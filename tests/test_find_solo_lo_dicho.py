@@ -68,6 +68,18 @@ def main():
                 if basura in frag:
                     fallos.append(f"se ha colado {basura!r} en un fragmento")
 
+        # Una sesion vieja llega marcada como historial, no como viva. Importa porque
+        # el selector filtra por pestana: abriendolo en la de las vivas, una busqueda
+        # ensenaba "(nothing matches)" con sus propios resultados escritos encima. Por
+        # eso `--find` abre el selector en "todas".
+        viejo = time.time() - 7200
+        os.utime(t, (viejo, viejo))
+        ns["_CACHE_DISCO"].clear()
+        (fila2, _a2), = ns["buscar"](AGUJA, todo=True)
+        if fila2.get("fuente") != "historial":
+            fallos.append(f"una sesion de hace dos horas llega como "
+                          f"{fila2.get('fuente')!r}, se esperaba 'historial'")
+
         # Una palabra que SOLO esta en la basura no puede devolver nada.
         if ns["buscar"]("400 ficheros", todo=True):
             fallos.append("encuentra texto que solo esta en un tool_result")

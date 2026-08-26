@@ -1441,7 +1441,7 @@ def color_tiempo(idle):
     return 7 if idle < 6 * INACTIVA else 4
 
 
-def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
+def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
     `muertas=True` es la rama de despues de un apagon: mismas teclas, otras
@@ -1460,7 +1460,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
         return None
 
     res = {"out": None, "toco": False}
-    vista = "claude"
+    # La pestana de arranque no siempre es "claude": una busqueda devuelve sobre todo
+    # sesiones del historial, y abrirla en la pestana de las vivas ensenaba "(nothing
+    # matches)" con los resultados escritos justo encima.
+    vista = vista_inicial
 
     def run(stdscr):
         # `rows` se reasigna aqui dentro (filtro/vista), asi que sin nonlocal Python
@@ -2604,7 +2607,7 @@ def main():
         # Y despues el selector con SOLO esas: encontrarla es la mitad, lo que quieres
         # es volver a ella. Al salir con `q` el listado sigue ahi arriba.
         if sys.stdin.isatty() and "--list" not in argv:
-            accion = pick_ui([f for f, _a in res])
+            accion = pick_ui([f for f, _a in res], vista_inicial="todas")
             if accion and accion[0] == "open":
                 return abrir_sesion(accion[1][0])
         return 0
