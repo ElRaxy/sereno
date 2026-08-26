@@ -1837,6 +1837,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
                     continue
                 aviso = _("Cancelled, nothing was closed.")
 
+    # Limpiar la pantalla ANTES de entrar en curses, no desde dentro: `clearok` deja
+    # que curses decida, y lo que quedo escrito en la terminal antes de arrancar
+    # sobrevivio igual en la grabacion (una `s` suelta del comando anterior).
+    try:
+        sys.stdout.write("\033[2J\033[3J\033[H")
+        sys.stdout.flush()
+    except Exception:
+        pass
     try:
         curses.wrapper(run)
     except Exception:
