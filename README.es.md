@@ -205,6 +205,7 @@ un pipe no, así que no lo hace. Hay un test que falla si algún campo cuela una
 
 ```bash
 sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
+sereno --json --all      # añade el historial reanudable, el equivalente de pulsar TAB
 ```
 
 | tecla | |

@@ -13,7 +13,7 @@ optional and only add live process control; without them everything is read from
 
   sereno                 the visual picker (arrows/mouse, SPACE marks, ENTER opens)
   sereno --list          plain list, touches nothing
-  sereno --json          the same facts as JSON, without any conversation in it
+  sereno --json [--all]  the same facts as JSON, without any conversation in it
   sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
@@ -2685,7 +2685,10 @@ def main():
             return 0
 
         if "--json" in argv:
-            print_json(live_sessions(con_ram=True))
+            # Por defecto salen las vivas, que es lo que pinta la pestana de arranque.
+            # `--all` anade el historial reanudable, el equivalente de pulsar TAB: una
+            # statusline que solo cuenta lo vivo dice "ninguna" con seis esperandote.
+            print_json(live_sessions(con_ram=True, solo_activas="--all" not in argv))
             return 0
 
         ejecutando = sum(1 for r in rows if r["working"])

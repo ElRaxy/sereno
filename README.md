@@ -205,6 +205,7 @@ doesn't. A test fails if a field ever sneaks one in.
 
 ```bash
 sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
+sereno --json --all      # add the resumable history, the equivalent of pressing TAB
 ```
 
 | key | |
