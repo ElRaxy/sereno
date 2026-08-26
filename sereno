@@ -870,13 +870,17 @@ def parse_sel(text, rows):
     Acepta numeros y rangos ("1,3-5"), y tres atajos por estado, porque el caso
     real es "quiero cerrar las viejas y quedarme con las que estoy usando":
       todas | espera (las que no estan trabajando) | sueltas (las que no tienen pestana)
+
+    Los atajos valen en los DOS idiomas, y no segun `SERENO_LANG`: quien teclea `idle`
+    en una interfaz en castellano no se ha equivocado, y quien teclea `paradas` en una
+    en ingles tampoco. Aceptar las dos listas cuesta una linea y no hay colision.
     """
     t = (text or "").strip().lower()
     if t in ("todas", "todo", "all", "*"):
         return list(range(len(rows)))
-    if t in ("espera", "esperando", "paradas"):
+    if t in ("espera", "esperando", "paradas", "idle", "waiting", "stopped"):
         return [i for i, r in enumerate(rows) if r["working"] is False]
-    if t in ("sueltas", "sin-pestana", "sinpestana"):
+    if t in ("sueltas", "sin-pestana", "sinpestana", "detached", "loose", "no-tab"):
         return [i for i, r in enumerate(rows) if not r["attached"]]
     if not t:
         return None
@@ -2438,7 +2442,7 @@ def cmd_add(argv):
         f"title={shlex.quote(title or pathlib.Path(cwd).name)}\n"
         f"title_explicit={'1' if title else ''}\n"
     )
-    print(f"registrada {sid} -> {f.name}")
+    print(_("registered {s} -> {f}", s=sid, f=f.name))
 
 
 def _T():
@@ -2510,6 +2514,30 @@ def _T():
         "mark all / invert": "marcar todas / invertir",
         "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
         "memory": "memoria",
+        "unknown option: {f}": "opcion desconocida: {f}",
+        "Did you mean {g}?": "\u00bfQuerias decir {g}?",
+        "`{p} --help` lists them all.": "`{p} --help` las lista todas.",
+        "registered {s} -> {f}": "registrada {s} -> {f}",
+        "{n} session(s) died without leaving a process "
+        "(resumable from their transcript):":
+            "{n} sesion(es) murieron sin dejar proceso "
+            "(reanudables desde su transcript):",
+        "None can be resumed (no id or no transcript); discarding them.":
+            "Ninguna se puede reanudar (sin id o sin transcript); se descartan.",
+        "{n} discarded: they will not be offered again.":
+            "{n} descartada(s): no se volveran a ofrecer.",
+        "{n} resumed -> {p}": "{n} reanudada(s) -> {p}",
+        "{n} stopped and archived.": "{n} parada(s) y archivada(s).",
+        "{n} stopped.": "{n} parada(s).",
+        "Run `{p}` to manage them.": "`{p}` para gestionarlas.",
+        "{n} discarded: they will not be offered again. Their history "
+        "is still on disk (`claude --resume <id>`).":
+            "{n} descartada(s): no se volveran a ofrecer. Su historial sigue "
+            "en disco (`claude --resume <id>`).",
+        "(not a terminal: nothing reopened. `{p} --yes` forces it)":
+            "(no interactivo: no se reabre nada. `{p} --yes` para forzar)",
+        "{flag} needs a selection (e.g. \"1,4-6\" or \"idle\")":
+            "{flag} necesita una seleccion (ej: \"1,4-6\" o \"paradas\")",
         "{n} hit(s) in {s} session(s) for \u201c{q}\u201d":
             "{n} acierto(s) en {s} sesion(es) para \u201c{q}\u201d",
         "you": "tu",
@@ -2583,8 +2611,68 @@ _T()
 VERSION = "1.0.0"
 
 
+# Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
+# mal escrito se tragaba en silencio: `sereno --jsonn` abria el selector, y un script
+# que creia estar pidiendo JSON recibia un TUI esperando teclas.
+_FLAGS = {
+    "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
+    "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
+    "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
+}
+
+
+def _parecido(malo):
+    """El flag conocido mas cercano, o "". Sin `difflib`: la lista de imports cabe en
+    una linea del README y es media promesa del proyecto.
+
+    Dos reglas, porque los dos typos frecuentes no se parecen entre si. Una letra de
+    mas o cambiada conserva el prefijo (`--jsonn`, `--wach`); una letra omitida lo
+    rompe pero deja el resto en orden (`--lst` dentro de `--list`).
+    """
+    def prefijo(a, b):
+        n = 0
+        while n < min(len(a), len(b)) and a[n] == b[n]:
+            n += 1
+        return n
+
+    def cabe_dentro(corto, largo):
+        i = 0
+        for c in largo:
+            if i < len(corto) and corto[i] == c:
+                i += 1
+        return i == len(corto)
+
+    # Cuatro: los dos guiones y dos letras. Con tres, `--frobnicate` sugeria `--find`
+    # por compartir solo la efe, y una sugerencia mala estorba mas que ninguna.
+    mejor = max(_FLAGS, key=lambda f: prefijo(f, malo))
+    if prefijo(mejor, malo) >= 4:
+        return mejor
+    dentro = [f for f in _FLAGS if len(malo) >= 4 and cabe_dentro(malo, f)]
+    return min(dentro, key=len) if dentro else ""
+
+
+def flags_desconocidos(argv):
+    fuera, saltar = [], 0
+    for a in argv:
+        if saltar:
+            saltar -= 1
+            continue
+        if a.startswith("-") and a != "-":
+            if a in _FLAGS:
+                saltar = _FLAGS[a]
+            else:
+                fuera.append(a)
+    return fuera
+
+
 def main():
     argv = sys.argv[1:]
+    for malo in flags_desconocidos(argv):
+        cerca = _parecido(malo)
+        print(_("unknown option: {f}", f=malo)
+              + (" " + _("Did you mean {g}?", g=cerca) if cerca else "")
+              + "  " + _("`{p} --help` lists them all.", p=PROG))
+        return 2
     if {"-h", "--help"} & set(argv):
         # El docstring ES la ayuda: dos textos que decir lo mismo acaban diciendo
         # cosas distintas, y el que se queda viejo siempre es el de --help.
@@ -2668,14 +2756,15 @@ def main():
             try:
                 expr = argv[argv.index(flag) + 1]
             except IndexError:
-                print(f"{flag} necesita una seleccion (ej: \"1,4-6\" o \"espera\")")
+                print(_("{flag} needs a selection (e.g. \"1,4-6\" or \"idle\")", flag=flag))
                 return 2
             idx = parse_sel(expr, rows)
             if idx is None:
                 print(_("I don't understand that selection: {e}", e=expr))
                 return 2
             n = stop_rows([rows[i] for i in idx], forget)
-            print(f"{n} parada(s){' y archivada(s)' if forget else ''}.")
+            print(_("{n} stopped and archived.", n=n) if forget
+                  else _("{n} stopped.", n=n))
             return 0
 
     # ── sesiones vivas en tmux: siguen corriendo con Warp cerrado ──
@@ -2713,7 +2802,7 @@ def main():
         if not sys.stdin.isatty():
             print(cabecera)
             print_live(rows)
-            print("\n  `claude-sessions` para gestionarlas.")
+            print("\n  " + _("Run `{p}` to manage them.", p=PROG))
             return 0
 
         rows = live_sessions(con_ram=True)      # el TUI si pinta RAM y titulos finos
@@ -2799,15 +2888,16 @@ def main():
         print(_("Discarded {n} entries.", n=len(items)))
         return 0
 
-    cabecera = (f"\n\033[1mHay {len(items)} sesion(es) que murieron sin dejar proceso"
-                " (reanudables desde su transcript):\033[0m")
+    cabecera = ("\n\033[1m" + _("{n} session(s) died without leaving a process "
+                                 "(resumable from their transcript):", n=len(items))
+                + "\033[0m")
 
     skipped = [e for e in items if e not in resumable]
     if not resumable:
         print(cabecera)
         for e in items:
             print(describe(e))
-        print(f"\n  Ninguna se puede reanudar (sin id o sin transcript); se descartan.")
+        print("\n  " + _("None can be resumed (no id or no transcript); discarding them."))
         archive(items, "dismissed")
         return 0
 
@@ -2818,12 +2908,12 @@ def main():
             elegidas = [r["meta"] for r in sel]
             if verbo == "close":
                 archive(elegidas, "dismissed")
-                aviso = f"{len(elegidas)} descartada(s): no se volveran a ofrecer."
+                aviso = _("{n} discarded: they will not be offered again.", n=len(elegidas))
             else:
                 path = write_launch_config(elegidas)
                 archive(elegidas, "restored")
                 subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-                aviso = f"{len(elegidas)} reanudada(s) -> {path.name}"
+                aviso = _("{n} resumed -> {p}", n=len(elegidas), p=path.name)
             quedan = [e for e in orphans() if e.get("id") and e.get("_transcript")]
             return aviso, [fila_de_huerfana(e) for e in quedan]
 
@@ -2842,15 +2932,15 @@ def main():
         elegidas = [r["meta"] for r in sel]
         if verbo == "close":
             archive(elegidas, "dismissed")
-            print(f"\n{len(elegidas)} descartada(s): no se volveran a ofrecer."
-                  " Su historial sigue en disco (`claude --resume <id>`).")
+            print("\n" + _("{n} discarded: they will not be offered again. Their history "
+                            "is still on disk (`claude --resume <id>`).", n=len(elegidas)))
             return 0
         resumable = elegidas
     elif "--yes" not in argv:
         print(cabecera)
         for e in items:
             print(describe(e))
-        print("\n  (no interactivo: no se reabre nada. `claude-sessions --yes` para forzar)")
+        print("\n  " + _("(not a terminal: nothing reopened. `{p} --yes` forces it)", p=PROG))
         return 0
 
     path = write_launch_config(resumable)

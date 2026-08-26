@@ -45,3 +45,5 @@ jobs:
         run: python tests/test_watch_flanco.py
       - name: --find busca en lo dicho, no en el fichero
         run: python tests/test_find_solo_lo_dicho.py
+      - name: un flag que no existe se dice, no se traga
+        run: python tests/test_flags.py
