@@ -96,20 +96,41 @@ That single check is the difference between *"it hung"* and *"it's working, leav
 ## 📖 Reading a row
 
 ```
- ▎ Refactor payment webhooks   ◐ checkout-api ⎇feat/webhooks   now   ▰▰▰▰▱  512 MB
- │            │                │       │           │            │       │       │
- │            │                │       │           │            │       │       └ memory
- │            │                │       │           │            │       └ share of the biggest
- │            │                │       │           │            └ idle time, coloured by age
- │            │                │       │           └ git branch
- │            │                │       └ project
- │            │                └ ◐ in a command · ● writing · nothing = waiting on you
+ ▎ Refactor payment webhooks  ◐ checkout-api ⎇feat/webhooks   now  ▰▰▰▰▱ 88% ▇ 512 MB
+ │            │               │       │           │            │      │     │  │    │
+ │            │               │       │           │            │      │     │  │    └ memory
+ │            │               │       │           │            │      │     │  └ share of the biggest
+ │            │               │       │           │            │      │     └ % of the context window
+ │            │               │       │           │            │      └ context used
+ │            │               │       │           │            └ idle time, coloured by age
+ │            │               │       │           └ git branch
+ │            │               │       └ project
+ │            │               └ ◐ in a command · ● writing · nothing = waiting on you
  │            └ title — the one Claude gave itself, or your /rename
  └ cursor. Turns yellow when the row is marked.
 ```
 
 The panel on the right shows that session's **last prompt and last reply**, so you can decide
-whether to go back to it without opening it.
+whether to go back to it without opening it — plus the exact context figures (`176k / 200k`)
+and the model.
+
+### About that context bar
+
+It answers the question you currently answer by opening the session: *can this one take
+another task, or is it about to compact?* The number is read from the transcript — every reply
+records what it cost — so nothing is estimated and no API is called.
+
+The **ceiling** is the one thing Claude Code does not write down. A session running the
+one-million window still records itself as `claude-opus-5`, exactly like a 200k one. So sereno
+works it out in this order, and stops at the first that answers:
+
+1. `SERENO_CTX_MAX`, if you set it.
+2. A `[1m]` suffix on the model in the transcript.
+3. The `model` in your `~/.claude/settings.json` — where the suffix actually lives today.
+4. The context already seen. A session holding 560k is not on a 200k ceiling.
+
+Rule 4 is what keeps the bar honest: the percentage can never read above 100%, and there is a
+test that fails if it ever does.
 
 ---
 
@@ -325,6 +346,7 @@ That's it. It creates no config, no cache and no state directory of its own.
 |:--|:--|
 | `SERENO_LANG` | `en` or `es`. Defaults to your locale (on macOS, `AppleLocale`) |
 | `SERENO_DEMO` | `1` for fake sessions |
+| `SERENO_CTX_MAX` | context ceiling in tokens, if the guess above gets it wrong |
 | `SERENO_TMUX_SOCK` | tmux socket to read. Default `claude-code` |
 | `SERENO_REGISTRY` | where the optional launcher registry lives |
 

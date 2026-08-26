@@ -36,3 +36,5 @@ jobs:
         run: python tests/test_tui_arranca.py
       - name: no abre conexiones ni lanza binarios sin declarar
         run: python tests/test_sin_red.py
+      - name: el tope de contexto sale de la cascada, no de una conjetura
+        run: python tests/test_contexto.py

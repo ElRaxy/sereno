@@ -96,20 +96,41 @@ Esa comprobación es toda la diferencia entre *«se ha colgado»* y *«está tra
 ## 📖 Leer una fila
 
 ```
- ▎ Refactor payment webhooks   ◐ checkout-api ⎇feat/webhooks   now   ▰▰▰▰▱  512 MB
- │            │                │       │           │            │       │       │
- │            │                │       │           │            │       │       └ memoria
- │            │                │       │           │            │       └ cuota sobre la mayor
- │            │                │       │           │            └ tiempo parada, con color
- │            │                │       │           └ rama de git
- │            │                │       └ proyecto
- │            │                └ ◐ en un comando · ● escribiendo · nada = te espera
+ ▎ Refactor payment webhooks  ◐ checkout-api ⎇feat/webhooks   now  ▰▰▰▰▱ 88% ▇ 512 MB
+ │            │               │       │           │            │      │     │  │    │
+ │            │               │       │           │            │      │     │  │    └ memoria
+ │            │               │       │           │            │      │     │  └ cuota sobre la mayor
+ │            │               │       │           │            │      │     └ % de la ventana
+ │            │               │       │           │            │      └ contexto gastado
+ │            │               │       │           │            └ tiempo parada, con color
+ │            │               │       │           └ rama de git
+ │            │               │       └ proyecto
+ │            │               └ ◐ en un comando · ● escribiendo · nada = te espera
  │            └ título — el que Claude se puso, o tu /rename
  └ cursor. Se pone amarillo cuando la fila está marcada.
 ```
 
 El panel de la derecha enseña **el último prompt y la última respuesta** de esa sesión, para
-que puedas decidir si volver a ella sin abrirla.
+que puedas decidir si volver a ella sin abrirla — y además las cifras exactas de contexto
+(`176k / 200k`) y el modelo.
+
+### Sobre la barra de contexto
+
+Contesta lo que hoy contestas abriendo la sesión: *¿le cabe otra tarea, o toca compactar?* El
+número sale del transcript —cada respuesta apunta lo que costó—, así que no se estima nada ni
+se llama a ninguna API.
+
+Lo único que Claude Code no apunta es **el tope**. Una sesión que corre en la ventana de un
+millón se registra como `claude-opus-5`, igual que una de 200k. Así que sereno lo deduce en
+este orden, y para en el primero que responde:
+
+1. `SERENO_CTX_MAX`, si lo pones tú.
+2. Un sufijo `[1m]` en el modelo del transcript.
+3. El `model` de tu `~/.claude/settings.json`, que es donde vive hoy ese sufijo.
+4. El contexto que ya se ha visto. Una sesión con 560k dentro no tiene un tope de 200k.
+
+La regla 4 es la que mantiene honesta la barra: el porcentaje no puede pasar del 100%, y hay
+un test que falla si algún día lo hace.
 
 ---
 
@@ -326,6 +347,7 @@ Ya está. No crea configuración, ni caché, ni carpeta de estado propia.
 |:--|:--|
 | `SERENO_LANG` | `en` o `es`. Por defecto, tu locale (en macOS, `AppleLocale`) |
 | `SERENO_DEMO` | `1` para sesiones falsas |
+| `SERENO_CTX_MAX` | tope de contexto en tokens, si la deducción de arriba falla |
 | `SERENO_TMUX_SOCK` | socket de tmux que se lee. Por defecto `claude-code` |
 | `SERENO_REGISTRY` | dónde vive el registro opcional del lanzador |
 
