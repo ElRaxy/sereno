@@ -13,6 +13,7 @@ Un fichero de Python · cero dependencias · Claude Code, Codex, Gemini, Antigra
 <br>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ElRaxy/sereno/ci.yml?style=flat-square&label=ci&labelColor=16161e&color=5fff5f)](https://github.com/ElRaxy/sereno/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ElRaxy/sereno?style=flat-square&labelColor=16161e&color=5fff5f)](https://github.com/ElRaxy/sereno/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.8+-00afff?style=flat-square&labelColor=16161e)](https://www.python.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-ninguna-5fff5f?style=flat-square&labelColor=16161e)](#-instalación)
 [![Instalación](https://img.shields.io/badge/instalar-un%20fichero-ffaf00?style=flat-square&labelColor=16161e)](#-instalación)
@@ -490,17 +491,39 @@ Los cambios entre versiones están en [CHANGELOG.md](CHANGELOG.md).
 
 ## 🤝 Contribuir
 
-Issues y pull requests bienvenidos, en castellano o en inglés. Dos cosas que el CI comprueba por
-ti, y las dos existen porque fallan **en silencio**:
+Issues y pull requests bienvenidos, en castellano o en inglés. Antes de abrir uno, pasa los tests:
 
-- **`tests/test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco
-  de verdad. Planta un canario en un `HOME` de mentira y recorre todas las funciones que leen datos.
-- **`tests/test_i18n.py`** — cada cadena que pasa por `_()` tiene traducción con los mismos
-  `{huecos}`. El inglés es la clave, así que una traducción que falta no revienta: simplemente
-  aparece en el idioma equivocado.
+```bash
+for t in tests/test_*.py; do python3 "$t"; done
+```
+
+Son diez, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
+algo que falla **en silencio**, que es justo por lo que existen:
+
+- **`test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco de
+  verdad. Planta un canario en un `HOME` de mentira y recorre todas las funciones que leen datos.
+- **`test_i18n.py`** — cada cadena que se imprime pasa por `_()` y tiene traducción con los mismos
+  `{huecos}`. Recorre el AST, así que también caza una frase escrita a pelo. El inglés es la clave,
+  así que una traducción que falta no revienta: aparece en el idioma equivocado y ya.
+- **`test_sin_red.py`** — ni sockets, ni un binario externo fuera de la lista declarada.
+- **`test_contexto.py`** — la barra de contexto no puede pasar del 100%.
+- **`test_json_sin_conversacion.py`** — `--json` no lleva dentro ni prompt ni respuesta.
+- Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,
+  los flags desconocidos diciéndose, y una sesión reanudada seguida hasta el fichero que escribe.
+
+Dos normas de la casa:
+
+- **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
+  arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
+  bueno algo que no lo era.
+- **Las actions van fijadas por SHA** y el repositorio lo exige, así que un cambio de workflow con
+  `@v4` se rechaza. Las subidas de versión las abre Dependabot.
 
 El GIF se regenera con `vhs demo.tape` ([vhs](https://github.com/charmbracelet/vhs)) — y mirando
-los fotogramas antes de commitearlos.
+los fotogramas antes de commitearlos. Con `SERENO_DEMO=1` delante, siempre: el panel enseña
+prompts de verdad.
+
+Cualquier cosa explotable va a [`SECURITY.md`](SECURITY.md), no a un issue público.
 
 ---
 

@@ -13,6 +13,7 @@ One Python file · zero dependencies · Claude Code, Codex, Gemini, Antigravity
 <br>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/ElRaxy/sereno/ci.yml?style=flat-square&label=ci&labelColor=16161e&color=5fff5f)](https://github.com/ElRaxy/sereno/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ElRaxy/sereno?style=flat-square&labelColor=16161e&color=5fff5f)](https://github.com/ElRaxy/sereno/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.8+-00afff?style=flat-square&labelColor=16161e)](https://www.python.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-none-5fff5f?style=flat-square&labelColor=16161e)](#-install)
 [![Install](https://img.shields.io/badge/install-one%20file-ffaf00?style=flat-square&labelColor=16161e)](#-install)
@@ -489,17 +490,39 @@ Changes between versions are in [CHANGELOG.md](CHANGELOG.md).
 
 ## 🤝 Contributing
 
-Issues and pull requests welcome, in English or Spanish. Two things CI checks for you, and both
-exist because they fail **silently**:
+Issues and pull requests welcome, in English or Spanish. Run the tests before you open one:
 
-- **`tests/test_demo_aislado.py`** — demo mode must not return a single row that came from real
-  disk. Plants a canary in a fake `HOME` and walks every function that reads data.
-- **`tests/test_i18n.py`** — every string passed through `_()` has a Spanish entry with the same
-  `{placeholders}`. English is the key, so a missing translation doesn't crash; it just quietly
-  shows up in the wrong language.
+```bash
+for t in tests/test_*.py; do python3 "$t"; done
+```
+
+There are ten, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
+Most guard against something that fails **silently**, which is why they exist at all:
+
+- **`test_demo_aislado.py`** — demo mode must not return a single row that came from real disk.
+  Plants a canary in a fake `HOME` and walks every function that reads data.
+- **`test_i18n.py`** — every string printed goes through `_()` and has a Spanish entry with the
+  same `{placeholders}`. It walks the AST, so a hardcoded phrase is caught too. English is the
+  key, so a missing translation never crashes; it just quietly shows the wrong language.
+- **`test_sin_red.py`** — no sockets, and no external binary beyond the declared list.
+- **`test_contexto.py`** — the context bar can never read above 100%.
+- **`test_json_sin_conversacion.py`** — `--json` carries no prompt and no reply.
+- Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
+  unknown flags being reported, and a resumed session being followed to its live transcript.
+
+Two house rules:
+
+- **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
+  then fix it. Half the tests here were written that way after the first version passed
+  something it shouldn't have.
+- **GitHub Actions are pinned by commit SHA**, and the repository enforces it, so a workflow
+  edit using `@v4` will be rejected. Dependabot raises the bumps.
 
 Regenerate the demo with `vhs demo.tape` ([vhs](https://github.com/charmbracelet/vhs)) — and
-look at the frames before you commit them.
+look at the frames before you commit them. `SERENO_DEMO=1` first, always: the panel shows real
+prompts.
+
+Anything exploitable goes to [`SECURITY.md`](SECURITY.md), not to a public issue.
 
 ---
 
