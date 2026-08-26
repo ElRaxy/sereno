@@ -9,6 +9,16 @@ import ast, pathlib, re, sys
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 FUENTE = (RAIZ / "sereno").read_text()
+# Palabras que en castellano SIEMPRE llevan tilde o ene. No van las ambiguas ("como",
+# "que", "esta", "solo", "tu"), que tambien existen sin ella: aqui solo entra lo que
+# escrito asi esta mal seguro. Si alguna vez hace falta una de estas sin tilde, se
+# quita de la lista a mano y se dice por que.
+SIN_TILDE = re.compile(r"\b(?:estan|sesion|numero|aqui|tambien|segun|pestana|pestanas|"
+                       r"raton|opcion|opciones|seleccion|confirmacion|huerfana|huerfanas|"
+                       r"titulo|ultimo|ultima|ultimos|ultimas|volvera|volveran|quitalas|"
+                       r"cuales|mas|asi|despues|ademas|informacion|accion|version|"
+                       r"ningun|algun|facil|dificil|rapido|alli|codigo|linea|lineas)\b")
+
 HUECOS = re.compile(r"\{(\w+)\}")
 
 
@@ -112,6 +122,13 @@ def main():
 
     for sobra in sorted(set(es) - vistas):
         fallos.append(f"traduccion huerfana (ya nadie la usa): {sobra!r}")
+
+    # Y que el castellano ESTE en castellano. De 245 cadenas, una sola llevaba tilde:
+    # la interfaz entera estaba escrita como si el teclado no tuviera acentos, y eso
+    # se lee como una traduccion a medio hacer, no como un idioma soportado.
+    for clave, texto in sorted(es.items()):
+        for palabra in SIN_TILDE.findall(texto.lower()):
+            fallos.append(f"falta la tilde en {palabra!r}: {texto!r}")
 
     for f in fallos:
         print("FALLO:", f)

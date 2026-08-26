@@ -371,9 +371,13 @@ def pulso(e, secs=90, fino=True):
 
 
 def _dur(secs):
+    """Cuanto lleva abierta. En dias a partir del segundo, que `170h 26m` no se lee:
+    hay que dividir mentalmente por 24 para saber que son siete dias."""
     secs = int(secs)
-    h, m = secs // 3600, (secs % 3600) // 60
-    return f"{h}h {m:02d}m" if h else f"{m}m"
+    d, h, m = secs // 86400, (secs % 86400) // 3600, (secs % 3600) // 60
+    if d >= 2:
+        return f"{d}d {h}h"
+    return f"{d * 24 + h}h {m:02d}m" if (d or h) else f"{m}m"
 
 
 def idle_secs(e):
@@ -931,17 +935,39 @@ def fila_de_huerfana(e):
             "pulso": {"escribe": False, "herramienta": False}}
 
 
+ICONO = {"in_command": "\u25d0", "writing": "\u25cf", "waiting": "\u25cb",
+         "stopped": "\u25cb", "unknown": "?"}
+
+
 def print_live(rows):
+    """La lista plana, para leer sin entrar. Mismos estados que el selector.
+
+    Antes decia solo "ejecutando" o "en espera": colapsaba los cuatro estados en dos
+    y se perdia justo el que importa, el de una sesion metida en un comando de tres
+    minutos, que es indistinguible de una parada si solo miras la fecha del fichero.
+    Un modo que resume de menos que la interfaz que resume no sirve para decidir.
+    """
     now = time.time()
     for i, r in enumerate(rows, 1):
-        w = r["working"]
-        mark = "\u25cf" if w else ("\u25cb" if w is False else "?")
-        est = _("running") if w else (_("idle") if w is False else _("no data"))
+        est = estado_estable(r)
         att = " " + _("[in a tab]") if r["attached"] else ""
         edad = _dur(now - r["created"]) if r["created"] else "?"
-        print(f"  {i:>2}. {mark} {r['title']:<34} {est:<11} "
-              f"{_hace(r.get('idle')):<10} " + _("open for {t}", t=edad) + att)
+        pu = r.get("pulso") or {}
+        ctx = pu.get("ctx")
+        pct = (f"  {round(100 * ctx / tope_contexto(pu.get('modelo'), ctx)):>3}%"
+               if ctx else "      ")
+        print(f"  {i:>2}. {ICONO.get(est, '?')} {r['title']:<34} "
+              f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}  "
+              + _("open for {t}", t=edad) + att)
         print(f"         {r['name']}")
+
+
+def ESTADO_LARGO(est):
+    return {"writing": _("writing"),
+            "in_command": _("in a command"),
+            "waiting": _("waiting on you"),
+            "stopped": _("stopped"),
+            }.get(est, _("no data"))
 
 
 def parse_sel(text, rows):
@@ -1682,7 +1708,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # 1006 (SGR) y 1003 (todo movimiento). El 1006 no es un lujo: el protocolo
             # viejo mete la columna en UN byte y muere en la 223, asi que en una ventana
             # ancha los clicks del panel derecho llegan a otra parte.
-            res["raton"] = True
+            res["ratón"] = True
             sys.stdout.write("\033[?1006h\033[?1003h")
             sys.stdout.flush()
         espera = 2500 if recargar else -1
@@ -2423,7 +2449,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
     finally:
         # `endwin()` deshace lo que activo ncurses, no el 1003/1006 que pusimos a
         # mano: sin esto la terminal se queda escupiendo eventos de raton al shell.
-        if res.get("raton"):
+        if res.get("ratón"):
             try:
                 sys.stdout.write("\033[?1003l\033[?1006l")
                 sys.stdout.flush()
@@ -2626,6 +2652,9 @@ def _T():
     TEXTOS["es"] = {
         " idle": " en espera",
         " in a command": " en un comando",
+        "in a command": "en un comando",
+        "writing": "escribiendo",
+        "stopped": "parada",
         " open": " abiertas",
         " resumable": " reanudables",
         " total": " en total",
@@ -2638,55 +2667,54 @@ def _T():
         "Close": "Cerrar",
         "Discard": "Descartar",
         "Discarded {n} entries.": "Descartadas {n} entradas.",
-        "Don't know how to open that one.": "No se como abrir esa.",
-        "Don't know how to open {s}.": "No se como abrir {s}.",
+        "Don't know how to open that one.": "No sé cómo abrir esa.",
+        "Don't know how to open {s}.": "No sé cómo abrir {s}.",
         "ENTER": "ENTER",
-        "HEADS UP: {n} are working right now": "OJO: {n} estan trabajando ahora mismo",
-        "I don't understand that selection: {e}": "No entiendo la seleccion: {e}",
+        "HEADS UP: {n} are working right now": "OJO: {n} están trabajando ahora mismo",
+        "I don't understand that selection: {e}": "No entiendo la selección: {e}",
         "Keys": "Teclas",
         "Mark what you want to close with SPACE first.": "Marca antes con ESPACIO lo que quieras cerrar.",
-        "Mark which ones you want to resume first.": "Marca primero cuales quieres reanudar.",
+        "Mark which ones you want to resume first.": "Marca primero cuáles quieres reanudar.",
         "NO TRANSCRIPT": "SIN TRANSCRIPT",
         "NO TRANSCRIPT: closing it loses it": "SIN TRANSCRIPT: al cerrarla no se recupera",
         "NO TRANSCRIPT: not recoverable": "SIN TRANSCRIPT: no se recupera",
         "No changes.": "Sin cambios.",
         "No changes. Run `{p}` to come back.": "Sin cambios. `{p}` para volver.",
-        "No sessions running and none orphaned.": "No hay sesiones corriendo ni huerfanas.",
+        "No sessions running and none orphaned.": "No hay sesiones corriendo ni huérfanas.",
         "No sessions running.": "No hay sesiones corriendo.",
-        "None has been idle for over an hour.": "Ninguna lleva mas de 1h parada.",
+        "None has been idle for over an hour.": "Ninguna lleva más de 1h parada.",
         "Opened in a new window: {t}": "Abierta en una ventana nueva: {t}",
         "Opening in a new window: {t}": "Abriendo en una ventana nueva: {t}",
-        "Opening {n} tabs -> {p}": "Abriendo {n} pestanas -> {p}",
+        "Opening {n} tabs -> {p}": "Abriendo {n} pestañas -> {p}",
         "Opening: {t}": "Abriendo: {t}",
-        "Reattaching {n} tabs -> {p}": "Reenganchando {n} pestanas -> {p}",
+        "Reattaching {n} tabs -> {p}": "Reenganchando {n} pestañas -> {p}",
         "SPACE": "ESPACIO",
         "Sessions that died": "Sesiones que murieron",
         "Stopped {n} sessions.": "Paradas {n} sesiones.",
         "Stopped {s}.": "Parada {s}.",
-        "They all already have a tab open.": "Todas estan ya abiertas en una pestana.",
-        "Those already have a tab open.": "Esas ya tienen pestana abierta.",
-        "[in a tab]": "[en una pestana]",
+        "They all already have a tab open.": "Todas están ya abiertas en una pestaña.",
+        "Those already have a tab open.": "Esas ya tienen pestaña abierta.",
+        "[in a tab]": "[en una pestaña]",
         "[y] confirm    [any other key] cancel": "[s] confirmar    [cualquier otra] cancelar",
         "`{p}` to manage them": "`{p}` para gestionarlas",
         "all": "todas",
-        "and {n} more": "y {n} mas",
+        "and {n} more": "y {n} más",
         "arrows": "flechas",
         "click selects, double click opens": "click selecciona, doble click abre",
         "close": "cerrar",
-        "close the marked ones (asks first)": "cerrar las marcadas (pide confirmacion)",
+        "close the marked ones (asks first)": "cerrar las marcadas (pide confirmación)",
         "filter": "filtrar",
-        "filter by title as you type": "filtrar por titulo mientras escribes",
+        "filter by title as you type": "filtrar por título mientras escribes",
         "filter: ": "filtro: ",
-        "first / last": "primera / ultima",
+        "first / last": "primera / última",
         "help": "ayuda",
         "history": "historial",
         "home/end": "inicio/fin",
-        "idle": "en espera",
-        "last:": "ultimo:",
+        "last:": "último:",
         "mark": "marcar",
         "mark / unmark": "marcar / desmarcar",
         "mark all / invert": "marcar todas / invertir",
-        "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
+        "mark the ones idle for over an hour": "marcar las que llevan más de 1h quietas",
         "memory": "memoria",
         "searching {n} transcripts ({g} GB)\u2026": "buscando en {n} transcripts ({g} GB)\u2026",
         "any key closes": "cualquier tecla cierra",
@@ -2700,54 +2728,54 @@ def _T():
             "No hay sesiones, y {d} no existe.",
         "That folder is written by Claude Code itself, so this "
         "looks like a machine where it has not run yet.":
-            "Esa carpeta la escribe el propio Claude Code, asi que esto parece "
+            "Esa carpeta la escribe el propio Claude Code, así que esto parece "
             "una maquina donde todavia no ha corrido.",
         "Try `{p} --demo` to see what this does.":
-            "Prueba `{p} --demo` para ver que hace esto.",
+            "Prueba `{p} --demo` para ver qué hace esto.",
         "Open one with `claude` and run `{p}` again.":
             "Abre una con `claude` y vuelve a ejecutar `{p}`.",
-        "unknown option: {f}": "opcion desconocida: {f}",
-        "Did you mean {g}?": "\u00bfQuerias decir {g}?",
+        "unknown option: {f}": "opción desconocida: {f}",
+        "Did you mean {g}?": "\u00bfQuerías decir {g}?",
         "`{p} --help` lists them all.": "`{p} --help` las lista todas.",
         "registered {s} -> {f}": "registrada {s} -> {f}",
         "{n} session(s) died without leaving a process "
         "(resumable from their transcript):":
-            "{n} sesion(es) murieron sin dejar proceso "
+            "{n} sesión(es) murieron sin dejar proceso "
             "(reanudables desde su transcript):",
         "None can be resumed (no id or no transcript); discarding them.":
             "Ninguna se puede reanudar (sin id o sin transcript); se descartan.",
         "{n} discarded: they will not be offered again.":
-            "{n} descartada(s): no se volveran a ofrecer.",
+            "{n} descartada(s): no se volverán a ofrecer.",
         "{n} resumed -> {p}": "{n} reanudada(s) -> {p}",
         "{n} stopped and archived.": "{n} parada(s) y archivada(s).",
         "{n} stopped.": "{n} parada(s).",
         "Run `{p}` to manage them.": "`{p}` para gestionarlas.",
         "{n} discarded: they will not be offered again. Their history "
         "is still on disk (`claude --resume <id>`).":
-            "{n} descartada(s): no se volveran a ofrecer. Su historial sigue "
+            "{n} descartada(s): no se volverán a ofrecer. Su historial sigue "
             "en disco (`claude --resume <id>`).",
         "(not a terminal: nothing reopened. `{p} --yes` forces it)":
             "(no interactivo: no se reabre nada. `{p} --yes` para forzar)",
         "{flag} needs a selection (e.g. \"1,4-6\" or \"idle\")":
-            "{flag} necesita una seleccion (ej: \"1,4-6\" o \"paradas\")",
+            "{flag} necesita una selección (ej: \"1,4-6\" o \"paradas\")",
         "{n} hit(s) in {s} session(s) for \u201c{q}\u201d":
-            "{n} acierto(s) en {s} sesion(es) para \u201c{q}\u201d",
-        "you": "tu",
+            "{n} acierto(s) en {s} sesión(es) para \u201c{q}\u201d",
+        "you": "tú",
         "it": "ella",
-        "+{n} more here": "+{n} mas aqui",
+        "+{n} more here": "+{n} más aquí",
         "--find takes something to look for, 2 characters or more.":
-            "--find quiere algo que buscar, de 2 caracteres o mas.",
+            "--find quiere algo que buscar, de 2 caracteres o más.",
         "Nothing said about \u201c{q}\u201d in the transcripts searched.":
             "Nada dicho sobre \u201c{q}\u201d en los transcripts mirados.",
         "Watching. Nothing is reported until a session stops working. Ctrl-C to quit.":
-            "Vigilando. No dice nada hasta que una sesion deje de trabajar. Ctrl-C para salir.",
+            "Vigilando. No dice nada hasta que una sesión deje de trabajar. Ctrl-C para salir.",
         "{hora}  {t} \u2014 waiting on you{d}": "{hora}  {t} \u2014 te espera a ti{d}",
         "--every takes a number of seconds, 2 or more.":
-            "--every quiere un numero de segundos, 2 o mas.",
+            "--every quiere un número de segundos, 2 o más.",
         "context": "contexto",
         "model": "modelo",
-        "mouse": "raton",
-        "move (j / k too)": "moverse (tambien j / k)",
+        "mouse": "ratón",
+        "move (j / k too)": "moverse (también j / k)",
         "no data": "sin datos",
         "now": "ahora",
         "open": "abrir",
@@ -2760,40 +2788,39 @@ def _T():
         "quit": "salir",
         "quit without touching anything": "salir sin tocar nada",
         "range mode: drop an anchor, SPACE marks to the cursor": "modo rango: fija ancla, ESPACIO marca hasta el cursor",
-        "reopen the marked ones as tabs": "reabrir las marcadas en pestanas",
+        "reopen the marked ones as tabs": "reabrir las marcadas en pestañas",
         "right click, or click the bar on the left: mark": "click derecho o en la barra de la izquierda: marcar",
-        "running": "ejecutando",
-        "session": "sesion",
+        "session": "sesión",
         "source": "origen",
         "status": "estado",
         "stopped, waiting on you": "parada, te espera a ti",
         "switch CLI: claude, history, codex, gemini, all": "cambiar de CLI: claude, historial, codex, gemini, todas",
         "waiting on a command of its own": "esperando a que termine un comando suyo",
         "waiting on you": "te espera a ti",
-        "wheel scrolls; tabs and buttons below are clickable": "rueda: desplaza; pestanas y botones de abajo se pinchan",
+        "wheel scrolls; tabs and buttons below are clickable": "rueda: desplaza; pestañas y botones de abajo se pinchan",
         "writing its reply": "escribiendo la respuesta",
         "{f} \u00b7 ENTER resumes it": "{f} \u00b7 ENTER lo reanuda",
-        "{n} Claude session(s) can be resumed": "{n} sesion(es) de Claude se pueden reanudar",
-        "{n} Claude session(s) open": "{n} sesion(es) de Claude abiertas",
-        "{n} Claude session(s) still running": "{n} sesion(es) de Claude siguen corriendo",
+        "{n} Claude session(s) can be resumed": "{n} sesión(es) de Claude se pueden reanudar",
+        "{n} Claude session(s) open": "{n} sesión(es) de Claude abiertas",
+        "{n} Claude session(s) still running": "{n} sesión(es) de Claude siguen corriendo",
         "{n} MB of history": "{n} MB de historial",
-        "{n} are history, not processes: nothing to close. Unmark them.": "{n} son historial, no procesos: no hay nada que cerrar. Quitalas de la seleccion.",
+        "{n} are history, not processes: nothing to close. Unmark them.": "{n} son historial, no procesos: no hay nada que cerrar. Quítalas de la selección.",
         "{n} closed and archived. The history is still on disk.": "{n} cerrada(s) y archivada(s). El historial sigue en disco.",
         "{n} marked to close": "{n} marcada(s) para cerrar",
         "{n} marked to discard": "{n} marcada(s) para descartar",
-        "{n} reattached as tabs -> {p}": "{n} reenganchada(s) en pestanas -> {p}",
-        "{n} resumable session(s):": "{n} sesion(es) reanudables:",
+        "{n} reattached as tabs -> {p}": "{n} reenganchada(s) en pestañas -> {p}",
+        "{n} resumable session(s):": "{n} sesión(es) reanudables:",
         "{n} running something right now": "{n} ejecutando ahora mismo",
-        "{n} session(s) closed. Their history is still on disk: `claude-sessions --list` won't list them again, but `claude --resume <id>` brings them back.": "{n} sesion(es) cerradas. Su historial sigue en disco: `claude-sessions --list` no las volvera a listar, pero `claude --resume <id>` las recupera.",
+        "{n} session(s) closed. Their history is still on disk: `claude-sessions --list` won't list them again, but `claude --resume <id>` brings them back.": "{n} sesión(es) cerradas. Su historial sigue en disco: `claude-sessions --list` no las volverá a listar, pero `claude --resume <id>` las recupera.",
         "{n} working": "{n} trabajando",
         "{t} ago": "hace {t}",
         "{t} on the same tool: it may be stuck": "lleva {t} en la misma herramienta: puede estar colgada",
         "{v} sessions": "Sesiones de {v}",
-        "{v} {n} session(s):": "{v} {n} sesion(es):",
+        "{v} {n} session(s):": "{v} {n} sesión(es):",
         "↕  {a}–{b} of {n}": "↕  {a}–{b} de {n}",
         "▸ right now": "▸ ahora mismo",
-        "▸ what it last replied": "▸ lo ultimo que te contesto",
-        "▸ what you last said": "▸ lo ultimo que le dijiste"
+        "▸ what it last replied": "▸ lo último que te contestó",
+        "▸ what you last said": "▸ lo último que le dijiste"
     }
 
 
