@@ -2800,7 +2800,7 @@ def _T():
 _T()
 
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

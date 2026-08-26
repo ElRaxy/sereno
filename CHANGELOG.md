@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.0
+
+**The title is the last thing to be cut.** It was the first: at 70 columns the list showed
+"Refactor pa…" next to a "checkout-api" with its whole branch, sacrificing the one thing that
+tells two rows apart to keep a value that repeats on every line and appears in full in the panel
+anyway. Now the title is served first and the support columns light up with what's left, in
+order: context, project, memory.
+
+**The state marker moved to the left, next to the title.** It used to be painted after the title,
+which is padded out to the longest one on screen — so a short title left fifteen blanks between
+the sentence and the dot telling you whether that session is alive.
+
+**A column with nothing to say now takes no space.** No tmux means no memory column at all rather
+than eight blanks per row; a Codex tab drops the context column the same way.
+
+Resizing can no longer shrink a column. Widening the window used to *narrow* the title, because
+the project column came back and took the room — found by the new test, not by looking.
+
+### Fixed
+
+- The memory needle is gone: it drew the same fact as the figure right next to it, with less
+  precision. The figure stays, coloured by the same threshold.
+- `fijas`, the width of everything that isn't the title, was a hardcoded 38 that was already off
+  by one. It's now derived from the columns themselves, in a pure function with its own test.
+
 ## 1.1.0
 
 **Context used, per session.** A bar in the list and the exact figures in the panel. The number
