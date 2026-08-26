@@ -1501,6 +1501,71 @@ def barra(valor, tope, celdas=5):
     return "\u25b0" * llenas + "\u25b1" * (celdas - llenas)
 
 
+COL_BASE = 3 + 2 + 9 + 1   # margen+canal+margen, estado, tiempo, marca adjunta
+COL_CTX = 10              # barra de 5 celdas + " 88%"
+COL_RAM = 8               # "  1.6 GB" + el blanco que la separa de la marca
+COL_SEP = 3               # los dos blancos del titulo + el relleno del proyecto
+T_COMODO = 44             # mas titulo que esto aporta menos que otra columna
+P_MINIMO = 12             # por debajo, el nombre del proyecto ya no se reconoce
+
+
+def reparto(hueco, largo, ancho_p, hay_ctx, hay_ram):
+    """Que columnas caben en `hueco` y cuanto mide cada una.
+
+    Dos reglas, y la segunda no es cosmetica.
+
+    **El titulo cobra primero.** Es la IDENTIDAD de la sesion. Antes se repartia al
+    reves —las columnas de apoyo pedian lo suyo y el titulo se quedaba el resto— y a
+    70 columnas la lista mostraba un "Refactor pa..." al lado de un "checkout-api"
+    con su rama entera: recortaba lo unico que distingue una fila para conservar un
+    dato que se repite en todas y que ademas sale entero en el panel.
+
+    **Ensanchar la ventana no puede estrechar ninguna columna.** Al probarlo salio
+    que si: a 56 columnas el proyecto no cabia y el titulo se quedaba 31; a 70 el
+    proyecto volvia y el titulo bajaba a 26. Redimensionar encogia la fila. Por eso
+    el titulo tiene un techo (`T_COMODO`) y las columnas se encienden en orden fijo
+    **parando en la primera que no entra**: asi cada una tiene un umbral propio y,
+    una vez encendida, ya no se apaga al seguir ensanchando.
+
+    El orden de encendido, de la que mas aporta a la que menos:
+
+      1. contexto -- el unico dato de la fila que no esta en ningun otro sitio;
+      2. proyecto -- se estrecha con la ventana, y por debajo de 12 se va;
+      3. RAM -- la repite el panel y solo la sabe quien corra bajo tmux.
+
+    Una columna sin nada que decir vale 0 desde el principio: quien no use tmux no
+    paga 8 columnas de blanco en cada fila.
+    """
+    t = max(12, min(largo, T_COMODO, hueco - COL_BASE))
+    sobra = hueco - COL_BASE - t
+    an_ctx = an_ram = 0
+
+    if hay_ctx and sobra >= COL_CTX:
+        an_ctx, sobra = COL_CTX, sobra - COL_CTX
+    elif hay_ctx:
+        return t, 0, 0, 0, COL_BASE
+
+    if ancho_p:
+        cabe = sobra - COL_SEP
+        if cabe < P_MINIMO:            # un proyecto a 8 columnas no dice nada
+            # Se corta aqui y la RAM no se enciende aunque quepa: encenderla ahora
+            # significaria apagarla al ensanchar, cuando el proyecto reclamase ese
+            # hueco. Cuesta unas columnas en blanco en una franja estrecha de
+            # anchos, y a cambio redimensionar nunca quita nada de la fila.
+            return t, 0, an_ctx, 0, COL_BASE + an_ctx
+        # Se ESTRECHA con la ventana en vez de saltar de 30 a nada. Y encoger el
+        # proyecto no puede encender la RAM: `sobra` solo crece cuando el proyecto ya
+        # esta a su ancho natural, que es lo que mantiene el reparto monotono.
+        ancho_p = min(ancho_p, cabe)
+        sobra = cabe - ancho_p
+
+    if hay_ram and sobra >= COL_RAM:
+        an_ram = COL_RAM
+
+    return (t, ancho_p, an_ctx, an_ram,
+            COL_BASE + an_ctx + an_ram + (ancho_p + COL_SEP if ancho_p else 0))
+
+
 def aguja(valor, tope):
     """La misma idea que `barra` en UNA columna, por altura del bloque.
 
@@ -1798,8 +1863,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             largo = max((ancho(r.get("title_full") or r["title"]) for r in visibles),
                         default=20)
             ancho_p = min(30, max((ancho(_proy(r)) for r in visibles), default=0))
-            fijas = 38 + ancho_p       # canal, estado, tiempo, contexto, aguja, RAM
-            anchura_t = max(12, min(largo, (w - (52 if lateral else 3)) - fijas))
+            # Una columna que no tiene nada que decir no ocupa. La RAM solo la sabe
+            # quien corre bajo tmux y el contexto solo lo publica Claude Code: sin
+            # esto, quien no use ninguna de las dos paga 22 columnas de blanco en
+            # cada fila. Mismo criterio que `ancho_p`, que ya vale 0 sin proyecto.
+            anchura_t, ancho_p, an_ctx, an_ram, fijas = reparto(
+                w - (52 if lateral else 3), largo, ancho_p,
+                any((r.get("pulso") or {}).get("ctx") for r in visibles),
+                any(r.get("mem_mb") for r in visibles))
             ancho_lista = anchura_t + fijas
             ancho_lista += 1              # una columna en blanco para el scrollbar
             # Tope duro contra el borde. `anchura_t` tiene un minimo de 12 columnas, asi
@@ -1857,38 +1928,49 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 put("\u258c" if marcada else ("\u258e" if foco else " "),
                     2 if marcada else 6, curses.A_BOLD)
                 put(" ")
-                titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
-                                 anchura_t)
-                put(titulo, 2 if marcada else (5 if sin_rastro else 0),
-                    curses.A_BOLD if (marcada or foco) else 0)
                 pu = r.get("pulso") or {}
+                # El estado va PEGADO al titulo y a la izquierda, no detras. Antes se
+                # pintaba al terminar el titulo, que va relleno hasta el mas largo de
+                # la pantalla: con un titulo corto quedaban quince blancos entre la
+                # frase y el punto que dice si esa sesion esta viva. Aqui cae siempre
+                # en la misma columna y se lee la lista entera de un barrido vertical.
+                #
                 # La herramienta gana sobre "escribe": el tool_use acaba de escribirse
                 # en el transcript, asi que las dos son ciertas a la vez y la que
                 # informa es la segunda ("esta corriendo algo"), no la primera.
                 if pu.get("herramienta"):
-                    put(" \u25d0 ", 7, curses.A_BOLD)      # esperando a su comando
+                    put("\u25d0 ", 7, curses.A_BOLD)       # esperando a su comando
                 elif pu.get("escribe"):
-                    put(" \u25cf ", 9, curses.A_BOLD)      # escribiendo la respuesta
+                    put("\u25cf ", 9, curses.A_BOLD)       # escribiendo la respuesta
                 else:
-                    put("   ")
+                    put("  ")
+                titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
+                                 anchura_t)
+                put(titulo, 2 if marcada else (5 if sin_rastro else 0),
+                    curses.A_BOLD if (marcada or foco) else 0)
                 proy = _proy(r)
                 if ancho_p:
+                    put("  ")
                     put(rellena(recorta(proy, ancho_p), ancho_p + 1), 8 if proy else 4)
-                put(f"{_hace(r['idle']):>8}  ", color_tiempo(r["idle"]))
+                put(f"{_hace(r['idle']):>8} ", color_tiempo(r["idle"]))
                 # Cuanto contexto lleva gastado. Es el dato que decide si una sesion
                 # aguanta otra tarea o si toca compactarla, y hasta hoy solo se veia
                 # entrando en ella. En blanco cuando no consta: una sesion de otro CLI
                 # no lo publica, y cero seria mentira.
-                ctx = pu.get("ctx")
-                tope_ctx = tope_contexto(pu.get("modelo"), ctx)
-                lleno = (ctx or 0) / tope_ctx
-                put(barra(ctx, tope_ctx), color_contexto(lleno))
-                put(f"{round(lleno * 100):>3}% " if ctx else "     ",
-                    color_contexto(lleno))
-                cuota = (r["mem_mb"] or 0) / tope_ram if tope_ram else 0
-                put(aguja(r["mem_mb"], tope_ram) + " ",
-                    5 if cuota > 0.75 else 7 if cuota > 0.4 else 8)
-                put(f"{(_mb(r['mem_mb']) if r['mem_mb'] else ''):>8} ", 4)
+                if an_ctx:
+                    ctx = pu.get("ctx")
+                    tope_ctx = tope_contexto(pu.get("modelo"), ctx)
+                    lleno = (ctx or 0) / tope_ctx
+                    put(barra(ctx, tope_ctx), color_contexto(lleno))
+                    put(f" {round(lleno * 100):>3}%" if ctx else "     ",
+                        color_contexto(lleno))
+                if an_ram:
+                    # La cifra va coloreada por su cuota, que es lo que hacia la aguja
+                    # de al lado. Dos dibujos para el mismo hecho, uno pegado al otro:
+                    # sobraba el de menos precision.
+                    cuota = (r["mem_mb"] or 0) / tope_ram if tope_ram else 0
+                    put(f"{(_mb(r['mem_mb']) if r['mem_mb'] else ''):>7} ",
+                        5 if cuota > 0.75 else 7 if cuota > 0.4 else 4)
                 put("\u25aa" if r["attached"] and not r.get("_sin_proceso") else " ", 6)
                 relleno = max(0, ancho_lista - x)
                 if (foco or roza) and relleno:      # con n=0, addnstr devuelve ERR

@@ -56,3 +56,5 @@ jobs:
         run: python tests/test_flags.py
       - name: una sesion reanudada se sigue hasta el fichero que escribe ahora
         run: python tests/test_sesion_reanudada.py
+      - name: el titulo es lo ultimo que se recorta al estrechar la ventana
+        run: python tests/test_reparto_columnas.py
