@@ -49,3 +49,5 @@ jobs:
         run: python tests/test_find_solo_lo_dicho.py
       - name: un flag que no existe se dice, no se traga
         run: python tests/test_flags.py
+      - name: una sesion reanudada se sigue hasta el fichero que escribe ahora
+        run: python tests/test_sesion_reanudada.py

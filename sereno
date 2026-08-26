@@ -151,6 +151,69 @@ def transcript_of(e):
     return p if p.is_file() else None
 
 
+# El sucesor de una sesion reanudada, cacheado por (id, mtime del que ya conocemos).
+_SUCESOR = {}
+_CABECERA = 1024 * 1024
+
+
+def transcript_vivo(e):
+    """El fichero que la sesion esta escribiendo AHORA, no el que registro al nacer.
+
+    El registro guarda el sessionId de arranque. Una sesion reanudada (`--continue`,
+    `--resume`) empieza un fichero NUEVO con otro id y el registro no se entera, asi
+    que la fila se quedaba congelada en la ultima actividad del fichero viejo. Visto
+    el 2026-08-26 sobre una sesion que llevaba seis minutos trabajando: figuraba
+    parada desde hacia tres horas, y su contexto decia 12% mientras el propio CLI
+    mostraba 41%. Los dos sintomas, una sola causa.
+
+    El enlace es exacto y no hay que adivinarlo por fechas: al reanudar, el transcript
+    nuevo COPIA las lineas del viejo, y esas lineas conservan su `session_id` original
+    (con guion bajo) aunque el `sessionId` de la linea sea ya el nuevo. Buscar esa
+    firma en la cabecera identifica al sucesor sin ambiguedad.
+
+    Solo se busca cuando el registrado lleva rancio: mientras la sesion escriba donde
+    dice el registro, no hay nada que resolver. Acotado al directorio del proyecto y a
+    ficheros mas nuevos que el registrado, son 8 ms.
+    """
+    p = transcript_of(e)
+    if p is None:
+        return None
+    try:
+        mt = p.stat().st_mtime
+    except OSError:
+        return p
+    if time.time() - mt <= VIVA:
+        return p                       # sigue escribiendo ahi: nada que buscar
+
+    sid = e.get("id")
+    clave = (sid, mt)
+    if clave in _SUCESOR:
+        return _SUCESOR[clave] or p
+    firma = f'"session_id":"{sid}"'.encode()
+    firma_esp = f'"session_id": "{sid}"'.encode()
+    mejor = None
+    try:
+        for otro in p.parent.glob("*.jsonl"):
+            if otro == p or not _UUID.match(otro.stem):
+                continue
+            try:
+                omt = otro.stat().st_mtime
+                if omt <= mt or (mejor and omt <= mejor[0]):
+                    continue           # un sucesor es por fuerza mas nuevo
+                with open(otro, "rb") as f:
+                    cab = f.read(_CABECERA)
+            except OSError:
+                continue
+            if firma in cab or firma_esp in cab:
+                mejor = (omt, otro)
+    except OSError:
+        pass
+    if len(_SUCESOR) > 200:
+        _SUCESOR.clear()               # la clave lleva mtime: crece sin tope
+    _SUCESOR[clave] = mejor[1] if mejor else None
+    return mejor[1] if mejor else p
+
+
 _SALUDO = re.compile(
     r"^(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|oye|vale|okey|ok|"
     r"perfecto|gracias)[\s,.:;!¡-]*", re.I)
@@ -229,7 +292,7 @@ def meta_by_tmux():
     for f in sorted(LIVE.glob("*.env")):
         e = read_entry(f)
         if e and e.get("tmux_session"):
-            e["_transcript"] = transcript_of(e)
+            e["_transcript"] = transcript_vivo(e)
             out[e["tmux_session"]] = e
     return out
 
@@ -420,7 +483,15 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
                        else bool(pu["escribe"] or pu["herramienta"]),
         })
     if con_disco:
-        ids = {(r.get("meta") or {}).get("id") for r in rows}
+        # Por el stem del transcript RESUELTO, no por el id del registro: si no, una
+        # sesion reanudada sale dos veces, una por tmux con su nombre y otra por disco
+        # con el primer prompt de titulo.
+        ids = set()
+        for r in rows:
+            m = r.get("meta") or {}
+            ids.add(m.get("id"))
+            if m.get("_transcript") is not None:
+                ids.add(m["_transcript"].stem)
         # `solo_activas=False` lo pide `--watch`: el filtro por mtime tira una sesion
         # a los 90 segundos de callarse, que es EXACTAMENTE cuando acaba de terminar y
         # hay que avisar. Sin tmux delante, el vigilante se quedaba sin ver el flanco
