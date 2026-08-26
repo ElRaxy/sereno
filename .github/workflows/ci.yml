@@ -58,3 +58,5 @@ jobs:
         run: python tests/test_sesion_reanudada.py
       - name: el titulo es lo ultimo que se recorta al estrechar la ventana
         run: python tests/test_reparto_columnas.py
+      - name: el orden no baraja la lista y el filtro mira lo que se ve
+        run: python tests/test_orden.py

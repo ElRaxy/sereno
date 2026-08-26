@@ -24,14 +24,16 @@ optional and only add live process control; without them everything is read from
   sereno --stop-sel  "idle"    stop them but leave them resumable
 
 Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
-SERENO_TMUX_SOCK, SERENO_REGISTRY.
+SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_SORT=activity|context|project|memory
+(prefix with `-` to invert: SERENO_SORT=-activity).
 
 Los comentarios de este fichero estan en castellano a proposito: explican POR QUE
 esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
 
 MIT licence. https://github.com/ElRaxy/sereno
 """
-import os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib, unicodedata
+import base64, os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib
+import unicodedata
 
 HOME = pathlib.Path.home()
 # El nombre con el que te han invocado: el repo lo instala como `sereno`, pero por un
@@ -445,8 +447,6 @@ def rss_por_arbol(pids):
 
 
 def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
-    if DEMO:
-        return [r for r in sesiones_demo() if r.get("fuente") == "claude"]
     """`con_ram` cuesta un `ps -eo` de toda la maquina: 220 ms medidos con 9 sesiones.
 
     El hook que corre al abrir terminal solo dice cuantas hay, asi que ahi no se
@@ -457,6 +457,12 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     saca las que se lanzaron desde VS Code o con la ruta completa al binario, que
     hasta ahora no aparecian en ningun sitio.
     """
+    # La demo sale por aqui, pero POR DEBAJO del `sort` del final: cuando se colaba
+    # antes, las capturas y el GIF del README ensenaban un orden —de menos a mas
+    # parada— que el programa de verdad no producia nunca. La unica vista que se
+    # revisa a ojo era justo la que esquivaba la regla.
+    if DEMO:
+        return ordena([r for r in sesiones_demo() if r.get("fuente") == "claude"])
     # El pulso fino y la RAM iban atados porque hasta ahora solo los pedia el selector,
     # que pinta las dos cosas. `--watch` quiere lo fino —es lo que detecta el cambio de
     # estado— y NO quiere el `ps -eo` de toda la maquina cada veinte segundos.
@@ -501,8 +507,10 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
         # hay que avisar. Sin tmux delante, el vigilante se quedaba sin ver el flanco
         # que existe para ver. Lo caza `tests/test_watch_flanco.py`.
         rows += sesiones_de_disco(vistos=ids, solo_activas=solo_activas, fino=fino)
-    rows.sort(key=lambda r: (r["idle"] is None, -(r["idle"] or 0)))
-    return rows
+    # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
+    # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
+    # cursor, que es lo que abre ENTER.
+    return ordena(rows)
 
 
 # ─────────────── sesiones leidas del historial, sin tmux ni registro ───────────────
@@ -1391,6 +1399,21 @@ _TOOL_ARG = ("command", "file_path", "pattern", "path", "url", "query",
              "description", "prompt", "notebook_path")
 
 
+def _arg_tool(b):
+    """La clave y el valor que identifican una llamada, de un bloque `tool_use`.
+
+    Vive aparte porque la quieren dos: `_resume_tool()` la pinta y el detector de
+    choques la interpreta. Sin esto la tabla acabaria copiada arriba, y dos copias
+    de la misma tabla se separan sin que nada falle.
+    """
+    ent = b.get("input") if isinstance(b.get("input"), dict) else {}
+    for k in _TOOL_ARG:
+        v = ent.get(k)
+        if isinstance(v, str) and v.strip():
+            return k, v
+    return "", ""
+
+
 def _sin_tabla(t):
     t = re.sub(r"\|?\s*:?-{2,}:?\s*(?=\||$)", "", t)   # la fila de guiones sobra
     t = re.sub(r"\s*\|\s*", " \u00b7 ", t)
@@ -1400,12 +1423,8 @@ def _sin_tabla(t):
 def _resume_tool(b):
     """'Bash \u00b7 git push origin main' a partir de un bloque tool_use."""
     nom = b.get("name") or "?"
-    ent = b.get("input") if isinstance(b.get("input"), dict) else {}
-    for k in _TOOL_ARG:
-        v = ent.get(k)
-        if isinstance(v, str) and v.strip():
-            return f"{nom} \u00b7 {_clean(v)}"
-    return nom
+    _, v = _arg_tool(b)
+    return f"{nom} \u00b7 {_clean(v)}" if v else nom
 
 
 def detalles(r):
@@ -1616,6 +1635,139 @@ def color_tiempo(idle):
     return 7 if idle < 6 * INACTIVA else 4
 
 
+# ──────────────────── orden y filtro de la lista ───────────────────
+# Los dos viven FUERA de `pick_ui` y sin tocar curses a proposito: son las dos reglas
+# que deciden que fila ve el usuario y en que sitio, y dentro del bucle de pintado no
+# habia forma de comprobarlas sin arrancar un pty. Mismo motivo que `reparto()`.
+
+MODOS_ORDEN = ("activity", "context", "project", "memory")
+
+
+def modo_orden_inicial():
+    """`SERENO_SORT=context` o `-context` (invertido). Devuelve (modo, invertido).
+
+    Es una variable de entorno y no un fichero de preferencias a proposito: sereno no
+    tiene fichero de configuracion y esa es una propiedad que se anuncia en el README y
+    en SECURITY.md. Un orden guardado en el perfil del shell lo ha escrito el usuario y
+    lo puede leer; uno guardado por el programa, ni una cosa ni la otra.
+    """
+    v = _env("SORT").strip().lower()
+    inv = v.startswith("-")
+    v = v.lstrip("-")
+    return (v if v in MODOS_ORDEN else MODOS_ORDEN[0]), (inv and v in MODOS_ORDEN)
+
+
+def etiqueta_orden(modo):
+    """El nombre traducido de un modo. Existe porque `_(modo)` seria una clave DINAMICA:
+    `tests/test_i18n.py` recorre el AST buscando `_("literal")`, no la veria pasar y
+    daria las cuatro traducciones por huerfanas. Con literales el test las sigue
+    vigilando, que es justo lo que se quiere de una tabla de idiomas."""
+    return {"activity": _("activity"), "context": _("context"),
+            "project": _("project"), "memory": _("memory")}.get(modo, modo)
+
+
+def _plano(s):
+    """Minusculas y sin tildes, para comparar. `sesion` tiene que encontrar `sesi\u00f3n`:
+    los titulos que escribe Claude llevan acentos y el usuario que filtra, no."""
+    return "".join(c for c in unicodedata.normalize("NFD", str(s or "").lower())
+                   if not unicodedata.combining(c))
+
+
+def casa(r, filtro):
+    """Que campos mira el filtro de `/`.
+
+    Hasta ahora solo el titulo, y eso hacia que teclear el nombre de un proyecto que SI
+    esta en pantalla —y en dos filas— devolviera "(nada coincide)". Se miran los cuatro
+    datos que identifican una sesion y que ademas se ven: titulo, proyecto, rama e id.
+
+    El ESTADO se queda fuera, y no por olvido: `_fase()` devuelve una frase traducida,
+    asi que filtrar por ella daria resultados distintos en ingles y en castellano.
+    """
+    if not filtro:
+        return True
+    a = _plano(filtro)
+    return any(a in _plano(c) for c in (r.get("title_full"), r.get("proyecto"),
+                                        r.get("rama"), r.get("name")))
+
+
+def _ausente(r, modo):
+    """1 si esta fila no tiene el dato por el que se ordena.
+
+    Va aparte de la clave y se aplica en su propia pasada porque un dato que no consta
+    tiene que caer al final SIEMPRE, tambien al invertir. Tratarlo como 0 pondria las
+    sesiones sin contexto las primeras en cuanto pulsas `S`, que es la lectura al reves:
+    un hueco no es un cero.
+    """
+    if modo == "context":
+        return 0 if (r.get("pulso") or {}).get("ctx") else 1
+    if modo == "project":
+        return 0 if (r.get("proyecto") or "") else 1
+    if modo == "memory":
+        return 0 if r.get("mem_mb") else 1
+    return 1 if r.get("idle") is None else 0
+
+
+def _clave_orden(r, modo):
+    """La clave principal. Cada modo apunta por defecto al extremo ACCIONABLE, que no es
+    el mismo para todos: de la actividad interesa lo que se movio hace un momento, y del
+    contexto y de la RAM lo que esta arriba del todo."""
+    if modo == "context":
+        # Por FRACCION del tope, no por tokens: 402k en una ventana de un millon esta
+        # mas vacia que 93k en una de 200k, y lo que decide si toca compactar es la
+        # fraccion. Ordenar por tokens crudos pondria la holgada delante de la llena.
+        pu = r.get("pulso") or {}
+        ctx = pu.get("ctx") or 0
+        return -(ctx / tope_contexto(pu.get("modelo"), ctx))
+    if modo == "project":
+        return ((r.get("proyecto") or "").lower(), (r.get("rama") or "").lower(),
+                r.get("idle") or 0)
+    if modo == "memory":
+        return -(r.get("mem_mb") or 0)
+    return r.get("idle") or 0
+
+
+def ordena(rows, modo="activity", invertido=False):
+    """Ordena la lista. Pura: ni pinta, ni lee el reloj, ni toca disco.
+
+    Tres pasadas y no una clave compuesta, aprovechando que `sort` es estable:
+
+      1. el NOMBRE, que es el desempate. Va primero y aparte porque el orden principal
+         se invierte y el desempate no debe invertirse con el: la lista se repinta sola
+         cada 2,5 s y dos filas empatadas que se intercambian en cada refresco se leen
+         como parpadeo.
+      2. el orden principal del modo, que si respeta `invertido`.
+      3. los huecos al fondo, en las dos direcciones.
+    """
+    if modo not in MODOS_ORDEN:
+        modo = MODOS_ORDEN[0]
+    out = sorted(rows, key=lambda r: r.get("name") or "")
+    out.sort(key=lambda r: _clave_orden(r, modo), reverse=invertido)
+    out.sort(key=lambda r: _ausente(r, modo))
+    return out
+
+
+def copia_al_portapapeles(texto):
+    """Pide al TERMINAL que copie, con OSC 52. No lanza ningun programa.
+
+    La alternativa era `pbcopy` en macOS y `xclip`/`wl-copy` en Linux: tres binarios
+    nuevos en `PERMITIDOS` de `tests/test_sin_red.py` y tres lineas mas en el "Runs" de
+    SECURITY.md, a cambio de un atajo de comodidad. OSC 52 es una secuencia de escape
+    —la escribe el proceso y la atiende el emulador— asi que no anade ni un binario, y
+    ademas funciona por SSH, que `pbcopy` no.
+
+    Devuelve si se pudo ESCRIBIR, que no es lo mismo que "el portapapeles tiene el
+    texto": Terminal.app ignora OSC 52 y tmux solo la reenvia con `set-clipboard on`.
+    Por eso quien llama ensena ademas el id en el aviso.
+    """
+    try:
+        b64 = base64.b64encode(texto.encode("utf-8")).decode("ascii")
+        sys.stdout.write("\033]52;c;" + b64 + "\a")
+        sys.stdout.flush()
+        return True
+    except Exception:
+        return False
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -1766,6 +1918,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
 
         marcadas, cur, top, aviso = set(), 0, 0, ""
         filtro, buscando, extra, ancla, ayuda = "", False, [], None, False
+        modo, orden_inv = modo_orden_inicial()
         todas, foco = list(rows), None
         sobre, ultimo_click = None, (None, 0.0)
         if recargar:
@@ -1775,9 +1928,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             fuentes = ([f for f in ORDEN_FUENTES if f in hay]
                        + sorted(f for f in hay if f not in ORDEN_FUENTES))
             base = todas + extra
-            rows = [r for r in base
-                    if (not filtro or filtro.lower() in r["title_full"].lower())
-                    and (vista == "todas" or r.get("fuente", "claude") == vista)]
+            rows = ordena([r for r in base if casa(r, filtro)
+                           and (vista == "todas"
+                                or r.get("fuente", "claude") == vista)],
+                          modo, orden_inv)
             if not rows:
                 rows = [{"name": "", "title": "", "title_full": _("(nothing matches)"),
                          "idle": None, "working": None, "attached": False,
@@ -1823,6 +1977,15 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cab_put("   ")
             if filtro or buscando:
                 cab_put(_("filter: ") + filtro + "\u2588", 2, curses.A_BOLD)
+                cab_put("   ")
+            # Solo cuando NO es el de por defecto, igual que el chip del filtro. La
+            # cabecera ya se recorta a 80 columnas: un "orden: actividad" permanente se
+            # comeria los contadores para decir lo que se ve mirando la lista.
+            if modo != MODOS_ORDEN[0] or orden_inv:
+                x0 = hx
+                cab_put(_("sort: ") + etiqueta_orden(modo)
+                        + ("\u2191" if orden_inv else "\u2193"), 7, curses.A_BOLD)
+                zonas.append((0, x0, hx - 1, "orden", None))
                 cab_put("   ")
             cab_put(str(len(rows)), 6, curses.A_BOLD)
             # En "todas" conviven abiertas y reanudables: llamarlas "abiertas" a todas
@@ -2140,12 +2303,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # Pastillas con fondo en vez de texto suelto: se leen como botones, que es
             # lo que ya son — se pinchan y hacen lo mismo que su tecla.
             hx2 = 2
+            # El orden NO es decorativo: va de mas esencial a menos, porque el bucle
+            # para en la primera que no cabe y a 80 columnas —que es media flota— solo
+            # entran cinco. Antes `? ayuda` era la sexta: la puerta al resto de teclas
+            # no se veia justo en la ventana donde mas falta hace. Y `TAB` baja porque
+            # las pestanas ya salen pintadas arriba, con sus nombres.
             for tecla, txt, cod in ((_("ENTER"), _("open"), 10),
                                     (_("SPACE"), _("mark"), 32),
                                     ("x", _("close"), ord("x")),
-                                    ("/", _("filter"), ord("/")),
-                                    ("TAB", _("other CLI"), 9),
                                     ("?", _("help"), ord("?")),
+                                    ("/", _("filter"), ord("/")),
+                                    ("s", _("sort"), ord("s")),
+                                    ("TAB", "CLI", 9),
                                     ("q", _("quit"), ord("q"))):
                 pastilla = f" {tecla} {txt} "
                 if hx2 + ancho(pastilla) >= w - 2:
@@ -2161,11 +2330,13 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 teclas = [
                     (_("ENTER"), _("open it (a NEW window when Warp is there)")),
                     (_("arrows"), _("move (j / k too)")),
-                    (_("home/end"), _("first / last")),
+                    (_("home/end"), _("first / last (g / G too)")),
+                    ("s / S", _("sort: activity, context, project, memory / invert")),
+                    ("y", _("copy the session id")),
                     (_("SPACE"), _("mark / unmark")),
                     ("v", _("range mode: drop an anchor, SPACE marks to the cursor")),
                     ("x", _("close the marked ones (asks first)")),
-                    ("/", _("filter by title as you type")),
+                    ("/", _("filter by title, project, branch or id")),
                     ("TAB", _("switch CLI: claude, history, codex, gemini, all")),
                     ("a / i", _("mark all / invert")),
                     ("d", _("mark the ones idle for over an hour")),
@@ -2255,6 +2426,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     continue
                 _y, _x0, _x1, que, dato = golpe
                 buscando = False
+                if que == "orden":
+                    foco = rows[cur]["name"]
+                    modo = MODOS_ORDEN[(MODOS_ORDEN.index(modo) + 1) % len(MODOS_ORDEN)]
+                    continue
                 if que == "vista":
                     if dato != "claude" and not extra:
                         extra = sesiones_externas(_ids(todas))
@@ -2308,9 +2483,27 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             if c == ord("/"):
                 buscando, filtro, cur = True, "", 0
                 continue
+            # `s` y `S` viven aqui, con `/` y TAB, porque son lo mismo: mandan sobre QUE
+            # se ve y en que sitio, no sobre la fila. Y el cursor sigue a SU sesion en
+            # vez de quedarse en el indice: reordenar no puede cambiarte de sesion
+            # seleccionada debajo de la mano.
+            if c == ord("s"):
+                foco = rows[cur]["name"]
+                modo = MODOS_ORDEN[(MODOS_ORDEN.index(modo) + 1) % len(MODOS_ORDEN)]
+                continue
+            if c == ord("S"):
+                foco = rows[cur]["name"]
+                orden_inv = not orden_inv
+                continue
             if c == 9:                      # Tab: claude -> historial -> ... -> todas
                 if not extra:
                     extra = sesiones_externas(_ids(todas))
+                # `fuentes` se calculo arriba del bucle, cuando `extra` aun estaba vacio:
+                # usarlo aqui dejaba el ciclo en ["claude", "todas"] y el PRIMER Tab
+                # saltaba al final. Se recalcula con lo que se acaba de cargar.
+                hay = {r.get("fuente", "claude") for r in todas + extra}
+                fuentes = ([f for f in ORDEN_FUENTES if f in hay]
+                           + sorted(f for f in hay if f not in ORDEN_FUENTES))
                 orden = ["claude"] + [f for f in fuentes if f != "claude"] + ["todas"]
                 vista = orden[(orden.index(vista) + 1) % len(orden)] if vista in orden else "claude"
                 cur = 0
@@ -2326,10 +2519,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cur = (cur - 1) % len(rows)
             elif c in (curses.KEY_DOWN, ord("j")):
                 cur = (cur + 1) % len(rows)
-            elif c == curses.KEY_HOME:
+            elif c in (curses.KEY_HOME, ord("g")):
                 cur = 0
-            elif c == curses.KEY_END:
+            elif c in (curses.KEY_END, ord("G")):
+                # `g`/`G` ademas de home/end: `j`/`k` ya estan, y en un teclado de
+                # portatil de Apple no hay teclas Inicio/Fin —son fn+flecha, que no
+                # todos los terminales traducen a KEY_HOME/KEY_END.
                 cur = len(rows) - 1
+            elif c == ord("y"):
+                copia_al_portapapeles(rows[cur]["name"])
+                # El id se ensena ADEMAS de copiarlo: hay terminales que ignoran OSC 52
+                # y el fallo seria mudo. Asi, como poco, se puede seleccionar a mano.
+                aviso = _("copied: {s}", s=rows[cur]["name"])
             elif c == ord(" "):
                 if ancla is not None:          # modo rango: marca de ancla a cursor
                     for i in range(min(ancla, cur), max(ancla, cur) + 1):
@@ -2670,6 +2871,14 @@ def _T():
         "Don't know how to open that one.": "No sé cómo abrir esa.",
         "Don't know how to open {s}.": "No sé cómo abrir {s}.",
         "ENTER": "ENTER",
+        "activity": "actividad",
+        "copied: {s}": "copiado: {s}",
+        "copy the session id": "copiar el id de la sesión",
+        "first / last (g / G too)": "primera / última (g / G también)",
+        "sort": "orden",
+        "sort: ": "orden: ",
+        "sort: activity, context, project, memory / invert":
+            "ordenar: actividad, contexto, proyecto, memoria / invertir",
         "HEADS UP: {n} are working right now": "OJO: {n} están trabajando ahora mismo",
         "I don't understand that selection: {e}": "No entiendo la selección: {e}",
         "Keys": "Teclas",
@@ -2704,9 +2913,9 @@ def _T():
         "close": "cerrar",
         "close the marked ones (asks first)": "cerrar las marcadas (pide confirmación)",
         "filter": "filtrar",
-        "filter by title as you type": "filtrar por título mientras escribes",
+        "filter by title, project, branch or id":
+            "filtrar por título, proyecto, rama o id",
         "filter: ": "filtro: ",
-        "first / last": "primera / última",
         "help": "ayuda",
         "history": "historial",
         "home/end": "inicio/fin",
@@ -2783,7 +2992,6 @@ def _T():
         "open for {t}": "abierta hace {t}",
         "open it (a NEW window when Warp is there)": "abrir (en una VENTANA NUEVA si hay Warp)",
         "opened {t}": "abierta {t}",
-        "other CLI": "otro CLI",
         "project": "proyecto",
         "quit": "salir",
         "quit without touching anything": "salir sin tocar nada",
