@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1
+
+**`--list` shows the four states, like the picker does.** It used to say only "running" or
+"idle", collapsing four into two and losing the one that matters — a session stuck inside a
+three-minute command, which by file date is indistinguishable from an abandoned one. It also
+shows the context percentage now, and durations past two days read as `7d 2h` instead of
+`170h 26m`.
+
+**The Spanish interface is now written in Spanish.** Of 245 strings exactly one carried an
+accent: the whole UI read like it had been typed on a keyboard without them. All of them are
+fixed, and the i18n test now fails on any string containing a word that always takes an accent.
+
 ## 1.2.0
 
 **The title is the last thing to be cut.** It was the first: at 70 columns the list showed
@@ -17,16 +29,6 @@ than eight blanks per row; a Codex tab drops the context column the same way.
 
 Resizing can no longer shrink a column. Widening the window used to *narrow* the title, because
 the project column came back and took the room — found by the new test, not by looking.
-
-**`--list` shows the four states, like the picker does.** It used to say only "running" or
-"idle", collapsing four into two and losing the one that matters — a session stuck inside a
-three-minute command, which by file date is indistinguishable from an abandoned one. It also
-shows the context percentage now, and durations past two days read as `7d 2h` instead of
-`170h 26m`.
-
-**The Spanish interface is now written in Spanish.** Of 245 strings exactly one carried an
-accent: the whole UI read like it had been typed on a keyboard without them. All of them are
-fixed, and the i18n test now fails on any string containing a word that always takes an accent.
 
 ### Fixed
 
