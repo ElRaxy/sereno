@@ -43,3 +43,5 @@ jobs:
         run: python tests/test_json_sin_conversacion.py
       - name: --watch avisa en el flanco y no repite
         run: python tests/test_watch_flanco.py
+      - name: --find busca en lo dicho, no en el fichero
+        run: python tests/test_find_solo_lo_dicho.py

@@ -15,6 +15,7 @@ optional and only add live process control; without them everything is read from
   sereno --list          plain list, touches nothing
   sereno --json          the same facts as JSON, without any conversation in it
   sereno --watch         sit there and tell you when a session stops and waits on you
+  sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
   sereno --yes           reopen as tabs without asking
   sereno --dismiss       drop the orphan entries without reopening them
@@ -479,36 +480,44 @@ def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True):
             continue
         cands.append((mt, p))
     cands.sort(reverse=True)
-    rows = []
-    for mt, p in cands[:limite]:
-        clave = (str(p), mt)
-        fila = _CACHE_DISCO.get(clave)
-        if fila is None:
-            e = {"id": p.stem, "project_dir": str(p.parent), "_transcript": p}
-            pu = pulso(e, fino=fino)
-            e["cwd"] = pu.get("cwd") or _proyecto_de_dir(p.parent.name)
-            titulo = (pu.get("aiTitle") or first_user_text(p) or p.stem[:8])
-            fila = {
-                "name": p.stem, "created": 0, "attached": False, "meta": e, "pid": "",
-                "mem_mb": None, "_sin_proceso": True,
-                "title": (titulo[:33] + "\u2026") if len(titulo) > 34 else titulo,
-                "title_full": titulo, "pulso": pu,
-                "proyecto": pathlib.Path(e["cwd"] or "").name,
-                "rama": pu.get("gitBranch", ""),
-            }
-            if len(_CACHE_DISCO) > 400:
-                _CACHE_DISCO.clear()      # la clave lleva el mtime: crece sin tope
-            _CACHE_DISCO[clave] = fila
-        fila = dict(fila)
-        fila["idle"] = max(0.0, ahora - mt)
-        viva = fila["idle"] <= VIVA
-        # `working` sale del pulso, que mira el transcript; sin proceso que inspeccionar
-        # es lo unico observable, y es honesto: si nadie escribe ahi, no esta trabajando.
-        fila["working"] = bool(fila["pulso"].get("escribe")
-                               or fila["pulso"].get("herramienta")) if viva else False
-        fila["fuente"] = "claude" if viva else "historial"
-        rows.append(fila)
-    return rows
+    return [fila_de_transcript(p, mt, fino=fino) for mt, p in cands[:limite]]
+
+
+def fila_de_transcript(p, mt=None, fino=True):
+    """Una fila a partir de un `.jsonl` suelto. Vive aparte porque la quieren dos:
+    el barrido de `sesiones_de_disco` y la busqueda de `--find`."""
+    if mt is None:
+        try:
+            mt = p.stat().st_mtime
+        except OSError:
+            mt = 0
+    clave = (str(p), mt)
+    fila = _CACHE_DISCO.get(clave)
+    if fila is None:
+        e = {"id": p.stem, "project_dir": str(p.parent), "_transcript": p}
+        pu = pulso(e, fino=fino)
+        e["cwd"] = pu.get("cwd") or _proyecto_de_dir(p.parent.name)
+        titulo = (pu.get("aiTitle") or first_user_text(p) or p.stem[:8])
+        fila = {
+            "name": p.stem, "created": 0, "attached": False, "meta": e, "pid": "",
+            "mem_mb": None, "_sin_proceso": True,
+            "title": (titulo[:33] + "\u2026") if len(titulo) > 34 else titulo,
+            "title_full": titulo, "pulso": pu,
+            "proyecto": pathlib.Path(e["cwd"] or "").name,
+            "rama": pu.get("gitBranch", ""),
+        }
+        if len(_CACHE_DISCO) > 400:
+            _CACHE_DISCO.clear()          # la clave lleva el mtime: crece sin tope
+        _CACHE_DISCO[clave] = fila
+    fila = dict(fila)
+    fila["idle"] = max(0.0, time.time() - mt)
+    viva = fila["idle"] <= VIVA
+    # `working` sale del pulso, que mira el transcript; sin proceso que inspeccionar es
+    # lo unico observable, y es honesto: si nadie escribe ahi, no esta trabajando.
+    fila["working"] = bool(fila["pulso"].get("escribe")
+                           or fila["pulso"].get("herramienta")) if viva else False
+    fila["fuente"] = "claude" if viva else "historial"
+    return fila
 
 
 # ───────────────────────────── modo demostracion ─────────────────────────────
@@ -666,6 +675,107 @@ def filas_json(rows):
 def print_json(rows):
     print(json.dumps({"sereno": VERSION, "sessions": filas_json(rows)},
                      indent=2, ensure_ascii=False))
+
+
+# ───────────────────────────── --find: buscar en el historial ─────────────────────────
+# La criba binaria por fichero NO basta, y medirlo fue la sorpresa: buscando "complianz"
+# sobre 506 transcripts, 287 contenian la palabra en crudo y solo 25 la tenian en algo
+# dicho. El resto son `tool_result` —volcados de ficheros, salidas de comandos— y el
+# CLAUDE.md del proyecto, que el CLI inyecta en CADA sesion. Buscar en el fichero entero
+# devuelve media maquina; buscar en lo que se dijo devuelve lo que buscabas.
+_TROZO = 70          # caracteres a cada lado del acierto
+
+
+def _fragmento(texto, aguja):
+    i = texto.lower().find(aguja.lower())
+    if i < 0:
+        return ""
+    a, b = max(0, i - _TROZO), min(len(texto), i + len(aguja) + _TROZO)
+    return (("\u2026" if a else "") + " ".join(texto[a:b].split())
+            + ("\u2026" if b < len(texto) else ""))
+
+
+def _dichos(j):
+    """Lo que se dijo en una linea del transcript: prompts y respuestas, nada mas.
+
+    Fuera quedan los `tool_result` (no los dijo nadie, son salida de comandos) y los
+    `<system-reminder>`, que son contexto que el CLI pega solo y aparece en todas las
+    sesiones: dejarlos dentro hacia que cualquier palabra del CLAUDE.md casara siempre.
+    """
+    if j.get("isSidechain"):
+        return []
+    m = j.get("message") or {}
+    c = m.get("content")
+    quien = j.get("type")
+    if quien not in ("user", "assistant"):
+        return []
+    if isinstance(c, str):
+        textos = [c]
+    elif isinstance(c, list):
+        textos = [b.get("text") or "" for b in c
+                  if isinstance(b, dict) and b.get("type") == "text"]
+    else:
+        return []
+    return [(quien, t) for t in textos if t and "<system-reminder>" not in t]
+
+
+def buscar(aguja, limite=200, todo=False):
+    """[(fila, [(quien, fragmento)])] por sesion, de la mas reciente a la mas vieja."""
+    if DEMO or not PROJECTS.is_dir():
+        return []
+    a = aguja.lower().encode("utf-8", "replace")
+    cands = []
+    for p in PROJECTS.glob("*/*.jsonl"):
+        if not _UUID.match(p.stem):
+            continue
+        try:
+            cands.append((p.stat().st_mtime, p))
+        except OSError:
+            pass
+    cands.sort(reverse=True)
+    if not todo:
+        cands = cands[:limite]
+
+    salida = []
+    for mt, p in cands:
+        try:
+            crudo = p.read_bytes()
+        except OSError:
+            continue
+        if a not in crudo.lower():
+            continue          # criba barata: descarta el 80% sin parsear un solo JSON
+        aciertos = []
+        for linea in crudo.split(b"\n"):
+            if a not in linea.lower():
+                continue
+            try:
+                j = json.loads(linea)
+            except Exception:
+                continue
+            for quien, texto in _dichos(j):
+                frag = _fragmento(texto, aguja)
+                if frag:
+                    aciertos.append((quien, frag))
+        if aciertos:
+            salida.append((fila_de_transcript(p, mt), aciertos))
+    return salida
+
+
+def print_hallazgos(res, aguja, por_sesion=3):
+    total = sum(len(a) for _f, a in res)
+    print("\n\033[1m" + _("{n} hit(s) in {s} session(s) for \u201c{q}\u201d",
+                           n=total, s=len(res), q=aguja) + "\033[0m")
+    for fila, aciertos in res:
+        donde = fila.get("proyecto") or ""
+        print(f"\n  \033[1m{fila['title_full']}\033[0m"
+              + (f"  \033[2m{donde}\033[0m" if donde else "")
+              + f"  \033[2m{_hace(fila['idle'])}\033[0m")
+        print(f"  \033[2m{fila['name']}\033[0m")
+        for quien, frag in aciertos[:por_sesion]:
+            etiq = _("you") if quien == "user" else _("it")
+            print(f"    \033[2m{etiq:>4}\033[0m  {frag}")
+        if len(aciertos) > por_sesion:
+            print("    " + _("+{n} more here", n=len(aciertos) - por_sesion))
 
 
 # ─────────────────────────── --watch: el aviso al terminar ───────────────────────────
@@ -2392,6 +2502,15 @@ def _T():
         "mark all / invert": "marcar todas / invertir",
         "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
         "memory": "memoria",
+        "{n} hit(s) in {s} session(s) for \u201c{q}\u201d":
+            "{n} acierto(s) en {s} sesion(es) para \u201c{q}\u201d",
+        "you": "tu",
+        "it": "ella",
+        "+{n} more here": "+{n} mas aqui",
+        "--find takes something to look for, 2 characters or more.":
+            "--find quiere algo que buscar, de 2 caracteres o mas.",
+        "Nothing said about \u201c{q}\u201d in the transcripts searched.":
+            "Nada dicho sobre \u201c{q}\u201d en los transcripts mirados.",
         "Watching. Nothing is reported until a session stops working. Ctrl-C to quit.":
             "Vigilando. No dice nada hasta que una sesion deje de trabajar. Ctrl-C para salir.",
         "{hora}  {t} \u2014 waiting on you{d}": "{hora}  {t} \u2014 te espera a ti{d}",
@@ -2469,6 +2588,26 @@ def main():
         return 0
     if argv and argv[0] == "--add":
         return cmd_add(argv[1:])
+
+    if "--find" in argv:
+        i = argv.index("--find")
+        aguja = argv[i + 1] if len(argv) > i + 1 else ""
+        if len(aguja) < 2:
+            print(_("--find takes something to look for, 2 characters or more."))
+            return 2
+        res = buscar(aguja, todo="--all" in argv)
+        if not res:
+            print(_("Nothing said about \u201c{q}\u201d in the transcripts searched.",
+                    q=aguja))
+            return 1
+        print_hallazgos(res, aguja)
+        # Y despues el selector con SOLO esas: encontrarla es la mitad, lo que quieres
+        # es volver a ella. Al salir con `q` el listado sigue ahi arriba.
+        if sys.stdin.isatty() and "--list" not in argv:
+            accion = pick_ui([f for f, _a in res])
+            if accion and accion[0] == "open":
+                return abrir_sesion(accion[1][0])
+        return 0
 
     if "--watch" in argv:
         cada = 20

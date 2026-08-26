@@ -48,6 +48,11 @@ def main():
             if CANARIO in json.dumps(f, default=str):
                 fallos.append(f"{nombre}: el canario se ha colado")
 
+    # `buscar()` lee transcripts a proposito, asi que en demo tiene que devolver vacio:
+    # es la funcion que mas facil se olvida al anadir una guarda, porque no pinta filas.
+    if ns["buscar"](CANARIO, todo=True):
+        fallos.append("buscar: en modo demo ha leido transcripts de verdad")
+
     # y la salida que se graba en el GIF tampoco puede traerlo
     import io, contextlib
     buf = io.StringIO()

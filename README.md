@@ -159,8 +159,26 @@ sereno            # the picker
 sereno --list     # plain list, touches nothing
 sereno --json     # the same facts, for your statusline or your scripts
 sereno --watch    # sit there and tell you the moment one stops and waits on you
+sereno --find "the thing you half remember"
 sereno --help
 ```
+
+### `--find`
+
+For the session you know you had and cannot find. It searches **what was said** — your prompts
+and the agent's replies — and prints the matches with enough of a line around them to
+recognise, then opens the picker with only those, so `ENTER` puts you back inside.
+
+```bash
+sereno --find "webhook idempotency"
+sereno --find "webhook idempotency" --all     # everything, not just the 200 most recent
+```
+
+Searching the raw files instead would have been three lines shorter and useless. Measured over
+506 transcripts here: 287 files contained the word, 25 had it in something a human or the agent
+actually said. The rest were `tool_result` dumps — greps, file contents, command output — and
+the project's `CLAUDE.md`, which the CLI pastes into **every** session. With those in, any word
+from your own project matches everywhere.
 
 ### `--watch`
 

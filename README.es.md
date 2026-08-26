@@ -159,8 +159,26 @@ sereno            # el selector
 sereno --list     # lista y ya, no toca nada
 sereno --json     # los mismos hechos, para tu statusline o tus scripts
 sereno --watch    # se queda ahí y te avisa en cuanto una para y te espera
+sereno --find "eso que recuerdas a medias"
 sereno --help
 ```
+
+### `--find`
+
+Para la sesión que sabes que tuviste y no encuentras. Busca en **lo que se dijo** —tus prompts
+y las respuestas del agente— e imprime los aciertos con suficiente línea alrededor para
+reconocerlos; después abre el selector con solo esas, así que `ENTER` te devuelve dentro.
+
+```bash
+sereno --find "idempotencia del webhook"
+sereno --find "idempotencia del webhook" --all   # todo, no solo los 200 más recientes
+```
+
+Buscar en los ficheros en crudo habría sido tres líneas más corto e inútil. Medido sobre 506
+transcripts aquí: 287 ficheros contenían la palabra y 25 la tenían en algo dicho por alguien. El
+resto eran volcados de `tool_result` —greps, contenidos de ficheros, salidas de comandos— y el
+`CLAUDE.md` del proyecto, que el CLI pega en **cada** sesión. Con eso dentro, cualquier palabra
+de tu propio proyecto casa en todas partes.
 
 ### `--watch`
 
