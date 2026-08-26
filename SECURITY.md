@@ -54,3 +54,6 @@ but a title Claude generated for itself does describe what you were working on.
   the file in the repository at that tag, don't run it and tell me.
 - Commits from 2026-08-26 onwards are signed with an SSH key registered to my GitHub account,
   so GitHub marks them Verified. An unsigned or unverified commit on `main` is not mine.
+- Releases are immutable: once published, neither the tag nor the assets can be changed.
+- `main` takes no direct pushes, mine included. Everything lands through a pull request with
+  the six test jobs green, and force-pushes and branch deletion are refused outright.
