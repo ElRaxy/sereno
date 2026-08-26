@@ -60,3 +60,5 @@ jobs:
         run: python tests/test_reparto_columnas.py
       - name: el orden no baraja la lista y el filtro mira lo que se ve
         run: python tests/test_orden.py
+      - name: dos sesiones en el mismo sitio se ven, y una sola no inventa nada
+        run: python tests/test_colisiones.py

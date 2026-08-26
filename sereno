@@ -299,6 +299,322 @@ def meta_by_tmux():
     return out
 
 
+# ─────────────────────────── colisiones entre sesiones ───────────────────────────
+# Dos sesiones vivas escribiendo en el mismo sitio no se ven entre ellas: cada una cree
+# que el fichero es suyo. Los dos accidentes reales de esta maquina tienen esa forma
+# —una saco a otro repo el modulo que la de al lado estaba editando, y un `git commit`
+# sin pathspec se llevo el indice que otra habia dejado preparado— y ninguno de los dos
+# dio error: se descubrieron despues, leyendo el diff.
+#
+# Lo que se observa son TOQUES: (epoch, clase, ruta, verbo).
+#
+#   "w"     escritura a un fichero concreto: Edit/Write/MultiEdit/NotebookEdit, y los
+#           dos extremos de un `mv`.
+#   "repo"  orden de git que actua sobre TODO el repo aunque nombre un fichero:
+#           `git commit` sin pathspec, `git add -A`, `git checkout .`, `git reset
+#           --hard`, `git clean -f`, `git stash`. Su ruta es la raiz del repo.
+#   "dir"   `rm -r <dir>`: se lleva por delante lo que cuelgue de ahi.
+#
+# El veredicto NO nace aqui. `hechos_colision()` constata y `nivel_colision()` compone,
+# que es la frontera que pide `.claude/rules/llm-decision-boundary.md`.
+
+# Cuanto atras cuenta un toque. Medido sobre 40 transcripts de esta maquina: las 80
+# lineas que `pulso()` ya lee abarcan entre 0,7 y 21 minutos segun lo hablador que sea
+# el agente, y 3 minutos en el caso tipico. Quince es lo que tarda la union de varios
+# refrescos en llenar esa ventana sin leer un byte de mas, y sigue significando "la
+# otra sesion estaba aqui en esta misma sentada". Mas alla de eso lo que hay no es una
+# carrera entre dos sesiones: es trabajo secuencial, y avisar de el es ruido.
+VENTANA_COL = 15 * 60
+# Compartir repo NO es chocar: en un monorepo lo comparten todas. Se avisa de "misma
+# carpeta" para arriba.
+COLISION_MINIMA = 2
+# Lo que cada sesion ha tocado, acumulado entre refrescos. `pulso()` ve las ultimas 80
+# lineas y nada mas; guardando lo visto, la ventana efectiva crece sola mientras sereno
+# siga abierto y no cuesta ni una lectura extra.
+_HUELLAS = {}
+_TOPE_TOQUES = 300
+_RAICES = {}
+
+_TROZOS = re.compile(r"&&|\|\||;|\n|\|")
+# Se corta ANTES de tokenizar: un `$(...)`, un heredoc o una redireccion meten dentro
+# del comando texto que no son argumentos suyos, y `git commit -m "$(cat <<'EOF'` es
+# como se escribe de verdad un commit largo aqui.
+_CORTE = re.compile(r"\$\(|<<|>")
+_CON_VALOR = {"-m", "--message", "-C", "--reuse-message", "-c", "--reedit-message",
+              "--author", "--date", "-F", "--file", "-S", "--gpg-sign", "--cleanup",
+              "--fixup", "--squash", "-t", "--template", "--trailer"}
+_ENVOLTORIO = ("sudo", "env", "nohup", "time", "command")
+# Solo estas escriben. `Read`, `Glob` y `Grep` tambien traen `file_path` o `path`, y
+# mirar un fichero no choca con nadie.
+_TOOLS_ESCRIBEN = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+
+
+def raiz_repo(d):
+    """La carpeta que contiene el `.git`, subiendo desde `d`. "" si no hay ninguna.
+
+    Sin lanzar `git`: `tests/test_sin_red.py` fija la lista de binarios permitidos y
+    esto no necesita ninguno — es un `exists()` por nivel y una cache por carpeta.
+
+    Distinguir repos importa mas de lo que parece. Medido el 2026-08-26 con dos
+    sesiones commiteando a la vez: una en `~/Desktop/VanguardIA` y otra en
+    `.../src/Anubis/seo-guardian`, que vive DENTRO pero es repo propio. Sin subir a
+    buscar el `.git` las dos habrian figurado compartiendo indice.
+    """
+    if not d or DEMO:
+        return ""
+    if d in _RAICES:
+        return _RAICES[d]
+    p, raiz = pathlib.Path(d), ""
+    for _nivel in range(20):
+        if (p / ".git").exists():
+            raiz = str(p)
+            break
+        if p.parent == p:
+            break
+        p = p.parent
+    _RAICES[d] = raiz
+    return raiz
+
+
+def _tokens(trozo):
+    """Los argumentos de un tramo de shell, o lo que se pueda sacar de el.
+
+    `shlex` revienta con comillas sin cerrar, que es lo normal cuando el tramo sale de
+    partir un comando de varias lineas. Ahi se cae a partir por blancos, que para
+    decidir "¿esto nombra un fichero?" basta.
+    """
+    trozo = _CORTE.split(trozo, 1)[0]
+    try:
+        tok = shlex.split(trozo)
+    except ValueError:
+        tok = trozo.split()
+    while tok and (tok[0] in _ENVOLTORIO or "=" in tok[0]):
+        tok = tok[1:]          # `sudo`, `VAR=x` y demas prefijos no son el comando
+    return tok
+
+
+def _sin_pathspec(resto):
+    """Un `git commit` sin fichero detras se lleva el INDICE, que es compartido.
+
+    Es el accidente registrado: ocho sesiones en el mismo repo, una commitea y arrastra
+    lo que otra habia dejado preparado con `git add`. Nombrando el fichero no pasa.
+    """
+    saltar = False
+    for t in resto:
+        if saltar:
+            saltar = False
+            continue
+        if t == "--":
+            return False
+        if not t.startswith("-"):
+            return False
+        if t in _CON_VALOR:
+            saltar = True
+    return True
+
+
+def _anchas(cmd):
+    """Ordenes de un `Bash` que tocan mas de lo que nombran: [(clase, ruta, verbo)].
+
+    Deliberadamente NO se leen redirecciones (`> fichero`), `tee`, `sed -i` ni `cp`.
+    Medido sobre los 505 comandos Bash de los ultimos 40 transcripts: la regex de
+    redireccion daba 717 aciertos y casi todos eran `/dev/null`, un `2>&1`, una
+    variable sin expandir o el `60` de un `head -60`. Un detector que grita 717 veces
+    no lo mira nadie. `mv` si entra aunque en la muestra saliera 0 veces: es
+    exactamente el accidente de sacar un modulo que otra sesion esta editando.
+    """
+    fuera = []
+    for trozo in _TROZOS.split(cmd):
+        tok = _tokens(trozo)
+        if len(tok) >= 2 and tok[0] == "git":
+            sub, resto = tok[1], tok[2:]
+            if sub == "commit" and _sin_pathspec(resto):
+                fuera.append(("repo", "", "git commit"))
+            elif sub == "add" and any(a in ("-A", "--all", "-u", "--update", ".", ":/")
+                                      for a in resto):
+                fuera.append(("repo", "", "git add"))
+            elif sub in ("checkout", "restore") and any(a in (".", ":/") for a in resto):
+                fuera.append(("repo", "", "git " + sub))
+            elif sub == "reset" and any(a in ("--hard", "--mixed") for a in resto):
+                fuera.append(("repo", "", "git reset"))
+            elif sub == "clean" and any(re.match(r"-[a-zA-Z]*f", a) for a in resto):
+                fuera.append(("repo", "", "git clean"))
+            elif sub == "stash" and (not resto or resto[0] in
+                                     ("push", "save", "-u", "--include-untracked")):
+                fuera.append(("repo", "", "git stash"))
+        elif len(tok) >= 2 and tok[0] == "rm" and any(re.match(r"-[a-zA-Z]*[rR]", a)
+                                                      for a in tok[1:]):
+            fuera += [("dir", a, "rm -r") for a in tok[1:] if not a.startswith("-")]
+        elif len(tok) >= 3 and tok[0] == "mv":
+            # Los DOS extremos: mover deja huerfano a quien editaba el origen, y pisa
+            # a quien estuviera escribiendo el destino.
+            fuera += [("w", a, "mv") for a in tok[1:] if not a.startswith("-")]
+    return fuera
+
+
+def _toques(b, ts):
+    """Lo que escribe un bloque `tool_use`, en toques crudos (rutas sin resolver).
+
+    Reusa `_arg_tool()`, que es la misma tabla `_TOOL_ARG` con la que `_resume_tool()`
+    pinta la linea del panel: un solo sitio donde se decide que argumento identifica
+    una llamada, dos lectores distintos de ese hecho.
+    """
+    nom = b.get("name") or ""
+    clave, valor = _arg_tool(b)
+    if nom in _TOOLS_ESCRIBEN and clave in ("file_path", "notebook_path"):
+        return [(ts, "w", valor, nom)]
+    if nom == "Bash" and clave == "command":
+        return [(ts, clase, ruta, verbo) for clase, ruta, verbo in _anchas(valor)]
+    return []
+
+
+def _resuelve(toques, cwd):
+    """Rutas absolutas y normalizadas, contra el `cwd` de la sesion.
+
+    Claude Code pasa `file_path` absoluto siempre —comprobado sobre los transcripts de
+    esta maquina— asi que esto es para lo que sale de un `Bash`, que si viene relativo.
+    Un toque de clase "repo" apunta al repo entero: su ruta ES la raiz del repo.
+    """
+    fuera = []
+    for ts, clase, ruta, verbo in toques:
+        if clase == "repo":
+            ruta = raiz_repo(cwd) or cwd
+        elif ruta.startswith("/"):
+            ruta = os.path.normpath(ruta)
+        elif cwd:
+            ruta = os.path.normpath(os.path.join(cwd, ruta))
+        if ruta:
+            fuera.append((ts, clase, ruta, verbo))
+    return fuera
+
+
+def recuerda_toques(sid, toques, ahora=None):
+    """Mezcla lo recien visto con lo ya sabido de esa sesion y devuelve su huella viva.
+
+    Idempotente a proposito: la fila de una sesion parada sale de `_CACHE_DISCO` con los
+    mismos toques vuelta tras vuelta, y volver a mezclarlos no puede cambiar nada.
+
+    La poda por ventana va aqui y no al consultar: asi el diccionario no crece con las
+    horas que lleve sereno abierto, que es la unica forma que tiene esto de hacerse
+    grande.
+    """
+    ahora = time.time() if ahora is None else ahora
+    h = _HUELLAS.setdefault(sid, {})
+    for ts, clase, ruta, verbo in (toques or ()):
+        k = (clase, ruta, verbo)
+        h[k] = max(ts, h.get(k, 0))
+    viejo = ahora - VENTANA_COL
+    for k in [k for k, ts in h.items() if ts < viejo]:
+        del h[k]
+    if len(h) > _TOPE_TOQUES:
+        # Un barrido que toca mil ficheros no puede comerse la memoria del selector.
+        for k, _ts in sorted(h.items(), key=lambda kv: kv[1])[:len(h) - _TOPE_TOQUES]:
+            del h[k]
+    if not h:
+        _HUELLAS.pop(sid, None)
+    return h
+
+
+def hechos_colision(mia, otra, ahora=None):
+    """Que comparten dos sesiones, en hechos. Sin veredicto: lo compone `nivel_colision`.
+
+    `mia` y `otra` son {"repo": str, "toques": {(clase, ruta, verbo): epoch}}. Los
+    campos simetricos valen para las dos; los contadores miran a `otra`, porque lo que
+    se le ensena a una sesion es lo que esta haciendo LA DE AL LADO.
+    """
+    ahora = time.time() if ahora is None else ahora
+    fmia = {r for (c, r, _v) in mia["toques"] if c == "w"}
+    fotra = {r for (c, r, _v) in otra["toques"] if c == "w"}
+    comunes = fmia & fotra
+    dmia = {os.path.dirname(r) for r in fmia}
+    dotra = {os.path.dirname(r) for r in fotra}
+    mismo_repo = bool(mia["repo"]) and mia["repo"] == otra["repo"]
+
+    # Una orden ancha solo choca si cae sobre terreno que la otra esta escribiendo: un
+    # `git commit` en un repo donde no trabaja nadie mas no se lleva nada de nadie. Es
+    # lo que evita que el aviso salte en cada commit de una sesion que va sola.
+    ancha, ancha_mia = "", False
+    for suya, quien, ajenos in ((True, mia, fotra), (False, otra, fmia)):
+        for (clase, ruta, verbo), _ts in quien["toques"].items():
+            if clase == "repo" and mismo_repo:
+                ancha, ancha_mia = verbo, suya
+            elif clase == "dir" and any(f.startswith(ruta.rstrip("/") + "/")
+                                        for f in ajenos):
+                ancha, ancha_mia = verbo, suya
+
+    # Cuanto pisa la OTRA sobre terreno compartido: la medida de si esto esta caliente
+    # ahora o es un rastro de hace un rato. Sin terreno compartido no hay que contar.
+    terreno = comunes or ({r for r in fotra if os.path.dirname(r) in dmia}
+                          if dmia & dotra else set())
+    calientes = [ts for (c, r, _v), ts in otra["toques"].items()
+                 if (c == "w" and r in terreno) or (c != "w" and mismo_repo)]
+    return {
+        "mismo_fichero": bool(comunes),
+        "mismo_directorio": bool(dmia & dotra),
+        "mismo_repo": mismo_repo,
+        "ficheros": tuple(sorted(comunes)),
+        "escrituras_recientes": len(calientes),
+        "segundos_desde_la_ultima": int(ahora - max(calientes)) if calientes else None,
+        "orden_ancha": ancha,
+        "orden_es_mia": ancha_mia,
+    }
+
+
+def nivel_colision(h):
+    """0 nada · 1 mismo repo · 2 misma carpeta · 3 mismo fichero · 4 orden ancha.
+
+    El 1 NO es un choque y no se pinta: en un monorepo lo comparten todas las sesiones a
+    la vez, y un aviso que sale siempre no avisa de nada. Existe como escalon para que
+    el 4 pueda apoyarse en el.
+
+    El 4 va por encima del 3 a proposito. Dos sesiones editando el mismo fichero lo
+    notas al guardar; un `git commit` sin pathspec en un repo que otra esta tocando se
+    lleva su indice sin que nada falle, y eso solo se ve leyendo el diff despues.
+    """
+    if h["orden_ancha"]:
+        return 4
+    if h["mismo_fichero"]:
+        return 3
+    if h["mismo_directorio"]:
+        return 2
+    if h["mismo_repo"]:
+        return 1
+    return 0
+
+
+def colisiones(rows):
+    """Anota en cada fila con quien choca, si con alguien. Devuelve las mismas `rows`.
+
+    O(n^2) sobre las filas que tienen toques en la ventana, que en la practica son dos o
+    tres. Aun con las 40 del historial serian 1.600 intersecciones de conjuntos de
+    decenas de elementos: por debajo del milisegundo, y solo se paga cuando hay algo que
+    cruzar.
+    """
+    ahora = time.time()
+    vivas = []
+    for r in rows:
+        pu = r.get("pulso") or {}
+        r["colision"] = None
+        toques = recuerda_toques(r["name"], pu.get("escrituras"), ahora)
+        if toques:
+            cwd = pu.get("cwd") or (r.get("meta") or {}).get("cwd") or ""
+            vivas.append((r, {"repo": raiz_repo(cwd), "toques": toques}))
+
+    for i, (ra, ha) in enumerate(vivas):
+        for rb, hb in vivas[i + 1:]:
+            if ra["name"] == rb["name"]:
+                continue          # una sesion reanudada puede llegar por dos vias
+            for yo, mia, otro, suya in ((ra, ha, rb, hb), (rb, hb, ra, ha)):
+                h = hechos_colision(mia, suya, ahora)
+                h["nivel"] = nivel_colision(h)
+                h["con"] = otro["name"]
+                h["titulo"] = otro.get("title_full") or otro.get("title") or ""
+                if h["nivel"] >= COLISION_MINIMA and (
+                        yo["colision"] is None or h["nivel"] > yo["colision"]["nivel"]):
+                    yo["colision"] = h
+    return rows
+
+
 def pulso(e, secs=90, fino=True):
     """Hechos sobre lo que hace la sesion. El veredicto lo compone quien llame.
 
@@ -317,16 +633,19 @@ def pulso(e, secs=90, fino=True):
     if not t:
         return {"escribe": None, "herramienta": None}
     try:
-        escribe = (time.time() - t.stat().st_mtime) < secs
+        # El `mtime` hace ademas de reloj de respaldo para las lineas sin `timestamp`:
+        # sin el, un toque sin fecha nace con epoch 0 y se poda al instante, en silencio.
+        mtime = t.stat().st_mtime
     except OSError:
         return {"escribe": None, "herramienta": None}
+    escribe = (time.time() - mtime) < secs
     if not fino:
         # El aviso de abrir terminal solo cuenta sesiones: leer la cola de todos los
         # transcripts para afinar le costaria 100 ms en vez de 30, y no cambia lo que
         # imprime. Lo fino lo pide el selector, que si lo pinta.
         return {"escribe": escribe, "herramienta": None}
 
-    pendientes, ultimo_tool, extra = set(), False, {}
+    pendientes, ultimo_tool, extra, toca = set(), False, {}, []
     for raw in ultimas_lineas(t, 80):
         try:
             j = json.loads(raw)
@@ -335,6 +654,16 @@ def pulso(e, secs=90, fino=True):
         for k in ("cwd", "gitBranch", "lastPrompt", "aiTitle"):
             if j.get(k):
                 extra[k] = j[k]            # de una pasada: no hay que releer despues
+        # Los ficheros que toca la sesion, para el detector de choques. Va ANTES del
+        # corte de `isSidechain` a proposito: lo que escribe un subagente lo escribe la
+        # sesion, y quien se lleve el fichero por delante no distingue cual de los dos
+        # lo hizo. No cuesta una lectura: esta cola ya esta abierta.
+        cont0 = (j.get("message") or {}).get("content")
+        if isinstance(cont0, list):
+            ts = _iso(j.get("timestamp") or "") or mtime
+            for b0 in cont0:
+                if isinstance(b0, dict) and b0.get("type") == "tool_use":
+                    toca += _toques(b0, ts)
         if j.get("isSidechain"):
             continue
         msg = j.get("message") or {}
@@ -368,6 +697,10 @@ def pulso(e, secs=90, fino=True):
                            if isinstance(b, dict) and b.get("type") == "tool_result"}
             if not pendientes:
                 ultimo_tool = False
+    if toca:
+        # Se resuelve al final porque el `cwd` sale de esta misma pasada y las primeras
+        # lineas pueden llegar antes que el.
+        extra["escrituras"] = _resuelve(toca, extra.get("cwd") or "")
     return {"escribe": escribe, "herramienta": bool(pendientes) and ultimo_tool,
             **extra}
 
@@ -510,7 +843,7 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
     # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
     # cursor, que es lo que abre ENTER.
-    return ordena(rows)
+    return colisiones(ordena(rows))
 
 
 # ─────────────── sesiones leidas del historial, sin tmux ni registro ───────────────
@@ -702,9 +1035,19 @@ def sesiones_demo():
                      "lastPrompt": pr, "resp": resp, "tool": cmd or None,
                      "gitBranch": rama, "cwd": f"/Users/you/code/{proy}"},
         })
+    # Dos de las falsas chocan a proposito: es el caso que el detector existe para
+    # ensenar, y sin el la captura del README no lo cuenta. Rutas inventadas, como todo lo
+    # demas de aqui. `raiz_repo()` devuelve "" en demo, asi que se queda en nivel 3
+    # (mismo fichero) sin tocar el disco de verdad.
+    ahora = time.time()
+    rows[0]["pulso"]["escrituras"] = [
+        (ahora - 40, "w", "/Users/you/code/checkout-api/src/webhooks.py", "Edit"),
+        (ahora - 95, "w", "/Users/you/code/checkout-api/tests/test_webhooks.py", "Write")]
+    rows[1]["pulso"]["escrituras"] = [
+        (ahora - 25, "w", "/Users/you/code/checkout-api/src/webhooks.py", "Edit")]
     for r in rows:
         r["_det"]["fase"] = _fase(r)
-    return rows
+    return colisiones(rows)
 
 
 # `_fase()` devuelve una frase traducida, que es lo correcto para una persona y lo peor
@@ -752,6 +1095,14 @@ def filas_json(rows):
             "context_max": tope_contexto(pu.get("modelo"), ctx) if ctx else None,
             "model": pu.get("modelo"),
             "pid": r.get("pid") or None,
+            # Con quien choca y cuanto. Van las CIFRAS, nunca las rutas: `--json` se
+            # canaliza a barras de estado y a scripts de terceros, y un path de cliente
+            # dice tanto como una frase de la conversacion. El panel si las ensena,
+            # porque lo mira una persona en su propia pantalla.
+            "clash_level": (r.get("colision") or {}).get("nivel") or 0,
+            "clash_with": (r.get("colision") or {}).get("con") or None,
+            "clash_files": len((r.get("colision") or {}).get("ficheros") or ()),
+            "clash_command": (r.get("colision") or {}).get("orden_ancha") or None,
         })
     return fuera
 
@@ -889,6 +1240,36 @@ def transiciones(antes, ahora):
     return salen
 
 
+def pares_choque(filas):
+    """{par: nivel} de una foto. La clave es el PAR ordenado, no la sesion: un choque es
+    una relacion entre dos, y contarlo por sesion lo cuenta dos veces."""
+    fuera = {}
+    for r in filas:
+        if r.get("clash_with"):
+            par = tuple(sorted((r["id"], r["clash_with"])))
+            fuera[par] = max(fuera.get(par, 0), r["clash_level"])
+    return fuera
+
+
+def choques_nuevos(antes, ahora):
+    """Pares que ACABAN de empezar a chocar, o que han empeorado. Pura, como
+    `transiciones` y por lo mismo: el bucle no se puede testear y esto si.
+
+    Se compara nivel a nivel, no presencia: subir de "misma carpeta" a "mismo fichero" es
+    noticia; seguir en el mismo nivel diez minutos, no. Y el par se marca en cuanto lo
+    saca la primera de las dos filas, para no avisar dos veces del mismo choque.
+    """
+    salen, vistos = [], dict(antes)
+    for r in ahora:
+        if not r.get("clash_with") or r.get("clash_level", 0) < COLISION_MINIMA:
+            continue
+        par = tuple(sorted((r["id"], r["clash_with"])))
+        if r["clash_level"] > vistos.get(par, 0):
+            vistos[par] = r["clash_level"]
+            salen.append((par, r))
+    return salen
+
+
 def notifica(titulo, cuerpo):
     """Aviso del escritorio si el sistema tiene con que; si no, la campana del terminal.
 
@@ -911,7 +1292,7 @@ def notifica(titulo, cuerpo):
 
 def watch(cada=20):
     print(_("Watching. Nothing is reported until a session stops working. Ctrl-C to quit."), flush=True)
-    antes = {}
+    antes, pares = {}, {}
     primera = True
     try:
         while True:
@@ -924,7 +1305,19 @@ def watch(cada=20):
                                           d=f"  ({donde})" if donde else "") + "\n")
                 sys.stdout.flush()
                 notifica(_("waiting on you"), f"{que}" + (f" \u00b7 {donde}" if donde else ""))
+            # El segundo flanco que existe: no que una sesion pare, sino que dos empiecen
+            # a escribir en el mismo sitio. Se avisa cuando NACE, igual que el otro: si se
+            # avisara del estado, un choque que dura media hora avisaria noventa veces.
+            titulos = {r["id"]: (r["title"] or r["id"]) for r in filas}
+            for par, r in (() if primera else choques_nuevos(pares, filas)):
+                a, b = (titulos.get(x, x) for x in par)
+                sys.stdout.write("\a" + _(
+                    "{hora}  \u29c9 {a} and {b} are writing in the same place",
+                    hora=time.strftime("%H:%M"), a=a, b=b) + "\n")
+                sys.stdout.flush()
+                notifica(_("two sessions in the same place"), f"{a} \u00b7 {b}")
             antes = {r["id"]: r["state"] for r in filas}
+            pares = pares_choque(filas)
             primera = False
             time.sleep(cada)
     except KeyboardInterrupt:
@@ -964,9 +1357,12 @@ def print_live(rows):
         ctx = pu.get("ctx")
         pct = (f"  {round(100 * ctx / tope_contexto(pu.get('modelo'), ctx)):>3}%"
                if ctx else "      ")
+        # `--list` es lo que sale en un pipe y en una terminal sin tty: si el aviso
+        # solo viviera en el selector, quien lea la lista se lo pierde justo cuando importa.
+        choque = ("  \u29c9 " + _("clashes with another session")) if r.get("colision") else ""
         print(f"  {i:>2}. {ICONO.get(est, '?')} {r['title']:<34} "
               f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}  "
-              + _("open for {t}", t=edad) + att)
+              + _("open for {t}", t=edad) + att + choque)
         print(f"         {r['name']}")
 
 
@@ -1392,6 +1788,31 @@ def _fase(r):
             else _("stopped, waiting on you"))
 
 
+def _texto_colision(cl):
+    """Que comparten las dos sesiones, en una linea. Se compone al pintar y no se
+    guarda hecha: el idioma se decide aqui, no cuando se observo el hecho."""
+    if not cl:
+        return ""
+    # Del fichero se ensenan las DOS ultimas partes de la ruta, no la ruta entera: el
+    # panel mide unas 48 columnas y un path absoluto se come la linea y sale cortado
+    # justo por donde informa, que es el final. `src/webhooks.py` distingue tanto como
+    # `/Users/tu/code/checkout-api/src/webhooks.py` y cabe.
+    donde = (" · ".join("/".join(f.rsplit("/", 2)[-2:]) for f in cl["ficheros"][:3])
+             if cl["ficheros"]
+             else _("same folder") if cl["mismo_directorio"] else _("same repo"))
+    trozos = [cl.get("titulo") or cl.get("con") or "", donde]
+    if cl.get("orden_ancha"):
+        trozos.append(_("you are about to run {v} here", v=cl["orden_ancha"])
+                      if cl.get("orden_es_mia")
+                      else _("{v} in a repo another session is editing",
+                             v=cl["orden_ancha"]))
+    if cl.get("segundos_desde_la_ultima") is not None:
+        trozos.append(_("{n} writes, the last one {t} ago",
+                        n=cl["escrituras_recientes"],
+                        t=_lapso(cl["segundos_desde_la_ultima"])))
+    return " · ".join(x for x in trozos if x)
+
+
 # El argumento que identifica una llamada cambia por herramienta: de un Bash lo que
 # importa es el comando, de un Edit el fichero. Nombre a secas ("Bash") no distingue
 # compilar de borrar media carpeta.
@@ -1546,7 +1967,7 @@ def barra(valor, tope, celdas=5):
     return "\u25b0" * llenas + "\u25b1" * (celdas - llenas)
 
 
-COL_BASE = 3 + 2 + 9 + 1   # margen+canal+margen, estado, tiempo, marca adjunta
+COL_BASE = 3 + 3 + 9 + 1   # margen+canal+margen, estado+choque, tiempo, marca adjunta
 COL_CTX = 10              # barra de 5 celdas + " 88%"
 COL_RAM = 8               # "  1.6 GB" + el blanco que la separa de la marca
 COL_SEP = 3               # los dos blancos del titulo + el relleno del proyecto
@@ -2127,12 +2548,22 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # La herramienta gana sobre "escribe": el tool_use acaba de escribirse
                 # en el transcript, asi que las dos son ciertas a la vez y la que
                 # informa es la segunda ("esta corriendo algo"), no la primera.
+                # El choque va en SU columna, entre el estado y el titulo. Meterlo en
+                # el blanco que ya habia detras del estado salia gratis pero dejaba el
+                # simbolo pegado a la primera letra —`\u25d0\u29c9Refactor`— y eso se lee como un
+                # fallo de pintado, no como un aviso. La columna se paga en COL_BASE y
+                # el titulo solo la nota por debajo de ~50 columnas, porque `reparto` ya
+                # lo topa en T_COMODO. `\u29c9` mide UNA columna (east_asian_width 'N').
+                col = r.get("colision") or {}
                 if pu.get("herramienta"):
-                    put("\u25d0 ", 7, curses.A_BOLD)       # esperando a su comando
+                    put("\u25d0", 7, curses.A_BOLD)       # esperando a su comando
                 elif pu.get("escribe"):
-                    put("\u25cf ", 9, curses.A_BOLD)       # escribiendo la respuesta
+                    put("\u25cf", 9, curses.A_BOLD)        # escribiendo la respuesta
                 else:
-                    put("  ")
+                    put(" ")
+                put("\u29c9" if col else " ",
+                    5 if (col.get("nivel") or 0) >= 3 else 7, curses.A_BOLD)
+                put(" ")
                 titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
                                  anchura_t)
                 put(titulo, 2 if marcada else (5 if sin_rastro else 0),
@@ -2238,7 +2669,13 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # Los metadatos se anclan ABAJO y el texto fluye desde arriba: asi las
                 # etiquetas caen siempre en la misma linea y el ojo no las persigue
                 # cuando el prompt de la sesion de al lado ocupa el doble.
+                # El choque va ARRIBA del todo, por delante de lo que la sesion esta
+                # haciendo: si dos escriben en el mismo fichero, eso es lo primero que hay
+                # que leer del panel, no el ultimo prompt.
+                cl = rows[cur].get("colision")
                 bloques = [b for b in (
+                    ((_("\u25b8 another session is writing here too"),
+                      _texto_colision(cl), 5, 3) if cl else None),
                     ((_("\u25b8 right now"), d.get("tool"), 7, 2)
                      if (rows[cur].get("pulso") or {}).get("herramienta") else None),
                     (_("\u25b8 what you last said"), ult, 6, 4),
@@ -2352,6 +2789,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     (_("outside"), _("--watch: tells you when one stops and waits")),
                     ("", _("--find \"text\": searches what was said")),
                     ("", _("--json: for statuslines and scripts")),
+                    ("", _("\u29c9 in a row: another session is writing in the same place")),
                 ]
                 alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
                 teclas = teclas[:max(0, alto_v - 4)]
@@ -2871,6 +3309,19 @@ def _T():
         "Don't know how to open that one.": "No sé cómo abrir esa.",
         "Don't know how to open {s}.": "No sé cómo abrir {s}.",
         "ENTER": "ENTER",
+        "▸ another session is writing here too": "▸ otra sesión escribe aquí también",
+        "⧉ in a row: another session is writing in the same place":
+            "⧉ en una fila: otra sesión escribe en el mismo sitio",
+        "clashes with another session": "choca con otra sesión",
+        "same folder": "misma carpeta",
+        "same repo": "mismo repo",
+        "two sessions in the same place": "dos sesiones en el mismo sitio",
+        "you are about to run {v} here": "vas a lanzar {v} aquí",
+        "{hora}  ⧉ {a} and {b} are writing in the same place":
+            "{hora}  ⧉ {a} y {b} escriben en el mismo sitio",
+        "{n} writes, the last one {t} ago": "{n} escrituras, la última hace {t}",
+        "{v} in a repo another session is editing":
+            "{v} en un repo que otra sesión está editando",
         "activity": "actividad",
         "copied: {s}": "copiado: {s}",
         "copy the session id": "copiar el id de la sesión",
