@@ -45,6 +45,9 @@ sereno
 - [Uso](#-uso)
 - [De dónde salen los datos](#-de-dónde-salen-los-datos)
 - [Comparativa](#-comparativa)
+- [Privacidad](#-privacidad)
+- [Requisitos](#-requisitos)
+- [Preguntas frecuentes](#-preguntas-frecuentes)
 - [Configuración](#-configuración)
 - [Sobre el código](#-sobre-el-código)
 - [Contribuir](#-contribuir)
@@ -218,6 +221,102 @@ el diseño.
 
 Si lo que quieres es *lanzar* una flota de agentes, usa uno de esos — y luego usa este para ver
 qué está haciendo la flota.
+
+---
+
+## 🔒 Privacidad
+
+Lee tus prompts y las respuestas de tu agente para pintarlos en tu pantalla. Eso merece una
+respuesta directa, no una promesa:
+
+**`sereno` no tiene una sola línea de red.** Ni `socket`, ni `urllib`, ni `requests` — la lista
+entera de imports es `os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib,
+unicodedata` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
+nada capaz de mandar nada a ningún sitio.
+
+Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
+sesiones), `open` (pasarle una sesión a Warp) y `defaults` (leer tu locale en macOS). Sin
+telemetría, sin analíticas, sin comprobación de actualizaciones.
+
+`tests/test_sin_red.py` recorre el AST en cada vuelta de CI y falla si aparece un import de red,
+o un binario externo que no esté en esa lista. No hace falta que me creas: el test *es* la
+palabra.
+
+---
+
+## ✅ Requisitos
+
+| | |
+|:--|:--|
+| **macOS** | funciona, y es donde se construyó |
+| **Linux** | funciona — el CI arranca el TUI de verdad en un pty sobre Ubuntu |
+| **Windows** | no. `curses` no está en la librería estándar de Python ahí. **Con WSL, sí** |
+| **Python** | 3.8 o más nuevo, sin paquetes |
+| **Terminal** | cualquiera. Usa 256 colores si los hay y degrada con elegancia si no |
+
+---
+
+## 🩺 Preguntas frecuentes
+
+<details>
+<summary><strong>Lo he instalado y no sale nada</strong></summary>
+
+<br>
+
+Mira `ls ~/.claude/projects`, que es lo único que necesita. Si la carpeta está vacía es que no
+has usado Claude Code en esta máquina (o `$HOME` no es el que crees, cosa que pasa bajo `sudo`).
+
+Si lista sesiones pero faltan las que esperabas, seguramente estén en la pestaña
+**`historial`** y no en `claude`: todo aquello cuyo transcript lleve más de 90 segundos quieto
+cuenta como reanudable, no como vivo. Pulsa `TAB`.
+
+</details>
+
+<details>
+<summary><strong>`x` me dice «historial, no procesos: no hay nada que cerrar»</strong></summary>
+
+<br>
+
+Correcto, y a propósito. Sin tmux no hay proceso que matar: la sesión es un fichero en disco.
+`sereno` se niega en vez de fingir que ha hecho algo. Usa `ENTER` para reanudarla, o borra tú el
+transcript si lo que quieres es que desaparezca.
+
+</details>
+
+<details>
+<summary><strong>La columna de memoria está vacía</strong></summary>
+
+<br>
+
+La memoria es por proceso, y solo conoce el proceso si la sesión corre dentro de tmux bajo el
+socket que vigila (`SERENO_TMUX_SOCK`, por defecto `claude-code`). Lo demás sigue funcionando.
+
+</details>
+
+<details>
+<summary><strong>¿Ralentiza algo? ¿Toca mis sesiones?</strong></summary>
+
+<br>
+
+Lee la **cola** de 40 transcripts como mucho y cachea por fecha de modificación: 4 ms para los
+vivos, 16 ms para el historial completo, medido sobre 1.248 transcripts y 3,8 GB. Nunca escribe
+en un transcript. Lo único que escribe es un fichero de arranque de Warp, y solo cuando pulsas
+`ENTER` en una máquina que tiene Warp.
+
+</details>
+
+<details>
+<summary><strong>¿Cómo lo desinstalo?</strong></summary>
+
+<br>
+
+```bash
+rm ~/.local/bin/sereno
+```
+
+Ya está. No crea configuración, ni caché, ni carpeta de estado propia.
+
+</details>
 
 ---
 
