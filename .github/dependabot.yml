@@ -1,0 +1,10 @@
+# Las actions del CI van fijadas por SHA, y un SHA no caduca solo: sin esto se quedan
+# en la version del dia que se escribieron. Dependabot abre el PR que las sube.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"
