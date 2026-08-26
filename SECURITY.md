@@ -52,3 +52,5 @@ but a title Claude generated for itself does describe what you were working on.
 - CI actions are pinned by commit SHA, not by tag, and the workflow token is read-only.
 - Releases are built from a tagged commit on `main`. If a download's contents differ from
   the file in the repository at that tag, don't run it and tell me.
+- Commits from 2026-08-26 onwards are signed with an SSH key registered to my GitHub account,
+  so GitHub marks them Verified. An unsigned or unverified commit on `main` is not mine.
