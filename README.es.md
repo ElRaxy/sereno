@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/hero.webp" alt="Un sereno con su manojo de llaves levanta el farol en una calle empedrada donde los portales son ventanas de terminal, unas cuantas encendidas" width="880">
+
 # sereno
 
 ### Nueve sesiones de agente abiertas. ¿Cuál está atascada?

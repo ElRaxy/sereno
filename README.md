@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/hero.webp" alt="A Spanish night watchman with his ring of door keys, raising a lantern in a cobbled street where the doorways are terminal windows, a few of them lit" width="880">
+
 # sereno
 
 ### Nine agent sessions open. Which one is stuck?
