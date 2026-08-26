@@ -157,7 +157,18 @@ cadena de suministro. Lo mandas por `scp` a un servidor y funciona allí tambié
 ```bash
 sereno            # el selector
 sereno --list     # lista y ya, no toca nada
+sereno --json     # los mismos hechos, para tu statusline o tus scripts
 sereno --help
+```
+
+`--json` te da cada sesión con un `state` estable
+(`writing` · `in_command` · `waiting` · `stopped` · `unknown`), sus cifras de contexto, la
+memoria y los segundos parada. **No lleva conversación dentro**: ni prompt, ni respuesta, ni
+nada de lo que se dijo. El selector puede enseñártelo porque estás mirando tu propia pantalla;
+un pipe no, así que no lo hace. Hay un test que falla si algún campo cuela una.
+
+```bash
+sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
 ```
 
 | tecla | |

@@ -13,6 +13,7 @@ optional and only add live process control; without them everything is read from
 
   sereno                 the visual picker (arrows/mouse, SPACE marks, ENTER opens)
   sereno --list          plain list, touches nothing
+  sereno --json          the same facts as JSON, without any conversation in it
   sereno --hook          one line if there is anything (for your shell rc)
   sereno --yes           reopen as tabs without asking
   sereno --dismiss       drop the orphan entries without reopening them
@@ -601,6 +602,71 @@ def sesiones_demo():
     for r in rows:
         r["_det"]["fase"] = _fase(r)
     return rows
+
+
+# `_fase()` devuelve una frase traducida, que es lo correcto para una persona y lo peor
+# posible para un script: cambia con el idioma y con cualquier retoque de estilo. El
+# JSON lleva este enum, que es lo unico que se promete estable.
+def estado_estable(r):
+    pu = r.get("pulso") or {}
+    if pu.get("escribe") is None:
+        return "unknown"
+    if pu.get("herramienta"):
+        return "in_command"
+    if pu.get("escribe"):
+        return "writing"
+    return "waiting" if (r.get("idle") or 0) < 6 * INACTIVA else "stopped"
+
+
+def filas_json(rows):
+    """Los mismos hechos que pinta la lista, sin una linea de conversacion dentro.
+
+    Deliberadamente NO salen el ultimo prompt ni la ultima respuesta, que si estan en el
+    panel. Un `--json` se canaliza a barras de estado, a scripts de otros y a lo que a
+    nadie se le ocurre: la promesa de que aqui no sale nada de la maquina solo se
+    sostiene si lo que este comando imprime no lleva conversacion. Lo vigila
+    `tests/test_json_sin_conversacion.py`, que ademas fija los tipos.
+    """
+    fuera = []
+    for r in rows:
+        pu = r.get("pulso") or {}
+        ctx = pu.get("ctx")
+        fuera.append({
+            "id": r.get("name") or "",
+            "title": r.get("title_full") or r.get("title") or "",
+            "project": r.get("proyecto") or "",
+            "branch": r.get("rama") or "",
+            "source": r.get("fuente", "claude"),
+            "state": estado_estable(r),
+            # Los dos hechos crudos de los que sale `state`, para quien prefiera
+            # componer el suyo en vez de fiarse del nuestro.
+            "writing": pu.get("escribe"),
+            "tool_pending": pu.get("herramienta"),
+            "idle_seconds": None if r.get("idle") is None else round(r["idle"]),
+            "attached": bool(r.get("attached")),
+            "memory_mb": None if r.get("mem_mb") is None else round(r["mem_mb"]),
+            "context_tokens": ctx,
+            "context_max": tope_contexto(pu.get("modelo"), ctx) if ctx else None,
+            "model": pu.get("modelo"),
+            "pid": r.get("pid") or None,
+        })
+    return fuera
+
+
+def print_json(rows):
+    print(json.dumps({"sereno": VERSION, "sessions": filas_json(rows)},
+                     indent=2, ensure_ascii=False))
+
+
+def fila_de_huerfana(e):
+    """Una entrada del registro con forma de fila. Vive fuera de `main()` porque la
+    quieren dos sitios: el selector de recuperacion y `--json`."""
+    titulo = ai_title(e) or label(e, 200)
+    return {"name": e.get("id", ""), "created": int(e.get("started_epoch") or 0),
+            "attached": False, "meta": e, "pid": "", "mem_mb": None,
+            "title": label(e), "title_full": titulo,
+            "idle": idle_secs(e), "working": False,
+            "pulso": {"escribe": False, "herramienta": False}}
 
 
 def print_live(rows):
@@ -2333,6 +2399,9 @@ def main():
         if hook:
             hook_line(live_sessions(), None)
             return 0
+        if "--json" in argv:
+            print_json(sesiones_demo())
+            return 0
         if "--list" in argv or not sys.stdin.isatty():
             print_live(sesiones_demo())
             return 0
@@ -2378,6 +2447,10 @@ def main():
     if rows:
         if hook:
             hook_line(rows, None)      # al abrir terminal: una linea, no un menu
+            return 0
+
+        if "--json" in argv:
+            print_json(live_sessions(con_ram=True))
             return 0
 
         ejecutando = sum(1 for r in rows if r["working"])
@@ -2449,6 +2522,9 @@ def main():
         if hist:
             if hook or not sys.stdin.isatty():
                 return 0           # al abrir terminal no se avisa de historial viejo
+            if "--json" in argv:
+                print_json(hist)
+                return 0
             if "--list" in argv:
                 print("\n\033[1m" + _("{n} resumable session(s):", n=len(hist)) + "\033[0m")
                 print_live(hist)
@@ -2459,6 +2535,10 @@ def main():
             return 0
 
     resumable = [e for e in items if e.get("id") and e.get("_transcript")]
+
+    if "--json" in argv:
+        print_json([fila_de_huerfana(e) for e in items])
+        return 0
 
     if "--list" in argv:
         if not items:
@@ -2493,14 +2573,6 @@ def main():
         archive(items, "dismissed")
         return 0
 
-    def _fila(e):
-        titulo = ai_title(e) or label(e, 200)
-        return {"name": e.get("id", ""), "created": int(e.get("started_epoch") or 0),
-                "attached": False, "meta": e, "pid": "", "mem_mb": None,
-                "title": label(e), "title_full": titulo,
-                "idle": idle_secs(e), "working": False,
-                "pulso": {"escribe": False, "herramienta": False}}
-
     if "--yes" not in argv and sys.stdin.isatty():
         # Mismo selector que para las vivas: marcar = quitarlas de en medio,
         # r = reanudarlas. Un apagon deja aqui una lista larga y no todas interesan.
@@ -2515,9 +2587,9 @@ def main():
                 subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
                 aviso = f"{len(elegidas)} reanudada(s) -> {path.name}"
             quedan = [e for e in orphans() if e.get("id") and e.get("_transcript")]
-            return aviso, [_fila(e) for e in quedan]
+            return aviso, [fila_de_huerfana(e) for e in quedan]
 
-        accion = pick_ui([_fila(e) for e in resumable], muertas=True, ejecutar=ejecutar_h)
+        accion = pick_ui([fila_de_huerfana(e) for e in resumable], muertas=True, ejecutar=ejecutar_h)
         if accion is None:
             print(cabecera)
             for e in items:

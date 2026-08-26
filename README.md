@@ -157,7 +157,18 @@ Python 3.8+. That's the whole dependency list. No venv, no lock file, no supply 
 ```bash
 sereno            # the picker
 sereno --list     # plain list, touches nothing
+sereno --json     # the same facts, for your statusline or your scripts
 sereno --help
+```
+
+`--json` gives you every session with a stable `state`
+(`writing` · `in_command` · `waiting` · `stopped` · `unknown`), its context figures, memory and
+idle seconds. **It carries no conversation** — no prompt, no reply, nothing that was said. The
+picker can show you that because you are looking at your own screen; a pipe cannot, so it
+doesn't. A test fails if a field ever sneaks one in.
+
+```bash
+sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
 ```
 
 | key | |
