@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/hero.webp" alt="A night watchman raising a lantern to a wall of terminal windows, four of them lit" width="880">
+<img src="docs/hero.webp" alt="A Spanish night watchman with his ring of door keys, raising a lantern in a cobbled street where the doorways are terminal windows, a few of them lit" width="880">
 
 # sereno
 
