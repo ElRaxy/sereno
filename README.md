@@ -136,19 +136,63 @@ test that fails if it ever does.
 
 ## ⚡ Install
 
+There is nothing to install, really. `sereno` is one Python file. Every route below ends with
+that same file sitting somewhere on your `PATH`.
+
+**The one-liner**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ElRaxy/sereno/main/install.sh | sh
 ```
 
-Or just take the file — it's one script and the standard library:
+**From the Releases page, no piping into a shell**
+
+If you'd rather not pipe a script from the internet into `sh` — and you shouldn't, as a habit —
+go to [**Releases**](https://github.com/ElRaxy/sereno/releases/latest), download the `sereno`
+asset in your browser, and then:
 
 ```bash
-curl -fsSLo ~/.local/bin/sereno https://raw.githubusercontent.com/ElRaxy/sereno/main/sereno
-chmod +x ~/.local/bin/sereno
+chmod +x ~/Downloads/sereno && mv ~/Downloads/sereno ~/.local/bin/
 ```
 
-Python 3.8+. That's the whole dependency list. No venv, no lock file, no supply chain.
-`scp` it to a server and it runs there too.
+Each release ships a `SHA256SUMS` file next to it. To check what you downloaded is what I
+published:
+
+```bash
+cd ~/Downloads && shasum -a 256 -c SHA256SUMS      # sha256sum -c on Linux
+```
+
+**From the repository page**
+
+Open [`sereno`](https://github.com/ElRaxy/sereno/blob/main/sereno) and use GitHub's download
+button. It's the same file the installer fetches, at whatever `main` says today.
+
+**With git, if you'd rather follow along**
+
+```bash
+git clone https://github.com/ElRaxy/sereno.git && ln -s "$PWD/sereno/sereno" ~/.local/bin/sereno
+```
+
+The symlink means `git pull` updates the command.
+
+**Read the installer before running it**
+
+```bash
+curl -fsSLo /tmp/install.sh https://raw.githubusercontent.com/ElRaxy/sereno/main/install.sh
+less /tmp/install.sh && sh /tmp/install.sh
+```
+
+It's 32 lines: it checks you have Python 3.8+, downloads one file into `~/.local/bin`, and
+tells you if that directory isn't on your `PATH`. Set `SERENO_BIN` to put it elsewhere.
+
+---
+
+Python 3.8+ is the whole dependency list. No venv, no lock file, no supply chain. `scp` it to a
+server and it runs there too. To uninstall, delete the file.
+
+> **No Homebrew, no package manager, and that's deliberate.** A formula is a second copy of the
+> version number that goes stale the week you forget it. If enough people ask, I'll reconsider —
+> [open an issue](https://github.com/ElRaxy/sereno/issues).
 
 ---
 
@@ -313,6 +357,9 @@ The alert carries the title and the project, never the conversation.
 `tests/test_sin_red.py` walks the AST on every CI run and fails if a networking import appears,
 or if a new external binary shows up that isn't on that list. You don't have to take my word
 for it — the test *is* the word.
+
+[`SECURITY.md`](SECURITY.md) has the full list of what it reads, what it writes and what it
+runs, and it's where to report anything exploitable.
 
 ---
 

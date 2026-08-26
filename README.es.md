@@ -136,19 +136,64 @@ un test que falla si algún día lo hace.
 
 ## ⚡ Instalación
 
+En realidad no hay nada que instalar. `sereno` es un fichero de Python. Todas las vías de abajo
+acaban con ese mismo fichero en algún sitio de tu `PATH`.
+
+**La de una línea**
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ElRaxy/sereno/main/install.sh | sh
 ```
 
-O te llevas el fichero, que es un script y la librería estándar:
+**Desde la página de Releases, sin meter un script en la shell**
+
+Si prefieres no pasar un script de internet por `sh` —y como costumbre, mejor no—, entra en
+[**Releases**](https://github.com/ElRaxy/sereno/releases/latest), descarga el fichero `sereno`
+desde el navegador y luego:
 
 ```bash
-curl -fsSLo ~/.local/bin/sereno https://raw.githubusercontent.com/ElRaxy/sereno/main/sereno
-chmod +x ~/.local/bin/sereno
+chmod +x ~/Downloads/sereno && mv ~/Downloads/sereno ~/.local/bin/
 ```
 
-Python 3.8 o más nuevo. Esa es la lista completa de dependencias. Ni venv, ni lock file, ni
-cadena de suministro. Lo mandas por `scp` a un servidor y funciona allí también.
+Cada release lleva al lado un `SHA256SUMS`. Para comprobar que lo que has descargado es lo que
+publiqué:
+
+```bash
+cd ~/Downloads && shasum -a 256 -c SHA256SUMS      # sha256sum -c en Linux
+```
+
+**Desde la página del repositorio**
+
+Abre [`sereno`](https://github.com/ElRaxy/sereno/blob/main/sereno) y usa el botón de descarga de
+GitHub. Es el mismo fichero que baja el instalador, en la versión que tenga `main` hoy.
+
+**Con git, si prefieres seguir los cambios**
+
+```bash
+git clone https://github.com/ElRaxy/sereno.git && ln -s "$PWD/sereno/sereno" ~/.local/bin/sereno
+```
+
+Con el enlace simbólico, un `git pull` actualiza el comando.
+
+**Leer el instalador antes de ejecutarlo**
+
+```bash
+curl -fsSLo /tmp/install.sh https://raw.githubusercontent.com/ElRaxy/sereno/main/install.sh
+less /tmp/install.sh && sh /tmp/install.sh
+```
+
+Son 32 líneas: comprueba que tienes Python 3.8 o más nuevo, baja un fichero a `~/.local/bin` y
+te avisa si esa carpeta no está en tu `PATH`. Con `SERENO_BIN` lo pones en otro sitio.
+
+---
+
+Python 3.8 o más nuevo es la lista completa de dependencias. Ni venv, ni lock file, ni cadena de
+suministro. Lo mandas por `scp` a un servidor y funciona allí también. Para desinstalarlo,
+borras el fichero.
+
+> **Ni Homebrew ni gestor de paquetes, y es a propósito.** Una fórmula es una segunda copia del
+> número de versión que se queda vieja la semana que se te olvide. Si lo pide bastante gente me
+> lo replanteo: [abre un issue](https://github.com/ElRaxy/sereno/issues).
 
 ---
 
@@ -316,6 +361,9 @@ conversación.
 `tests/test_sin_red.py` recorre el AST en cada vuelta de CI y falla si aparece un import de red,
 o un binario externo que no esté en esa lista. No hace falta que me creas: el test *es* la
 palabra.
+
+En [`SECURITY.md`](SECURITY.md) está la lista completa de lo que lee, lo que escribe y lo que
+ejecuta, y es donde se reporta cualquier cosa explotable.
 
 ---
 
