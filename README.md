@@ -281,8 +281,8 @@ look at the frames before you commit them.
 
 ## 👤 Credits
 
-Built by **[Alex Micó](https://github.com/ElRaxy)**, who runs [Anubis Solutions](https://anubis.es)
-and had nine Claude Code tabs open at the time.
+Built by **[Alex Micó](https://github.com/ElRaxy)**, who had nine Claude Code tabs open at
+the time and no idea which one to go back to.
 
 Written with **Claude Code (Opus 5)** as co-author — including the afternoon spent discovering
 that macOS ships a 2015 ncurses. Fitting, for a tool whose whole job is watching Claude Code

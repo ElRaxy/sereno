@@ -281,8 +281,8 @@ los fotogramas antes de commitearlos.
 
 ## 👤 Créditos
 
-Hecho por **[Alex Micó](https://github.com/ElRaxy)**, que lleva [Anubis Solutions](https://anubis.es)
-y tenía nueve pestañas de Claude Code abiertas en ese momento.
+Hecho por **[Alex Micó](https://github.com/ElRaxy)**, que tenía nueve pestañas de Claude Code
+abiertas y ni idea de a cuál volver.
 
 Escrito con **Claude Code (Opus 5)** de coautor — incluida la tarde que se fue en descubrir que
 macOS trae un ncurses de 2015. Apropiado, para una herramienta cuyo trabajo es vigilar sesiones de

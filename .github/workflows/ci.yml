@@ -32,3 +32,5 @@ jobs:
         run: python tests/test_demo_aislado.py
       - name: los textos traducidos casan con las claves
         run: python tests/test_i18n.py
+      - name: el TUI arranca en un pty, pinta y sale
+        run: python tests/test_tui_arranca.py
