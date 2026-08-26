@@ -737,6 +737,14 @@ def buscar(aguja, limite=200, todo=False):
     if not todo:
         cands = cands[:limite]
 
+    # Cuatro segundos de silencio con `--all` sobre 3,4 GB parecen un cuelgue. El aviso
+    # va por stderr para no ensuciar la salida de quien la canalice, y solo cuando hay
+    # bastante que leer: decirlo para tres ficheros es ruido.
+    peso = sum(p.stat().st_size for _mt, p in cands if p.exists())
+    if peso > 200 * 1024 * 1024:
+        print(_("searching {n} transcripts ({g} GB)\u2026",
+                n=len(cands), g=f"{peso / 1e9:.1f}"), file=sys.stderr)
+
     salida = []
     for mt, p in cands:
         try:
@@ -1988,6 +1996,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     (_("mouse"), _("click selects, double click opens")),
                     ("", _("right click, or click the bar on the left: mark")),
                     ("", _("wheel scrolls; tabs and buttons below are clickable")),
+                    ("", ""),
+                    # Quien vive dentro del selector no se entera de que existen los
+                    # tres modos que no abren interfaz. Aqui es donde va a mirar.
+                    (_("outside"), _("--watch: tells you when one stops and waits")),
+                    ("", _("--find \"text\": searches what was said")),
+                    ("", _("--json: for statuslines and scripts")),
                 ]
                 alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
                 teclas = teclas[:max(0, alto_v - 4)]
@@ -1997,6 +2011,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 win.box()
                 win.attrset(0)
                 win.addnstr(1, 3, _("Keys"), ancho_v - 6, C(6) | curses.A_BOLD)
+                # Como se sale, escrito en el propio marco. Un modal sin salida a la
+                # vista hace probar teclas, y aqui casi todas hacen algo.
+                cierre = " " + _("any key closes") + " "
+                if ancho_v > ancho(cierre) + 6:
+                    win.addnstr(alto_v - 1, ancho_v - ancho(cierre) - 3, cierre,
+                                ancho(cierre), C(4))
                 for k, (tec, txt) in enumerate(teclas):
                     if tec:
                         win.addnstr(3 + k, 3, f"{tec:<11}", 11, C(7) | curses.A_BOLD)
@@ -2515,6 +2535,14 @@ def _T():
         "mark all / invert": "marcar todas / invertir",
         "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
         "memory": "memoria",
+        "searching {n} transcripts ({g} GB)\u2026": "buscando en {n} transcripts ({g} GB)\u2026",
+        "any key closes": "cualquier tecla cierra",
+        "outside": "fuera",
+        "--watch: tells you when one stops and waits":
+            "--watch: te avisa cuando una para y te espera",
+        "--find \"text\": searches what was said":
+            "--find \"texto\": busca en lo que se dijo",
+        "--json: for statuslines and scripts": "--json: para statuslines y scripts",
         "No sessions, and {d} does not exist.":
             "No hay sesiones, y {d} no existe.",
         "That folder is written by Claude Code itself, so this "
