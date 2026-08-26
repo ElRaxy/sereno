@@ -438,6 +438,8 @@ subagente hasta que se filtraron.
 
 ---
 
+Los cambios entre versiones están en [CHANGELOG.md](CHANGELOG.md).
+
 ## 🤝 Contribuir
 
 Issues y pull requests bienvenidos, en castellano o en inglés. Dos cosas que el CI comprueba por

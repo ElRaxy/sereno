@@ -438,6 +438,8 @@ until they were filtered out.
 
 ---
 
+Changes between versions are in [CHANGELOG.md](CHANGELOG.md).
+
 ## 🤝 Contributing
 
 Issues and pull requests welcome, in English or Spanish. Two things CI checks for you, and both
