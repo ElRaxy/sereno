@@ -1724,7 +1724,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # avisa, aborta con `addnwstr() returned ERR` y se lleva el programa. Lo
             # cazo el test del pty en el CI, donde la ventana es pequena.
             ancho_lista = max(12, min(ancho_lista, w - 2))
-            ancho_det = max(0, w - ancho_lista - 3) if lateral else 0
+            # El panel arranca en `ancho_lista + 4`, asi que lo que le cabe se mide
+            # DESDE ahi, y sobra una columna al final: escribir en la ultima de la fila
+            # hace que curses envuelva el sobrante al principio de la SIGUIENTE, y
+            # aparecia un caracter suelto pegado al borde izquierdo dos filas mas
+            # abajo. Se veia en las capturas y parecia suciedad del terminal.
+            ancho_det = max(0, w - (ancho_lista + 4) - 1) if lateral else 0
             if lateral and ancho_det < 26:
                 lateral, ancho_det, ancho_lista = False, 0, anchura_t + fijas
             fila0 = 2
