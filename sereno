@@ -1,0 +1,2409 @@
+#!/usr/bin/env python3
+"""sereno - see what every coding-agent session on your machine is actually doing.
+
+A single-file, stdlib-only terminal UI over the sessions of Claude Code (and the
+history of Codex, Gemini and Antigravity). It does not just list them: for each one
+it reads the transcript and says whether the agent is writing, blocked on a command
+of its own, or waiting on you - plus how much memory it eats, what you last asked
+and what it last answered.
+
+Nothing is required beyond Python 3.8 and the CLI you already use. tmux and Warp are
+optional and only add live process control; without them everything is read from
+~/.claude/projects, which the CLI itself writes.
+
+  sereno                 the visual picker (arrows/mouse, SPACE marks, ENTER opens)
+  sereno --list          plain list, touches nothing
+  sereno --hook          one line if there is anything (for your shell rc)
+  sereno --yes           reopen as tabs without asking
+  sereno --dismiss       drop the orphan entries without reopening them
+  sereno --close-sel "1,4-6"   close without opening the picker (for scripts)
+  sereno --stop-sel  "idle"    stop them but leave them resumable
+
+Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
+SERENO_TMUX_SOCK, SERENO_REGISTRY.
+
+Los comentarios de este fichero estan en castellano a proposito: explican POR QUE
+esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
+
+MIT licence. https://github.com/ElRaxy/sereno
+"""
+import os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib, unicodedata
+
+HOME = pathlib.Path.home()
+# El nombre con el que te han invocado: el repo lo instala como `sereno`, pero por un
+# symlink puede llamarse de otra forma y los mensajes deben decir lo que tecleaste.
+PROG = pathlib.Path(sys.argv[0]).name or "sereno"
+
+
+def _env(nombre, defecto=""):
+    """SERENO_X, y si no CLAUDE_X. Lo segundo es compatibilidad con la version que
+    vivia dentro de mi monorepo; sin ella, mi propia maquina dejaria de funcionar."""
+    return os.environ.get("SERENO_" + nombre) or os.environ.get("CLAUDE_" + nombre) or defecto
+
+
+ROOT = pathlib.Path(_env("REGISTRY") or _env("WARP_REG")
+                    or HOME / ".claude/warp-sessions")
+LIVE = ROOT / "live"
+LAUNCH = HOME / ".warp/launch_configurations"
+CONFIG_NAME = "claude-restore"
+# Un transcript tocado hace menos de esto es una sesion viva. Es el mismo umbral que
+# usa `pulso()` para decidir si esta escribiendo: dos numeros distintos harian que la
+# lista y el panel se contradijeran delante del usuario.
+VIVA = 90
+# Alfabetico ponia "antigravity" delante de "historial" y "codex": el orden util es
+# por cercania a lo que estas mirando, no por la inicial.
+ORDEN_FUENTES = ["claude", "historial", "codex", "gemini", "antigravity"]
+# El valor interno se queda en castellano (es la clave de `fuente` en cada fila); lo
+# que se traduce es la etiqueta que se pinta.
+_ETIQUETAS = {"todas": "all", "historial": "history"}
+
+
+def etiqueta_fuente(nombre):
+    return _(_ETIQUETAS.get(nombre, nombre))
+
+
+# ─────────────────────────── idioma de la interfaz ───────────────────────────
+# Se traduce lo que sale por pantalla; los comentarios y los nombres de variables se
+# quedan en castellano a proposito: reescribirlos no ayuda a nadie y se pierde matiz.
+# La CLAVE es la cadena inglesa, asi que una cadena sin traducir sale en ingles — no
+# revienta ni deja un identificador crudo delante del usuario.
+_IDIOMAS = ("en", "es")
+
+
+def _detecta_idioma():
+    """`CLAUDE_SESSIONS_LANG` manda; si no, el locale; si no, ingles.
+
+    En macOS hay que preguntarle a `defaults`: la terminal suele traer `LANG=C.UTF-8`
+    —medido en esta maquina— y por ahi no se distingue un espanol de un japones.
+    """
+    v = _env("LANG")[:2].lower()
+    if v in _IDIOMAS:
+        return v
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        v = os.environ.get(var, "")[:2].lower()
+        if v in _IDIOMAS:
+            return v
+    if sys.platform == "darwin":
+        try:
+            v = subprocess.run(["defaults", "read", "-g", "AppleLocale"],
+                               capture_output=True, text=True, timeout=3).stdout[:2].lower()
+            if v in _IDIOMAS:
+                return v
+        except Exception:
+            pass
+    return "en"
+
+
+LANG_UI = _detecta_idioma()
+TEXTOS = {"es": {}}          # lo rellena _T() al final del fichero
+
+
+def _(clave, **kw):
+    t = TEXTOS.get(LANG_UI, {}).get(clave, clave)
+    return t.format(**kw) if kw else t
+
+
+def read_entry(path):
+    data = {}
+    try:
+        for line in path.read_text().splitlines():
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            try:
+                parts = shlex.split(v)
+            except ValueError:
+                parts = [v]
+            key = k.strip()
+            data[key] = parts[0] if parts else ""
+            data[key + "__list"] = parts
+    except OSError:
+        return None
+    data["_file"] = path
+    return data
+
+
+def alive(pid):
+    """Vivo = el PID existe Y su linea de comando menciona claude (evita reuso de PID)."""
+    if not pid or not str(pid).isdigit() or int(pid) <= 1:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ProcessLookupError, PermissionError):
+        return False
+    try:
+        out = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return True  # si no se puede comprobar, no la tratamos como muerta
+    return "claude" in out
+
+
+def transcript_of(e):
+    pd, sid = e.get("project_dir"), e.get("id")
+    if not pd or not sid:
+        return None
+    p = pathlib.Path(pd) / f"{sid}.jsonl"
+    return p if p.is_file() else None
+
+
+_SALUDO = re.compile(
+    r"^(hola|buenas|buenos d[ií]as|buenas tardes|buenas noches|oye|vale|okey|ok|"
+    r"perfecto|gracias)[\s,.:;!¡-]*", re.I)
+
+
+def _strip_saludo(t):
+    prev = None
+    while t and t != prev:          # "Buenas, hola oye ..." se pela en varias vueltas
+        prev = t
+        t = _SALUDO.sub("", t, count=1).lstrip()
+    return t or prev or ""
+
+
+# ───────────────────────────── capa tmux ─────────────────────────────
+# Con tmux debajo, "que sesiones siguen vivas" ya no se deduce de PIDs muertos:
+# lo dice `tmux list-sessions`. El registro solo aporta metadatos (titulo, flags).
+TMUX_BIN = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
+# Socket parametrizable: el valor real es "claude-code"; la variable solo existe
+# para poder probar este script contra un servidor tmux de juguete.
+SOCK = _env("TMUX_SOCK", "claude-code")
+
+
+# Titulos que el binario emite cuando no tiene nada mejor: no identifican nada.
+_TITULO_GENERICO = {"", "claude code", "claude", "zsh", "bash", "-zsh", "tmux"}
+
+
+def tmux_list():
+    """[(nombre, creada, enganchada, titulo, pid)] de las sesiones vivas.
+
+    `pane_title` es la via buena para el titulo: Claude Code emite ahi el nombre
+    de `/rename` (y si no, su aiTitle), asi que sale en vivo y sin abrir ningun
+    fichero. Se pide con list-panes porque list-sessions no expone pane_title;
+    de una sesion con varios paneles vale el primero.
+    """
+    if not pathlib.Path(TMUX_BIN).exists():
+        return []
+    try:
+        r = subprocess.run(
+            [TMUX_BIN, "-L", SOCK, "list-panes", "-a", "-F",
+             "#{session_name}\t#{session_created}\t#{session_attached}"
+             "\t#{pane_title}\t#{pane_pid}"],
+            capture_output=True, text=True, timeout=10)
+    except Exception:
+        return []
+    if r.returncode != 0:
+        return []                      # sin servidor = sin sesiones, no es error
+    out, vistas = [], set()
+    for line in r.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 5 or parts[0] in vistas:
+            continue
+        vistas.add(parts[0])
+        titulo = parts[3].lstrip("\u2733\u2734\u2735* ").strip()
+        # Un panel que aun no ha emitido titulo propio se queda con el hostname:
+        # El hostname por defecto de un portatil no identifica ninguna sesion, asi
+        # que cuenta como titulo generico.
+        if titulo.lower() in _TITULO_GENERICO or titulo.endswith(".local"):
+            titulo = ""
+        out.append((parts[0], int(parts[1] or 0), parts[2] != "0", titulo,
+                    parts[4] if parts[4].isdigit() else ""))
+    return out
+
+
+def tmux_kill(name=None):
+    if name:
+        subprocess.run([TMUX_BIN, "-L", SOCK, "kill-session", "-t", name], check=False)
+    else:
+        subprocess.run([TMUX_BIN, "-L", SOCK, "kill-server"], check=False)
+
+
+def meta_by_tmux():
+    """Metadatos del registro indexados por nombre de sesion tmux."""
+    if not LIVE.is_dir():
+        return {}
+    out = {}
+    for f in sorted(LIVE.glob("*.env")):
+        e = read_entry(f)
+        if e and e.get("tmux_session"):
+            e["_transcript"] = transcript_of(e)
+            out[e["tmux_session"]] = e
+    return out
+
+
+def pulso(e, secs=90, fino=True):
+    """Hechos sobre lo que hace la sesion. El veredicto lo compone quien llame.
+
+    {"escribe": bool|None, "herramienta": bool|None}
+
+    Con `escribe` solo no basta y era el fallo de la version anterior: mientras
+    Claude espera a que termine un comando NO escribe nada en el transcript, asi que
+    una sesion en mitad de un `Bash` de tres minutos figuraba como parada. Lo que la
+    delata es que su ultimo evento sea un `tool_use` cuyo `tool_result` no ha llegado.
+
+    Los procesos hijos NO sirven para esto: medido el 2026-08-25, las 8 sesiones
+    tenian 6-7 descendientes cada una solo por los servidores MCP (context7, uv,
+    npm exec), estuvieran haciendo algo o no.
+    """
+    t = e.get("_transcript") if e else None
+    if not t:
+        return {"escribe": None, "herramienta": None}
+    try:
+        escribe = (time.time() - t.stat().st_mtime) < secs
+    except OSError:
+        return {"escribe": None, "herramienta": None}
+    if not fino:
+        # El aviso de abrir terminal solo cuenta sesiones: leer la cola de todos los
+        # transcripts para afinar le costaria 100 ms en vez de 30, y no cambia lo que
+        # imprime. Lo fino lo pide el selector, que si lo pinta.
+        return {"escribe": escribe, "herramienta": None}
+
+    pendientes, ultimo_tool, extra = set(), False, {}
+    for raw in ultimas_lineas(t, 80):
+        try:
+            j = json.loads(raw)
+        except Exception:
+            continue
+        for k in ("cwd", "gitBranch", "lastPrompt", "aiTitle"):
+            if j.get(k):
+                extra[k] = j[k]            # de una pasada: no hay que releer despues
+        if j.get("isSidechain"):
+            continue
+        cont = j.get("message", {}).get("content")
+        bloques = cont if isinstance(cont, list) else []
+        if j.get("type") == "assistant":
+            ids = {b.get("id") for b in bloques
+                   if isinstance(b, dict) and b.get("type") == "tool_use"}
+            if ids:
+                pendientes |= ids
+                ultimo_tool = True
+            elif any(isinstance(b, dict) and b.get("type") == "text" for b in bloques):
+                ultimo_tool = False
+        elif j.get("type") == "user":
+            pendientes -= {b.get("tool_use_id") for b in bloques
+                           if isinstance(b, dict) and b.get("type") == "tool_result"}
+            if not pendientes:
+                ultimo_tool = False
+    return {"escribe": escribe, "herramienta": bool(pendientes) and ultimo_tool,
+            **extra}
+
+
+def _dur(secs):
+    secs = int(secs)
+    h, m = secs // 3600, (secs % 3600) // 60
+    return f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def idle_secs(e):
+    """Segundos desde la ultima actividad real de la sesion (su transcript).
+
+    NO vale `session_created` de tmux para esto: tras un apagon todas las sesiones
+    renacen hoy y parecen igual de nuevas aunque la conversacion sea de ayer. El
+    transcript es lo unico que distingue una sesion viva de una abandonada.
+    """
+    t = (e or {}).get("_transcript")
+    if not t:
+        return None
+    try:
+        return max(0, time.time() - t.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def ai_title(e):
+    """El titulo que Claude Code se pone a si mismo, de la cola del transcript.
+
+    Solo se consulta cuando tmux no da uno (pane_title generico): abrir el fichero
+    es mas caro que leer una variable, y para la mayoria de sesiones no hace falta.
+    """
+    t = (e or {}).get("_transcript")
+    if not t:
+        return ""
+    for raw in reversed(ultimas_lineas(t, 40)):
+        try:
+            j = json.loads(raw)
+        except Exception:
+            continue
+        if j.get("aiTitle"):
+            return j["aiTitle"]
+    return ""
+
+
+def rss_por_arbol(pids):
+    """MB de RSS de cada pid contando a sus descendientes. Un solo `ps` para todos.
+
+    16 sesiones de Claude en un portatil no son gratis, y ese es justo el dato que
+    falta para decidir cual sobra: "hace 5h que no la tocas y ocupa 900 MB".
+    """
+    if not pids:
+        return {}
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,rss="],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return {}
+    hijos, rss = {}, {}
+    for linea in out.splitlines():
+        campos = linea.split()
+        if len(campos) != 3 or not all(c.isdigit() for c in campos):
+            continue
+        pid, ppid, kb = (int(c) for c in campos)
+        hijos.setdefault(ppid, []).append(pid)
+        rss[pid] = kb
+    def suma(pid, visto):
+        if pid in visto:
+            return 0
+        visto.add(pid)
+        return rss.get(pid, 0) + sum(suma(h, visto) for h in hijos.get(pid, ()))
+    return {p: suma(int(p), set()) / 1024 for p in pids if str(p).isdigit()}
+
+
+def live_sessions(con_ram=False, con_disco=True):
+    if DEMO:
+        return [r for r in sesiones_demo() if r.get("fuente") == "claude"]
+    """`con_ram` cuesta un `ps -eo` de toda la maquina: 220 ms medidos con 9 sesiones.
+
+    El hook que corre al abrir terminal solo dice cuantas hay, asi que ahi no se
+    pide; solo la pide el selector, que si la pinta.
+
+    `con_disco` anade las sesiones vivas que tmux no ve. Son dos casos y los dos
+    importan: en una maquina sin nuestro wrapper es la UNICA fuente, y en la de casa
+    saca las que se lanzaron desde VS Code o con la ruta completa al binario, que
+    hasta ahora no aparecian en ningun sitio.
+    """
+    metas = meta_by_tmux()
+    paneles = tmux_list()
+    mem = rss_por_arbol([p for *_resto, p in paneles if p]) if con_ram else {}
+    rows = []
+    for name, created, attached, titulo, pid in paneles:
+        e = metas.get(name, {})
+        pu = pulso(e, fino=con_ram) if e else {"escribe": None, "herramienta": None}
+        # Orden de preferencia del titulo: lo que el usuario puso con /rename o el
+        # aiTitle (los dos llegan por pane_title, en vivo) > el aiTitle del
+        # transcript > el primer mensaje. Lo ultimo era la unica fuente y es la peor.
+        propio = titulo or pu.get("aiTitle", "")
+        rows.append({
+            "name": name, "created": created, "attached": attached,
+            "meta": e, "pid": pid,
+            "mem_mb": mem.get(pid),
+            "title": (propio[:33] + "\u2026") if len(propio) > 34 else (propio or (label(e) if e else name)),
+            "title_full": propio or (label(e, 200) if e else name),
+            "idle": idle_secs(e),
+            "pulso": pu,
+            "proyecto": pathlib.Path(pu.get("cwd") or e.get("cwd") or "").name,
+            "rama": pu.get("gitBranch", ""),
+            "working": None if pu["escribe"] is None
+                       else bool(pu["escribe"] or pu["herramienta"]),
+        })
+    if con_disco:
+        ids = {(r.get("meta") or {}).get("id") for r in rows}
+        rows += sesiones_de_disco(vistos=ids, solo_activas=True, fino=con_ram)
+    rows.sort(key=lambda r: (r["idle"] is None, -(r["idle"] or 0)))
+    return rows
+
+
+# ─────────────── sesiones leidas del historial, sin tmux ni registro ───────────────
+# El registro de `tools/claude` y tmux dan RAM y "tiene pestana abierta", que esto no
+# puede saber. A cambio, `~/.claude/projects` lo escribe el propio CLI en CUALQUIER
+# maquina: es la unica via que funciona sin haber instalado antes nuestro wrapper, y
+# ademas ve las sesiones que el wrapper no lanzo (VS Code, `claude` por ruta completa).
+PROJECTS = HOME / ".claude/projects"
+_CACHE_DISCO = {}
+# Una sesion reanudable se llama como su UUID. Los `agent-*.jsonl` que el CLI deja al
+# lado son transcripts de SUBAGENTES: no se reanudan, no tienen titulo propio y son
+# muchos —213 en esta maquina, contra 1.035 sesiones— asi que colarlos enterraba la
+# lista bajo veinte copias del mismo prompt de subagente.
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _proyecto_de_dir(nombre):
+    """`-home-you-code-my-project` -> `/home/you/code/my-project`.
+
+    Es una conjetura: el CLI aplana el path sustituyendo `/` por `-`, asi que un
+    directorio con guion propio no se puede deshacer. Por eso solo se usa como
+    ULTIMO recurso — el `cwd` bueno viene dentro del transcript.
+    """
+    return "/" + nombre.lstrip("-").replace("-", "/") if nombre.startswith("-") else ""
+
+
+def _ids(rows):
+    return {(r.get("meta") or {}).get("id") for r in rows}
+
+
+def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True):
+    if DEMO:
+        return []
+    """Filas a partir de los transcript de `~/.claude/projects`.
+
+    `solo_activas` filtra por mtime ANTES de abrir nada: preguntar "¿hay alguna
+    sesion viva que tmux no vea?" cuesta entonces un `stat` por fichero y no una
+    lectura. Sin ese filtro, 1.248 transcript son 3,8 GB de cola por barrer.
+    """
+    if not PROJECTS.is_dir():
+        return []
+    ahora, cands = time.time(), []
+    for p in PROJECTS.glob("*/*.jsonl"):     # sin `**`: los `subagents/` no se reanudan
+        if p.stem in vistos or not _UUID.match(p.stem):
+            continue
+        try:
+            mt = p.stat().st_mtime
+        except OSError:
+            continue
+        if solo_activas and ahora - mt > VIVA:
+            continue
+        cands.append((mt, p))
+    cands.sort(reverse=True)
+    rows = []
+    for mt, p in cands[:limite]:
+        clave = (str(p), mt)
+        fila = _CACHE_DISCO.get(clave)
+        if fila is None:
+            e = {"id": p.stem, "project_dir": str(p.parent), "_transcript": p}
+            pu = pulso(e, fino=fino)
+            e["cwd"] = pu.get("cwd") or _proyecto_de_dir(p.parent.name)
+            titulo = (pu.get("aiTitle") or first_user_text(p) or p.stem[:8])
+            fila = {
+                "name": p.stem, "created": 0, "attached": False, "meta": e, "pid": "",
+                "mem_mb": None, "_sin_proceso": True,
+                "title": (titulo[:33] + "\u2026") if len(titulo) > 34 else titulo,
+                "title_full": titulo, "pulso": pu,
+                "proyecto": pathlib.Path(e["cwd"] or "").name,
+                "rama": pu.get("gitBranch", ""),
+            }
+            if len(_CACHE_DISCO) > 400:
+                _CACHE_DISCO.clear()      # la clave lleva el mtime: crece sin tope
+            _CACHE_DISCO[clave] = fila
+        fila = dict(fila)
+        fila["idle"] = max(0.0, ahora - mt)
+        viva = fila["idle"] <= VIVA
+        # `working` sale del pulso, que mira el transcript; sin proceso que inspeccionar
+        # es lo unico observable, y es honesto: si nadie escribe ahi, no esta trabajando.
+        fila["working"] = bool(fila["pulso"].get("escribe")
+                               or fila["pulso"].get("herramienta")) if viva else False
+        fila["fuente"] = "claude" if viva else "historial"
+        rows.append(fila)
+    return rows
+
+
+# ───────────────────────────── modo demostracion ─────────────────────────────
+# `CLAUDE_SESSIONS_DEMO=1` sustituye la lista por sesiones inventadas. No es un
+# juguete: el panel ensena el ultimo prompt y la ultima respuesta, asi que grabar una
+# captura contra sesiones de verdad publica trabajo de clientes. Con esto la captura
+# del README sale de datos que no existen, y ademas se puede probar el layout sin
+# tener cinco sesiones abiertas.
+DEMO = _env("DEMO", "0") not in ("", "0")
+
+_DEMO = [
+    # titulo, proyecto, rama, idle, MB, escribe, herramienta, prompt, respuesta, tool,
+    # fuente. La fuente va explicita y no derivada del idle: una sesion abierta en tmux
+    # sigue viva aunque lleve dos horas quieta, y la demo tiene que ensenar ese caso.
+    ("Refactor payment webhooks", "checkout-api", "feat/webhooks", 3, 512, True, True,
+     "The Stripe webhook handler retries forever when the DB write fails. Make it "
+     "idempotent and add a dead-letter path.",
+     "Found it: the handler acks only after the write, so a failed write means Stripe "
+     "never sees a 2xx and keeps retrying the same event. Adding an idempotency key on "
+     "event.id and moving the ack ahead of the write.",
+     "Bash \u00b7 pytest tests/webhooks -x -q", "claude"),
+    ("Fix flaky login test", "checkout-api", "main", 11, 287, True, False,
+     "test_login_redirect fails about one run in five on CI but never locally.",
+     "It is a clock race, not a redirect bug: the test signs a token with a 1-second "
+     "expiry and CI is slow enough to cross it. Freezing time instead of widening the "
+     "window, so the test keeps asserting what it meant to.",
+     "", "claude"),
+    ("Draft release notes v2.4", "docs-site", "main", 420, 190, False, False,
+     "Turn the merged PRs since v2.3 into release notes. Group by user-visible change, "
+     "not by module.",
+     "Draft is in NOTES.md. Three groups: faster cold starts, the new CLI flags, and "
+     "two breaking changes that need a migration line each.",
+     "", "claude"),
+    ("Migrate CI to reusable workflows", "infra", "chore/ci", 7300, 640, False, False,
+     "Six repos copy the same 200-line build job. Pull it into one reusable workflow.",
+     "Extracted to .github/workflows/build.yml with inputs for node version and cache "
+     "key. Five repos switched and green; the sixth pins an old action and needs a "
+     "decision before I touch it.",
+     "", "claude"),
+    ("Explore vector search options", "search-lab", "", 91000, None, False, False,
+     "Compare pgvector against a dedicated store for 2M documents. I care about recall "
+     "and about not running one more service.",
+     "pgvector holds up at this size: recall@10 within a point of the dedicated store "
+     "once the HNSW index is tuned, and it is one less thing to operate.",
+     "", "historial"),
+    ("Audit dependency licences", "infra", "", 190000, None, False, False,
+     "List every transitive dependency whose licence is not MIT/BSD/Apache.",
+     "Four of them, all under the same GPL-3 package pulled in by the PDF exporter. "
+     "Two have drop-in replacements; the other two need a call.",
+     "", "historial"),
+    ("Port the CLI to argparse", "checkout-api", "", 610000, None, False, False,
+     "Replace the hand-rolled flag parsing in cli.py with argparse, same flags.",
+     "Done and the old tests pass unchanged. One behaviour difference worth knowing: "
+     "argparse rejects `--limit=-1`, the old parser silently accepted it.",
+     "", "historial"),
+    ("Shrink the docker image", "infra", "", 250000, None, False, False,
+     "The API image is 1.2 GB. Get it under 300 MB without changing the base distro.",
+     "310 MB with a multi-stage build and no dev dependencies in the final layer. The "
+     "last 40 MB are the ICU data the runtime needs, so that is the floor.",
+     "", "codex"),
+    ("Name the new billing events", "docs-site", "", 430000, None, False, False,
+     "Propose names for the six new webhook events, consistent with the existing ones.",
+     "Kept your noun.verb order and the past tense: invoice.finalized, "
+     "invoice.voided, payment.captured, payment.refunded, dispute.opened, dispute.won.",
+     "", "codex"),
+]
+
+
+def sesiones_demo():
+    rows = []
+    for i, (tit, proy, rama, idle, mb, esc, tool, pr, resp, cmd, fu) in enumerate(_DEMO):
+        rows.append({
+            "name": f"demo-{proy}-{i}", "created": int(time.time() - idle - 3600),
+            "attached": i % 2 == 0, "meta": {"cwd": f"/Users/you/code/{proy}"},
+            "pid": "", "mem_mb": mb, "_sin_proceso": True, "_demo": True,
+            "title": (tit[:33] + "\u2026") if len(tit) > 34 else tit,
+            "title_full": tit, "idle": float(idle),
+            "pulso": {"escribe": esc, "herramienta": tool},
+            "proyecto": proy, "rama": rama,
+            "working": bool(esc or tool),
+            "fuente": fu,
+            # `_det` precocinado: `detalles()` lo respeta y no abre ningun transcript.
+            "_det": {"fase": None, "peso": (3 + i * 7) * 1024 * 1024,
+                     "lastPrompt": pr, "resp": resp, "tool": cmd or None,
+                     "gitBranch": rama, "cwd": f"/Users/you/code/{proy}"},
+        })
+    for r in rows:
+        r["_det"]["fase"] = _fase(r)
+    return rows
+
+
+def print_live(rows):
+    now = time.time()
+    for i, r in enumerate(rows, 1):
+        w = r["working"]
+        mark = "\u25cf" if w else ("\u25cb" if w is False else "?")
+        est = _("running") if w else (_("idle") if w is False else _("no data"))
+        att = " " + _("[in a tab]") if r["attached"] else ""
+        edad = _dur(now - r["created"]) if r["created"] else "?"
+        print(f"  {i:>2}. {mark} {r['title']:<34} {est:<11} "
+              f"{_hace(r.get('idle')):<10} " + _("open for {t}", t=edad) + att)
+        print(f"         {r['name']}")
+
+
+def parse_sel(text, rows):
+    """Traduce lo tecleado a indices. Devuelve None si no se entiende (!= lista vacia).
+
+    Acepta numeros y rangos ("1,3-5"), y tres atajos por estado, porque el caso
+    real es "quiero cerrar las viejas y quedarme con las que estoy usando":
+      todas | espera (las que no estan trabajando) | sueltas (las que no tienen pestana)
+    """
+    t = (text or "").strip().lower()
+    if t in ("todas", "todo", "all", "*"):
+        return list(range(len(rows)))
+    if t in ("espera", "esperando", "paradas"):
+        return [i for i, r in enumerate(rows) if r["working"] is False]
+    if t in ("sueltas", "sin-pestana", "sinpestana"):
+        return [i for i, r in enumerate(rows) if not r["attached"]]
+    if not t:
+        return None
+    out = []
+    for part in re.split(r"[,;\s]+", t):
+        if not part:
+            continue
+        m = re.fullmatch(r"(\d+)-(\d+)", part)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            if a > b:
+                a, b = b, a
+            out += list(range(a - 1, b))
+        elif part.isdigit():
+            out.append(int(part) - 1)
+        else:
+            return None                # una palabra que no es atajo: no adivinar
+    out = sorted({i for i in out if 0 <= i < len(rows)})
+    return out or None
+
+
+def stop_rows(rows, forget):
+    """Para las sesiones tmux dadas.
+
+    forget=True archiva ademas su entrada del registro: sin eso la entrada
+    sobrevive al kill (el wrapper hizo exec y no tiene trap que la borre) y la
+    sesion vuelve a ofrecerse como huerfana en el siguiente arranque. Ese es el
+    "vuelve a preguntarme lo mismo". El transcript NO se toca: siempre se puede
+    reanudar a mano con `claude --resume <id>`.
+    """
+    dest = ROOT / "closed" / time.strftime("%Y%m%d-%H%M%S") if forget else None
+    for r in rows:
+        tmux_kill(r["name"])
+        f = (r.get("meta") or {}).get("_file")
+        if forget and f:
+            dest.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(f), str(dest / f.name))
+            except OSError:
+                pass
+    return len(rows)
+
+
+ABRIR_CONFIG = "claude-abrir"
+
+
+def _comando_de(r):
+    """(comando, cwd) con que se abre esta fila. None si no se sabe abrirla."""
+    e = r.get("meta") or {}
+    if r.get("abrir"):                     # historial de otro CLI (codex, gemini...)
+        return " ".join(shlex.quote(x) for x in r["abrir"]), e.get("cwd") or str(HOME)
+    if str(r.get("name", "")).startswith("cc-"):
+        return (f"{shlex.quote(TMUX_BIN)} -L {SOCK} attach -t {shlex.quote(r['name'])}",
+                e.get("cwd") or str(HOME))
+    if e.get("id"):                        # sesion de Claude muerta: --resume
+        flags = " ".join(shlex.quote(f) for f in (e.get("resume_flags__list") or []))
+        return (f"claude --resume {shlex.quote(e['id'])} {flags}".strip(),
+                e.get("cwd") or str(HOME))
+    return None
+
+
+def hay_warp():
+    """Warp es la unica via que tenemos para abrir en una ventana NUEVA (`warpctrl`
+    no existe en esta version, verificado 2026-08-25). Sin el se reemplaza la terminal
+    actual: peor, pero es lo que hay en Linux, en iTerm o en Terminal.app."""
+    return sys.platform == "darwin" and any(
+        (base / "Warp.app").is_dir()
+        for base in (pathlib.Path("/Applications"), HOME / "Applications"))
+
+
+def abrir_sesion(r, callado=False):
+    """Abre la sesion en una VENTANA NUEVA de Warp y deja esta terminal en paz.
+
+    Antes hacia `exec` sobre el propio proceso: la sesion se comia la pestana desde
+    la que se estaba mirando la lista, y con ella el hilo de lo que estabas haciendo.
+    Se lanza por launch configuration, que es la unica via de Warp para abrir algo en
+    una ventana suya (`warpctrl` no existe en esta version, verificado 2026-08-25).
+    """
+    par = _comando_de(r)
+    if not par:
+        if callado:
+            return ""
+        print(_("Don't know how to open {s}.", s=r.get('name')))
+        return 1
+    cmd, cwd = par
+    if not pathlib.Path(cwd or "").is_dir():
+        cwd = str(HOME)
+    titulo = (r.get("title_full") or r.get("name") or "claude").replace('"', "'")[:60]
+    if not hay_warp():
+        # `exec` y no `subprocess`: la sesion tiene que heredar ESTE tty. Lanzarla como
+        # hija dejaria dos programas leyendo del mismo teclado.
+        os.chdir(cwd)
+        print("\n" + _("Opening: {t}", t=titulo) + "\n")
+        os.execvp("/bin/sh", ["/bin/sh", "-c", cmd])
+    LAUNCH.mkdir(parents=True, exist_ok=True)
+    ruta = LAUNCH / f"{ABRIR_CONFIG}.yaml"
+    ruta.write_text("\n".join([
+        "---", f"name: {ABRIR_CONFIG}", "windows:", "  - tabs:",
+        f'      - title: "{titulo}"', "        layout:",
+        f'          cwd: "{cwd}"', "          commands:",
+        f"            - exec: {cmd}",
+    ]) + "\n")
+    subprocess.run(["open", f"warp://launch/{ABRIR_CONFIG}"], check=False)
+    if callado:                        # llamado desde el selector: no romper curses
+        return titulo
+    print("\n" + _("Opening in a new window: {t}", t=titulo))
+    return 0
+
+
+def reopen(sel):
+    path = write_attach_config(sel)
+    subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
+    print("\n" + _("Reattaching {n} tabs -> {p}", n=len(sel), p=path))
+    return 0
+
+
+def write_attach_config(rows):
+    LAUNCH.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f"name: {CONFIG_NAME}", "windows:", "  - tabs:"]
+    for r in rows:
+        title = r["title"].replace('"', "'")
+        cwd = (r["meta"] or {}).get("cwd") or str(HOME)
+        lines += [
+            f'      - title: "{title}"',
+            "        layout:",
+            f'          cwd: "{cwd}"',
+            "          commands:",
+            f"            - exec: {TMUX_BIN} -L {SOCK} attach -t {shlex.quote(r['name'])}",
+        ]
+    path = LAUNCH / f"{CONFIG_NAME}.yaml"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def _clean(t):
+    t = re.sub(r"```.*?```", " ", t, flags=re.S)
+    t = re.sub(r"[`*#>\[\]]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _user_texts(blob):
+    """Mensajes escritos por el usuario dentro de un trozo de transcript."""
+    out = []
+    for raw in blob.splitlines():
+        try:
+            d = json.loads(raw)
+        except Exception:
+            continue
+        if d.get("type") != "user" or d.get("isSidechain"):
+            continue
+        c = d.get("message", {}).get("content")
+        if isinstance(c, str):
+            t = c
+        elif isinstance(c, list):
+            t = " ".join(b.get("text", "") for b in c
+                         if isinstance(b, dict) and b.get("type") == "text")
+        else:
+            continue
+        t = _clean(t)
+        if not t or t.startswith("<"):
+            continue
+        if "system-reminder" in t[:200] or "tool_use_id" in t[:200]:
+            continue
+        if t.startswith("Request interrupted") or t.startswith("API Error"):
+            continue          # ruido del propio CLI, no lo escribio el usuario
+        if t.startswith("Pre-Compact Rutina") or t.startswith("Vuelve a preguntarme"):
+            continue          # texto inyectado por comandos, no lo escribio el usuario
+        out.append(t)
+    return out
+
+
+def _head(path, n=256 * 1024):
+    try:
+        with path.open("rb") as f:
+            return f.read(n)
+    except OSError:
+        return b""
+
+
+def _tail(path, n=512 * 1024):
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > n:
+                f.seek(size - n)
+                f.readline()          # descarta la linea partida por el seek
+            return f.read()
+    except OSError:
+        return b""
+
+
+def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
+    """Las ultimas `cuantas` lineas COMPLETAS, retrocediendo en bloques.
+
+    Leer "los ultimos N bytes" no vale en estos transcripts: una sola linea de
+    `tool_result` puede pasar de 96 KB, y entonces la ventana cae entera dentro de
+    esa linea, se descarta como parcial y el lector se queda sin nada que mirar. Es
+    lo que hacia que una sesion en mitad de un comando figurase como parada.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    trozo, datos, pos = 256 * 1024, b"", size
+    try:
+        with path.open("rb") as f:
+            while pos > 0 and len(datos) < tope:
+                pos = max(0, pos - trozo)
+                f.seek(pos)
+                datos = f.read(size - pos)
+                if datos.count(b"\n") > cuantas or pos == 0:
+                    break
+    except OSError:
+        return []
+    lineas = datos.split(b"\n")
+    if pos > 0 and lineas:
+        lineas = lineas[1:]                 # la primera puede venir partida
+    return [l.decode("utf-8", "replace") for l in lineas[-cuantas:] if l.strip()]
+
+
+def first_user_text(path, minlen=25):
+    """Primer mensaje sustancial del usuario: es lo que identifica el hilo.
+
+    Medido sobre las 8 sesiones del 2026-08-24: el PRIMER mensaje da 8/8 titulos
+    reconocibles y el ultimo da basura ('Continua', 'Si procede'), porque una
+    conversacion larga acaba en monosilabos. Por eso la fuente es la cabecera.
+    """
+    for t in _user_texts(_head(path)):
+        t = _strip_saludo(t)
+        if len(t) >= minlen:
+            return t[:1].upper() + t[1:]
+    return None
+
+
+def last_user_text(path, minlen=40):
+    """Ultima instruccion sustancial: no sirve de titulo, si de 'donde se quedo'."""
+    found = [t for t in _user_texts(_tail(path)) if len(t) >= minlen]
+    if not found:
+        try:
+            if path.stat().st_size > 512 * 1024:
+                found = [t for t in _user_texts(path.read_bytes()) if len(t) >= minlen]
+        except OSError:
+            pass
+    return found[-1] if found else None
+
+
+def label(e, width=34):
+    """Titulo de la pestana. Un -n explicito manda; si no, se deriva del transcript,
+    porque el basename del cwd deja 8 pestanas llamadas igual."""
+    if e.get("title_explicit"):
+        return e["title"]
+    t = e.get("_transcript")
+    if t:
+        txt = first_user_text(t)
+        if txt:
+            return (txt[: width - 1] + "\u2026") if len(txt) > width else txt
+    return e.get("title") or "claude"
+
+
+def _fecha_corta(epoch):
+    if not epoch:
+        return "?"
+    d = datetime.date.fromtimestamp(epoch)
+    hoy = datetime.date.today()
+    dias = (hoy - d).days
+    if dias <= 0:
+        return "hoy"
+    if dias == 1:
+        return "ayer"
+    return d.strftime("%d/%m")
+
+
+def hook_line(rows, items):
+    """Al abrir una terminal, una linea. El menu solo si se pide.
+
+    Antes se volcaba la lista entera y se exigia una decision en cada pestana
+    nueva: eso convierte una herramienta util en una interrupcion.
+    """
+    if rows:
+        trab = sum(1 for r in rows if r["working"])
+        print("\n  " + _("{n} Claude session(s) open", n=len(rows))
+              + (", " + _("{n} working", n=trab) if trab else "")
+              + "  \u00b7  " + _("`{p}` to manage them", p=PROG) + "\n")
+    elif items:
+        print("\n  " + _("{n} Claude session(s) can be resumed", n=len(items))
+              + f"  \u00b7  `{PROG}`\n")
+
+
+# ─────────────────────────── selector visual ───────────────────────────
+# Marcas con el espacio lo que quieres cerrar y Enter lo aplica. Sin sintaxis
+# que recordar: escribir "C 1-9" obligaba a traducir la intencion a un rango.
+INACTIVA = 3600          # a partir de aqui, "lleva parada un rato" y `d` la marca
+
+
+def ancho(s):
+    """Columnas que ocupa un texto en pantalla, que no es su len().
+
+    Un emoji vale 2 columnas ('W' en east_asian_width) y descuadra la tabla entera
+    si se mide con len(); los titulos de Claude Code los llevan. Se resuelve con
+    stdlib, sin depender de `wcwidth`.
+    """
+    total = 0
+    for ch in s:
+        if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Cf"):
+            continue
+        total += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return total
+
+
+def recorta(s, cols):
+    """Corta a `cols` COLUMNAS (no caracteres) y pone puntos suspensivos si sobra."""
+    if ancho(s) <= cols:
+        return s
+    out, usado = "", 0
+    for ch in s:
+        w = 0 if (unicodedata.combining(ch)
+                  or unicodedata.category(ch) in ("Mn", "Cf")) else (
+            2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1)
+        if usado + w > cols - 1:
+            break
+        out += ch
+        usado += w
+    return out + "\u2026"
+
+
+def rellena(s, cols):
+    """Padding a la derecha contando columnas reales."""
+    return s + " " * max(0, cols - ancho(s))
+
+
+def _troceado(texto, cols, lineas):
+    """Parte un texto en `lineas` renglones de `cols` columnas, sin cortar palabras.
+
+    Si sobra texto, la ultima linea acaba en `\u2026`. La version anterior solo lo
+    marcaba cuando la linea cortada llegaba justa al ancho: un resumen de cinco
+    renglones que se comia media respuesta se leia como la respuesta entera.
+    """
+    out, actual, palabras, resto = [], "", texto.split(), 0
+    for i, palabra in enumerate(palabras):
+        prueba = (actual + " " + palabra).strip()
+        if ancho(prueba) > cols:
+            out.append(actual)
+            actual = palabra
+            if len(out) == lineas:
+                resto = len(palabras) - i
+                break
+        else:
+            actual = prueba
+    if actual and len(out) < lineas:
+        out.append(actual)
+        actual = ""
+    if out and (resto or actual):
+        out[-1] = recorta(out[-1] + " \u2026", cols)
+    return out
+
+
+def _lapso(secs):
+    """'5m' / '3h' / '2d', sin prefijo. Existe aparte porque el prefijo cambia con el
+    idioma y habia sitios recortandolo con `_hace(x)[5:]`: en ingles eso se comia la
+    cifra. Un formato que hay que recortar para reutilizarlo esta mal partido."""
+    secs = int(secs or 0)
+    if secs < 3600:
+        return f"{secs // 60}m"
+    if secs < 86400:
+        return f"{secs // 3600}h"
+    return f"{secs // 86400}d"
+
+
+def _hace(secs):
+    """'ahora' / 'hace 5m' / 'hace 3h' / 'hace 2d'. Nunca una fecha: lo que decide
+    si una sesion sobra es cuanto lleva quieta, no que dia empezo."""
+    if secs is None:
+        return "?"
+    return _("now") if int(secs) < 90 else _("{t} ago", t=_lapso(secs))
+
+
+def _fase(r):
+    """Que hace la sesion, en una frase, a partir de los hechos del pulso.
+
+    Sale del MISMO `pulso` que pinta la lista: si el panel y el glifo se calcularan
+    por separado acabarian contradiciendose delante del usuario.
+    """
+    pu = r.get("pulso") or {}
+    idle = r.get("idle") or 0
+    if pu.get("escribe") is None:
+        return None
+    if pu.get("herramienta"):
+        if idle > 10 * 60:
+            return _("{t} on the same tool: it may be stuck", t=_lapso(idle))
+        return _("waiting on a command of its own")
+    if pu.get("escribe"):
+        return _("writing its reply")
+    return (_("waiting on you") if idle < 6 * INACTIVA
+            else _("stopped, waiting on you"))
+
+
+# El argumento que identifica una llamada cambia por herramienta: de un Bash lo que
+# importa es el comando, de un Edit el fichero. Nombre a secas ("Bash") no distingue
+# compilar de borrar media carpeta.
+_TOOL_ARG = ("command", "file_path", "pattern", "path", "url", "query",
+             "description", "prompt", "notebook_path")
+
+
+def _sin_tabla(t):
+    t = re.sub(r"\|?\s*:?-{2,}:?\s*(?=\||$)", "", t)   # la fila de guiones sobra
+    t = re.sub(r"\s*\|\s*", " \u00b7 ", t)
+    return re.sub(r"(?:\s*\u00b7)+\s*", " \u00b7 ", t).strip(" \u00b7")
+
+
+def _resume_tool(b):
+    """'Bash \u00b7 git push origin main' a partir de un bloque tool_use."""
+    nom = b.get("name") or "?"
+    ent = b.get("input") if isinstance(b.get("input"), dict) else {}
+    for k in _TOOL_ARG:
+        v = ent.get(k)
+        if isinstance(v, str) and v.strip():
+            return f"{nom} \u00b7 {_clean(v)}"
+    return nom
+
+
+def detalles(r):
+    """aiTitle / lastPrompt / rama / peso del transcript, de su cola.
+
+    Se lee SOLO para la fila bajo el cursor: abrir 16 transcripts para pintar una
+    lista costaria mas que todo lo demas junto, y 15 de esos datos no se miran.
+    """
+    if "_det" in r:
+        return r["_det"]
+    d = {}
+    t = (r.get("meta") or {}).get("_transcript")
+    if t:
+        try:
+            d["peso"] = t.stat().st_size
+        except OSError:
+            pass
+        for raw in ultimas_lineas(t, 60):
+            try:
+                j = json.loads(raw)
+            except Exception:
+                continue
+            for k in ("aiTitle", "lastPrompt", "gitBranch", "cwd"):
+                if j.get(k):
+                    d[k] = j[k]
+            # Lo que la sesion dijo y lo que esta ejecutando salen de la MISMA cola
+            # que ya se lee: volver a abrir el transcript costaria por fila.
+            if j.get("isSidechain") or j.get("type") != "assistant":
+                continue
+            cont = j.get("message", {}).get("content")
+            for b in (cont if isinstance(cont, list) else []):
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text":
+                    txt = _sin_tabla(_clean(b.get("text") or ""))
+                    if txt:
+                        d["resp"] = txt
+                elif b.get("type") == "tool_use":
+                    d["tool"] = _resume_tool(b)
+    d["fase"] = _fase(r)
+    r["_det"] = d
+    return d
+
+
+def _mb(x):
+    return "?" if x is None else (f"{x/1024:.1f} GB" if x >= 1024 else f"{int(x)} MB")
+
+
+def barra(valor, tope, celdas=5):
+    """Barra de bloques unicode. Una cifra sola no se compara de un vistazo; cinco
+    celdas si: se ve de golpe cual es la sesion que se esta comiendo la maquina."""
+    if not valor or not tope:
+        return " " * celdas
+    llenas = max(1, min(celdas, round(celdas * valor / tope)))
+    # Segmentos (U+25B0/25B1) y no bloques llenos: `█` pinta un rectangulo macizo
+    # que a tamaño de terminal parece una mancha de color, no una barra.
+    return "\u25b0" * llenas + "\u25b1" * (celdas - llenas)
+
+
+def color_tiempo(idle):
+    """5=rojo(nada), 9=verde recien, 6=azul hace poco, 4=gris lleva rato."""
+    if idle is None:
+        return 4
+    if idle < 90:
+        return 9
+    if idle < INACTIVA:
+        return 6
+    return 7 if idle < 6 * INACTIVA else 4
+
+
+def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
+    """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
+
+    `muertas=True` es la rama de despues de un apagon: mismas teclas, otras
+    palabras — ahi no se cierra un proceso, se descarta una entrada del registro.
+
+    `recargar() -> filas` refresca sola cada pocos segundos: una lista de sesiones es
+    un panel de estado, y una foto fija miente en cuanto una empieza a trabajar.
+
+    `ejecutar(verbo, seleccion) -> (aviso, filas_nuevas)` hace el trabajo SIN salir
+    del selector: cerrar o reabrir no deberian echarte de la herramienta, igual que
+    no te echan de lazygit. Si no se pasa, se devuelve la accion y decide quien llame.
+    """
+    try:
+        import curses
+    except ImportError:
+        return None
+
+    res = {"out": None, "toco": False}
+    vista = "claude"
+
+    def run(stdscr):
+        # `rows` se reasigna aqui dentro (filtro/vista), asi que sin nonlocal Python
+        # la trataria como local y `todas = list(rows)` explotaria antes de nacer.
+        nonlocal vista, rows
+        curses.curs_set(0)
+        stdscr.keypad(True)
+        # Sin esto, lo que hubiera en la terminal antes de arrancar sobrevive en las
+        # celdas que curses cree ya vacias: en la grabacion quedaba una letra suelta
+        # del comando anterior flotando bajo la lista.
+        stdscr.clearok(True)
+        color, foco_bg = False, False
+        try:
+            curses.start_color()
+            curses.use_default_colors()
+            hay256 = curses.COLORS >= 256
+            curses.init_pair(1, curses.COLOR_GREEN, -1)    # trabajando ahora
+            curses.init_pair(2, curses.COLOR_YELLOW, -1)   # marcada para cerrar
+            curses.init_pair(3, curses.COLOR_CYAN, -1)     # cabecera y pestanas
+            curses.init_pair(4, 244 if hay256 else curses.COLOR_WHITE, -1)
+            curses.init_pair(5, curses.COLOR_RED, -1)      # sin transcript: irrecuperable
+            curses.init_pair(6, 39 if hay256 else curses.COLOR_CYAN, -1)     # azul vivo
+            curses.init_pair(7, 208 if hay256 else curses.COLOR_YELLOW, -1)  # naranja
+            curses.init_pair(8, 141 if hay256 else curses.COLOR_MAGENTA, -1) # violeta
+            curses.init_pair(9, 84 if hay256 else curses.COLOR_GREEN, -1)    # verde menta
+            # gris 244 explicito y no A_DIM: hay terminales que ignoran A_DIM y
+            # entonces "en espera" y "trabajando" acaban del mismo color.
+            color = True
+            # Pares 10..19: LA MISMA paleta, un punto mas viva, sobre gris 236. La
+            # fila bajo el cursor se pinta con estos y no con A_REVERSE: el reverse
+            # la convertia en un bloque blanco y borraba el color de cada columna
+            # (estado, proyecto, tiempo, RAM) justo en la unica fila que estas
+            # mirando. Cambiar el FONDO marca la fila sin tirar la informacion.
+            if hay256 and curses.COLOR_PAIRS >= 30:
+                for par, fg in enumerate((253, 41, 220, 45, 250, 203, 39, 214, 147, 84)):
+                    curses.init_pair(10 + par, fg, 238)      # fila bajo el cursor
+                # El hover NO puede parecerse al foco o dejan de distinguirse: 234 es
+                # casi el negro del terminal, lo justo para decir "el raton esta aqui".
+                for par, fg in enumerate((-1, curses.COLOR_GREEN, curses.COLOR_YELLOW,
+                                          curses.COLOR_CYAN, 244, curses.COLOR_RED,
+                                          39, 208, 141, 84)):
+                    curses.init_pair(20 + par, fg, 234)
+                foco_bg = True
+        except curses.error:
+            pass
+        C = (lambda n: curses.color_pair(n)) if color else (lambda n: 0)
+        # Sin 256 colores no hay fondo que valga: ahi el reverse sigue siendo lo unico
+        # que se ve, y feo se lee mejor que invisible.
+        CF = ((lambda n: curses.color_pair(10 + n)) if foco_bg
+              else (lambda n: curses.A_REVERSE))
+        CH = ((lambda n: curses.color_pair(20 + n)) if foco_bg
+              else (lambda n: 0))
+
+        # ── raton ──
+        # `mouseinterval(0)` desactiva la espera con la que ncurses agrupa clicks: sin
+        # el, cada click simple arrastraria 200 ms de latencia para poder decidir si
+        # era doble. El doble se detecta aqui con dos marcas de tiempo y sale gratis.
+        raton = False
+        try:
+            disponible, _antes = curses.mousemask(curses.ALL_MOUSE_EVENTS
+                                             | curses.REPORT_MOUSE_POSITION)
+            raton = bool(disponible)
+            curses.mouseinterval(0)
+        except curses.error:
+            pass
+        if raton:
+            # 1006 (SGR) y 1003 (todo movimiento). El 1006 no es un lujo: el protocolo
+            # viejo mete la columna en UN byte y muere en la 223, asi que en una ventana
+            # ancha los clicks del panel derecho llegan a otra parte.
+            res["raton"] = True
+            sys.stdout.write("\033[?1006h\033[?1003h")
+            sys.stdout.flush()
+        espera = 2500 if recargar else -1
+
+        def leer_sgr(win, restaurar=None):
+            """Parsea `CSI < boton ; x ; y M|m` a mano -> (boton, x, y, pulsado).
+
+            El ncurses que trae macOS es el 6.0 de 2015 y solo conoce el raton x11 de
+            `kmous=\\E[M`: medido en esta maquina, un evento SGR le llega como teclas
+            sueltas (27, 91, 60, 48...) y se pierde entero. El terminal SI habla SGR,
+            asi que se pide y se parsea aqui. Con un ncurses moderno esto ni se ejecuta:
+            el evento sale por KEY_MOUSE antes de llegar.
+            """
+            win.timeout(30)          # la secuencia viaja de una pieza; 30 ms sobran
+            try:
+                k = win.getch()
+                if k != ord("["):
+                    if k != -1:
+                        curses.ungetch(k)
+                    return None
+                if win.getch() != ord("<"):
+                    return None
+                campos, num = [], ""
+                for _ in range(24):
+                    k = win.getch()
+                    if k == ord(";"):
+                        campos.append(num)
+                        num = ""
+                    elif k in (ord("M"), ord("m")):
+                        campos.append(num)
+                        if len(campos) != 3 or not all(c.isdigit() for c in campos):
+                            return None
+                        b, mx, my = (int(c) for c in campos)
+                        return b, mx - 1, my - 1, k == ord("M")
+                    elif 48 <= k <= 57:
+                        num += chr(k)
+                    else:
+                        return None
+            finally:
+                win.timeout(espera if restaurar is None else restaurar)
+            return None
+
+        def tecla_limpia(win):
+            """Una pulsacion de verdad: descarta el raton. Sin esto, pasar el raton por
+            encima de un dialogo lo cerraba — y en el de cerrar sesiones, lo cancelaba."""
+            while True:
+                k = win.getch()
+                if k == curses.KEY_MOUSE:
+                    continue
+                if k == 27 and raton:
+                    if leer_sgr(win, -1) is None:
+                        return 27          # ESC de verdad: cierra el dialogo
+                    continue               # era el raton: seguimos esperando
+                return k
+
+        marcadas, cur, top, aviso = set(), 0, 0, ""
+        filtro, buscando, extra, ancla, ayuda = "", False, [], None, False
+        todas, foco = list(rows), None
+        sobre, ultimo_click = None, (None, 0.0)
+        if recargar:
+            stdscr.timeout(2500)      # refresco solo; -1 seria bloqueante
+        while True:
+            hay = {r.get("fuente", "claude") for r in todas + extra}
+            fuentes = ([f for f in ORDEN_FUENTES if f in hay]
+                       + sorted(f for f in hay if f not in ORDEN_FUENTES))
+            base = todas + extra
+            rows = [r for r in base
+                    if (not filtro or filtro.lower() in r["title_full"].lower())
+                    and (vista == "todas" or r.get("fuente", "claude") == vista)]
+            if not rows:
+                rows = [{"name": "", "title": "", "title_full": _("(nothing matches)"),
+                         "idle": None, "working": None, "attached": False,
+                         "mem_mb": None, "meta": {}, "_vacio": True,
+                         "pulso": {"escribe": None, "herramienta": None}}]
+            if foco:                  # tras un refresco, el cursor sigue a su sesion
+                for k, r in enumerate(rows):
+                    if r["name"] == foco:
+                        cur = k
+                        break
+                foco = None
+            cur = max(0, min(cur, len(rows) - 1))
+            stdscr.erase()
+            h, w = stdscr.getmaxyx()
+            trab = sum(1 for r in rows if r["working"])
+
+            cab = (_("Sessions that died") if muertas else
+                   _("Claude sessions") if vista == "claude" else
+                   _("All sessions") if vista == "todas"
+                   else _("{v} sessions", v=etiqueta_fuente(vista)))
+            externa = vista not in ("claude", "todas")
+            ram_total = sum(r["mem_mb"] or 0 for r in rows)
+            zonas = []          # (y, x0, x1, que, dato) — lo que el raton puede tocar
+            hx = 2
+            def cab_put(txt, par=0, extra=0):
+                nonlocal hx
+                if hx < w - 1:
+                    stdscr.addnstr(0, hx, txt, w - 1 - hx, C(par) | extra)
+                    hx += ancho(txt)
+            if muertas:
+                cab_put(cab, 6, curses.A_BOLD)
+                cab_put("   ")
+            else:
+                # Pestanas en vez del titulo: "Sesiones de Claude" ya lo dice la
+                # pestana activa, y ademas ensena QUE otras vistas hay — cosa que una
+                # tecla escondida (TAB) no hace. Se pinchan.
+                for nom in (["claude"] + [f for f in fuentes if f != "claude"]
+                            + ["todas"]):
+                    x0, act = hx, nom == vista
+                    cab_put(f" {etiqueta_fuente(nom)} ", 0 if act else 4,
+                            (CF(6) | curses.A_BOLD) if act else 0)
+                    zonas.append((0, x0, hx - 1, "vista", nom))
+                cab_put("   ")
+            if filtro or buscando:
+                cab_put(_("filter: ") + filtro + "\u2588", 2, curses.A_BOLD)
+                cab_put("   ")
+            cab_put(str(len(rows)), 6, curses.A_BOLD)
+            # En "todas" conviven abiertas y reanudables: llamarlas "abiertas" a todas
+            # decia que 46 sesiones muertas seguian corriendo.
+            cab_put(_(" total") if vista == "todas" else
+                    _(" resumable") if (muertas or externa) else _(" open"), 4)
+            currando = sum(1 for r in rows if (r.get("pulso") or {}).get("herramienta"))
+            escriben = sum(1 for r in rows if (r.get("pulso") or {}).get("escribe")
+                           and not (r.get("pulso") or {}).get("herramienta"))
+            if escriben:
+                cab_put("  \u00b7  ", 4)
+                cab_put("\u25cf ", 9, curses.A_BOLD)
+                cab_put(str(escriben), 9, curses.A_BOLD)
+                cab_put(_(" writing"), 4)
+            if currando:
+                cab_put("  \u00b7  ", 4)
+                cab_put("\u25d0 ", 7, curses.A_BOLD)
+                cab_put(str(currando), 7, curses.A_BOLD)
+                cab_put(_(" in a command"), 4)
+            if not (muertas or externa):
+                # El filtro por fuente ya deja fuera el historial; excluir ademas las
+                # que no tienen proceso conocido contaba 0 en espera con dos delante.
+                quietas = sum(1 for r in rows if not r["working"]
+                              and r.get("fuente", "claude") == "claude")
+                if quietas or vista != "todas":
+                    cab_put("  \u00b7  ", 4)
+                    cab_put(str(quietas), 0)
+                    cab_put(_(" idle"), 4)
+            if vista == "todas":
+                reanud = sum(1 for r in rows if r.get("fuente", "claude") != "claude")
+                if reanud:
+                    cab_put("  \u00b7  ", 4)
+                    cab_put(str(reanud), 4, curses.A_BOLD)
+                    cab_put(_(" resumable"), 4)
+            if ram_total:
+                cab_put("  \u00b7  ", 4)
+                cab_put(_mb(ram_total), 8, curses.A_BOLD)
+
+            fondo = max(5, h - 6)          # ultima fila util del area de contenido
+            alto = max(3, min(len(rows), fondo - 2))
+            if cur < top:
+                top = cur
+            if cur >= top + alto:
+                top = cur - alto + 1
+
+            # Con 150 columnas la lista ocupaba un tercio y el resto estaba vacio:
+            # a partir de 108 el detalle se va a una columna a la derecha.
+            lateral = w >= 108
+            # El ancho sobrante se lo lleva el PANEL, no el titulo: estirar el titulo
+            # solo mete espacios en blanco entre columnas, mientras que el panel tiene
+            # contenido de verdad que cortar (el ultimo prompt). Asi una ventana de 185
+            # columnas se llena de informacion en vez de desierto.
+            visibles = rows[top:top + alto]
+
+            def _proy(r):
+                pr, ra = r.get("proyecto") or "", r.get("rama") or ""
+                if ra and ra not in ("main", "master"):
+                    return f"{pr} \u2387{ra}" if pr else ra
+                return pr
+
+            # Cada columna pide lo que necesita y el sobrante va al panel. Fijar el
+            # proyecto a 18 cortaba nombres largos teniendo la pantalla
+            # medio vacia al lado.
+            largo = max((ancho(r.get("title_full") or r["title"]) for r in visibles),
+                        default=20)
+            ancho_p = min(30, max((ancho(_proy(r)) for r in visibles), default=0))
+            fijas = 31 + ancho_p              # canal, estado, tiempo, barra, RAM
+            anchura_t = max(12, min(largo, (w - (52 if lateral else 3)) - fijas))
+            ancho_lista = anchura_t + fijas
+            ancho_lista += 1              # una columna en blanco para el scrollbar
+            ancho_det = max(0, w - ancho_lista - 3) if lateral else 0
+            if lateral and ancho_det < 26:
+                lateral, ancho_det, ancho_lista = False, 0, anchura_t + fijas
+            fila0 = 2
+            # Regla bajo la cabecera: sin ella el estado global y la primera fila se
+            # leen como una sola cosa. La T marca donde arranca la columna de detalle.
+            stdscr.addnstr(1, 2, "\u2500" * max(0, w - 3), max(0, w - 3), C(4))
+            if lateral and ancho_lista + 2 < w - 1:
+                stdscr.addnstr(1, ancho_lista + 2, "\u252c", 1, C(4))
+            tope_ram = max((r["mem_mb"] or 0 for r in rows), default=0)
+            for vis, i in enumerate(range(top, min(len(rows), top + alto))):
+                r = rows[i]
+                marcada = r["name"] in marcadas or (
+                    ancla is not None and min(ancla, cur) <= i <= max(ancla, cur))
+                fila_y, x = fila0 + vis, 0
+                foco = i == cur
+                roza = sobre == i and not foco
+                zonas.append((fila_y, 0, 2, "marca", i))
+                zonas.append((fila_y, 3, max(3, ancho_lista - 1), "fila", i))
+
+                def put(txt, par=0, extra=0):
+                    """Pinta un trozo con su propio color. Bajo el cursor solo cambia
+                    el FONDO (pares 10..19), asi que el estado, el proyecto y la RAM
+                    siguen distinguiendose en la fila que estas mirando."""
+                    nonlocal x
+                    if x >= ancho_lista:
+                        return
+                    attr = (CF(par) if foco else CH(par) if roza else C(par)) | extra
+                    stdscr.addnstr(fila_y, x, txt, ancho_lista - x, attr)
+                    x += ancho(txt)
+
+                sin_rastro = (r.get("fuente", "claude") == "claude"
+                              and not r.get("_vacio") and not r.get("_demo")
+                              and not (r.get("meta") or {}).get("_transcript"))
+                # Barra de canal en vez de "[x] ": amarilla si esta marcada, azul si es
+                # la fila bajo el cursor. Cuatro columnas menos de ruido repetido en
+                # cada linea, y la seleccion se lee por color sin deletrear casillas.
+                put(" ")
+                put("\u258c" if marcada else ("\u258e" if foco else " "),
+                    2 if marcada else 6, curses.A_BOLD)
+                put(" ")
+                titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
+                                 anchura_t)
+                put(titulo, 2 if marcada else (5 if sin_rastro else 0),
+                    curses.A_BOLD if (marcada or foco) else 0)
+                pu = r.get("pulso") or {}
+                # La herramienta gana sobre "escribe": el tool_use acaba de escribirse
+                # en el transcript, asi que las dos son ciertas a la vez y la que
+                # informa es la segunda ("esta corriendo algo"), no la primera.
+                if pu.get("herramienta"):
+                    put(" \u25d0 ", 7, curses.A_BOLD)      # esperando a su comando
+                elif pu.get("escribe"):
+                    put(" \u25cf ", 9, curses.A_BOLD)      # escribiendo la respuesta
+                else:
+                    put("   ")
+                proy = _proy(r)
+                if ancho_p:
+                    put(rellena(recorta(proy, ancho_p), ancho_p + 1), 8 if proy else 4)
+                put(f"{_hace(r['idle']):>8}  ", color_tiempo(r["idle"]))
+                cuota = (r["mem_mb"] or 0) / tope_ram if tope_ram else 0
+                put(barra(r["mem_mb"], tope_ram),
+                    5 if cuota > 0.75 else 7 if cuota > 0.4 else 8)
+                put(f"{(_mb(r['mem_mb']) if r['mem_mb'] else ''):>8} ", 4)
+                put("\u25aa" if r["attached"] and not r.get("_sin_proceso") else " ", 6)
+                if foco or roza:
+                    stdscr.addnstr(fila_y, x, " " * max(0, ancho_lista - x),
+                                   max(0, ancho_lista - x), CF(0) if foco else CH(0))
+
+            y = fila0 + alto
+            if len(rows) > alto:
+                # La columna `ancho_lista` esta libre por construccion (todo el
+                # contenido se recorta a ancho_lista-1) y la barra dice de un vistazo
+                # cuanta lista queda debajo, que el contador solo dice leyendolo.
+                grosor = max(1, round(alto * alto / len(rows)))
+                arriba = round((alto - grosor) * top / max(1, len(rows) - alto))
+                for k in range(alto):
+                    pomo = arriba <= k < arriba + grosor
+                    stdscr.addnstr(fila0 + k, ancho_lista,
+                                   "\u2503" if pomo else "\u2502", 1,
+                                   C(6) if pomo else C(4))
+                    zonas.append((fila0 + k, ancho_lista, ancho_lista, "scroll", k))
+                stdscr.addnstr(y, 4, _("\u2195  {a}\u2013{b} of {n}",
+                                       a=top + 1, b=top + alto, n=len(rows)), w - 5, C(4))
+                y += 1
+            y += 1
+
+            d = detalles(rows[cur])
+            fu = rows[cur].get("fuente", "claude")
+            proyecto = pathlib.Path(d.get("cwd") or
+                                    (rows[cur].get("meta") or {}).get("cwd") or "").name
+            ult = _clean(d.get("lastPrompt") or "")
+            pistas = [x for x in (
+                _("{f} \u00b7 ENTER resumes it", f=etiqueta_fuente(fu))
+                if fu != "claude" else d.get("fase"),
+                proyecto or None,
+                d.get("gitBranch"),
+                (_("{n} MB of history", n=max(1, (d.get('peso') or 0) // 1024 // 1024))
+                 if d.get("peso") else
+                 None if fu != "claude"
+                 else _("NO TRANSCRIPT: closing it loses it")),
+                rows[cur]["name"],
+            ) if x]
+
+            if lateral:
+                x0 = ancho_lista + 4
+                # Etiqueta a la izquierda y valor a la derecha: con 70 columnas de
+                # panel, una lista de valores sueltos no se lee — no se sabe que es cada
+                # cosa. Cuesta 10 columnas y las hay de sobra.
+                campos = [
+                    (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")
+                     else 7 if (d.get("fase") or "").startswith(("esperando", "escribiendo", "lleva")) else 4),
+                    (_("project"), " \u00b7 ".join(x for x in (rows[cur].get("proyecto"),
+                                                         rows[cur].get("rama")) if x), 8),
+                    (_("open for"), _lapso(max(0, time.time() - rows[cur]["created"]))
+                     if rows[cur].get("created") else "", 4),
+                    (_("memory"), _mb(rows[cur]["mem_mb"]) if rows[cur]["mem_mb"] else "", 8),
+                    (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
+                     if d.get("peso") else
+                     ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
+                    (_("session"), rows[cur]["name"], 4),
+                ]
+                if fu != "claude":
+                    campos.insert(0, (_("source"),
+                                      _("{f} \u00b7 ENTER resumes it",
+                                        f=etiqueta_fuente(fu)), 7))
+                campos = [c for c in campos if c[1]]
+
+                # Los metadatos se anclan ABAJO y el texto fluye desde arriba: asi las
+                # etiquetas caen siempre en la misma linea y el ojo no las persigue
+                # cuando el prompt de la sesion de al lado ocupa el doble.
+                bloques = [b for b in (
+                    ((_("\u25b8 right now"), d.get("tool"), 7, 2)
+                     if (rows[cur].get("pulso") or {}).get("herramienta") else None),
+                    (_("\u25b8 what you last said"), ult, 6, 4),
+                    (_("\u25b8 what it last replied"), d.get("resp"), 9, 5),
+                ) if b and b[1]]
+                # Sin texto arriba (las sesiones de otros CLI no traen prompt) anclar
+                # abajo dejaria veinte lineas en blanco y tres etiquetas al fondo.
+                base_campos = (max(fila0 + 2, fondo - len(campos) + 1) if bloques
+                               else fila0)
+                # Tope por bloque, y reparto proporcional solo si no caben: sin tope,
+                # una respuesta con tabla se comia veinte lineas y tapaba el prompt.
+                libre = max(0, base_campos - fila0 - 1 - 2 * len(bloques))
+                pide = [min(tope, max(1, -(-ancho(t) // max(1, ancho_det))))
+                        for _e, t, _p, tope in bloques]
+                fila = fila0
+                for (etiq, txt, par, _t), q in zip(bloques, pide):
+                    if fila >= base_campos - 2:
+                        break          # cabecera sin ni una linea debajo no informa
+                    cuota = q if sum(pide) <= libre else max(
+                        1, min(q, round(libre * q / max(1, sum(pide)))))
+                    stdscr.addnstr(fila, x0, etiq, ancho_det, C(par) | curses.A_BOLD)
+                    fila += 1
+                    for trozo in _troceado(txt, ancho_det, cuota):
+                        if fila >= base_campos - 1:
+                            break
+                        stdscr.addnstr(fila, x0, trozo, ancho_det)
+                        fila += 1
+                    fila += 1
+
+                fila = base_campos
+                for etiq, valor, par in campos:
+                    if fila > fondo:
+                        break
+                    stdscr.addnstr(fila, x0, f"{etiq:<10}", 10, C(4))
+                    stdscr.addnstr(fila, x0 + 10, recorta(valor, ancho_det - 10),
+                                   ancho_det - 10, C(par)
+                                   | (curses.A_BOLD if par in (5, 9) else 0))
+                    fila += 1
+                # La vertical llega hasta donde hay algo: un separador colgando sobre
+                # veinte lineas vacias es marco, no informacion.
+                for k in range(fila0, max(fila0 + alto, fila)):
+                    stdscr.addnstr(k, x0 - 2, "\u2502", 1, C(4))
+            else:
+                if ult:
+                    stdscr.addnstr(y, 2, _("last:"), 8, C(6) | curses.A_BOLD)
+                    stdscr.addnstr(y, 10, recorta(ult, max(20, w - 12)), w - 11)
+                    y += 1
+                stdscr.addnstr(y, 10, recorta("  \u00b7  ".join(pistas), w - 12),
+                               w - 11, C(4))
+
+            y = min(max(y + 1, h - 4), max(0, h - 3))
+            n = len(marcadas)
+            if aviso:                      # el aviso manda: va donde se mira
+                stdscr.addnstr(y, 2, " " + aviso + " ", w - 3,
+                               (C(9) if aviso.startswith("Abierta") else C(2))
+                               | curses.A_BOLD)
+            elif n:
+                stdscr.addnstr(y, 2,
+                               _("{n} marked to discard", n=n) if muertas
+                               else _("{n} marked to close", n=n),
+                               w - 3, C(2) | curses.A_BOLD)
+            # Pastillas con fondo en vez de texto suelto: se leen como botones, que es
+            # lo que ya son — se pinchan y hacen lo mismo que su tecla.
+            hx2 = 2
+            for tecla, txt, cod in ((_("ENTER"), _("open"), 10),
+                                    (_("SPACE"), _("mark"), 32),
+                                    ("x", _("close"), ord("x")),
+                                    ("/", _("filter"), ord("/")),
+                                    ("TAB", _("other CLI"), 9),
+                                    ("?", _("help"), ord("?")),
+                                    ("q", _("quit"), ord("q"))):
+                pastilla = f" {tecla} {txt} "
+                if hx2 + ancho(pastilla) >= w - 2:
+                    break
+                stdscr.addnstr(y + 2, hx2, f" {tecla} ", w - 1 - hx2,
+                               CF(7) | curses.A_BOLD)
+                stdscr.addnstr(y + 2, hx2 + len(tecla) + 2, f"{txt} ", w - 1 - hx2, CF(0))
+                zonas.append((y + 2, hx2, hx2 + ancho(pastilla) - 1, "tecla", cod))
+                hx2 += ancho(pastilla) + 2
+            stdscr.refresh()
+
+            if ayuda:
+                teclas = [
+                    (_("ENTER"), _("open it (a NEW window when Warp is there)")),
+                    (_("arrows"), _("move (j / k too)")),
+                    (_("home/end"), _("first / last")),
+                    (_("SPACE"), _("mark / unmark")),
+                    ("v", _("range mode: drop an anchor, SPACE marks to the cursor")),
+                    ("x", _("close the marked ones (asks first)")),
+                    ("/", _("filter by title as you type")),
+                    ("TAB", _("switch CLI: claude, history, codex, gemini, all")),
+                    ("a / i", _("mark all / invert")),
+                    ("d", _("mark the ones idle for over an hour")),
+                    ("r", _("reopen the marked ones as tabs")),
+                    ("q", _("quit without touching anything")),
+                    ("", ""),
+                    (_("mouse"), _("click selects, double click opens")),
+                    ("", _("right click, or click the bar on the left: mark")),
+                    ("", _("wheel scrolls; tabs and buttons below are clickable")),
+                ]
+                alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
+                teclas = teclas[:max(0, alto_v - 4)]
+                win = curses.newwin(alto_v, ancho_v, max(0, (h - alto_v) // 2),
+                                    max(0, (w - ancho_v) // 2))
+                win.attrset(C(6))
+                win.box()
+                win.attrset(0)
+                win.addnstr(1, 3, _("Keys"), ancho_v - 6, C(6) | curses.A_BOLD)
+                for k, (tec, txt) in enumerate(teclas):
+                    if tec:
+                        win.addnstr(3 + k, 3, f"{tec:<11}", 11, C(7) | curses.A_BOLD)
+                    if txt:
+                        win.addnstr(3 + k, 14, txt, max(1, ancho_v - 17), C(4))
+                win.refresh()
+                win.timeout(-1)
+                tecla_limpia(win)
+                ayuda = False
+                continue
+
+            c = stdscr.getch()
+            if c == -1:               # nadie ha tocado nada: refrescar y seguir
+                foco = rows[cur]["name"] if rows else None
+                todas = recargar()
+                continue
+            ev = None
+            if c == curses.KEY_MOUSE:                 # ncurses lo parseo el
+                try:
+                    _id, mx, my, _z, bs = curses.getmouse()
+                except curses.error:
+                    continue
+                # BUTTON5 solo existe si ncurses se compilo con la v2 del protocolo:
+                # sin el getattr, la rueda hacia abajo tira la sesion con AttributeError.
+                ev = (mx, my, bool(bs & curses.BUTTON4_PRESSED),
+                      bool(bs & getattr(curses, "BUTTON5_PRESSED", 0x00200000)),
+                      bool(bs & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED)),
+                      bool(bs & (curses.BUTTON3_PRESSED | curses.BUTTON3_CLICKED)))
+            elif c == 27 and raton:                   # ncurses no sabe: SGR a mano
+                sgr = leer_sgr(stdscr)
+                if not sgr:
+                    continue
+                b, mx, my, pulsado = sgr
+                rueda, bot = bool(b & 64), b & 3
+                mueve = bool(b & 32) and not rueda
+                ev = (mx, my, rueda and bot == 0, rueda and bot == 1,
+                      pulsado and not mueve and bot == 0,
+                      pulsado and not mueve and bot == 2)
+
+            if ev:
+                mx, my, arriba, abajo, pulsa, dcha = ev
+                if arriba or abajo:
+                    # La rueda desplaza la VISTA y solo arrastra el cursor si se le
+                    # sale: mover la seleccion con la rueda hace perder el sitio.
+                    top = (max(0, top - 3) if arriba
+                           else min(max(0, len(rows) - alto), top + 3))
+                    cur = max(top, min(cur, top + alto - 1))
+                    continue
+                golpe = next((z for z in zonas if z[0] == my and z[1] <= mx <= z[2]), None)
+                if not (pulsa or dcha):          # solo esta pasando por encima
+                    nuevo = golpe[4] if golpe and golpe[3] in ("fila", "marca") else None
+                    if nuevo == sobre:
+                        continue                 # nada que repintar: no gastes la vuelta
+                    sobre = nuevo
+                    continue
+                if not golpe:
+                    continue
+                _y, _x0, _x1, que, dato = golpe
+                buscando = False
+                if que == "vista":
+                    if dato != "claude" and not extra:
+                        extra = sesiones_externas(_ids(todas))
+                    vista, cur, top = dato, 0, 0
+                    aviso = ""
+                    continue
+                if que == "scroll":
+                    top = max(0, min(round((len(rows) - alto) * dato / max(1, alto - 1)),
+                                     max(0, len(rows) - alto)))
+                    cur = max(top, min(cur, top + alto - 1))
+                    continue
+                if que == "marca" or (que == "fila" and dcha):
+                    if not rows[dato].get("_vacio"):
+                        marcadas.symmetric_difference_update({rows[dato]["name"]})
+                    cur = dato
+                    aviso = ""
+                    continue
+                if que == "fila":
+                    ahora = time.time()
+                    doble = ultimo_click[0] == dato and ahora - ultimo_click[1] < 0.45
+                    ultimo_click, cur = (dato, ahora), dato
+                    if not doble:
+                        aviso = ""
+                        continue
+                    c = 10                       # doble click = ENTER
+                elif que == "tecla":
+                    c = dato                     # la pastilla del pie hace de tecla
+
+            # El aviso se limpia DESPUES del raton, no antes: con 1003 cada pixel de
+            # movimiento es un evento, y borrarlo arriba hacia que un "Abierta en una
+            # ventana nueva" durara lo que tardas en rozar el raton.
+            aviso = ""
+            if c == ord("?"):
+                ayuda = True
+                continue
+
+            if buscando:                    # modo filtro: casi todo es texto
+                if c == -1:
+                    continue
+                if c in (curses.KEY_ENTER, 10, 13, 27):
+                    buscando = False
+                elif c in (curses.KEY_BACKSPACE, 127, 8):
+                    filtro = filtro[:-1]
+                    if not filtro:
+                        buscando = False
+                elif 32 <= c < 127:
+                    filtro += chr(c)
+                    cur = 0
+                continue
+
+            if c == ord("/"):
+                buscando, filtro, cur = True, "", 0
+                continue
+            if c == 9:                      # Tab: claude -> historial -> ... -> todas
+                if not extra:
+                    extra = sesiones_externas(_ids(todas))
+                orden = ["claude"] + [f for f in fuentes if f != "claude"] + ["todas"]
+                vista = orden[(orden.index(vista) + 1) % len(orden)] if vista in orden else "claude"
+                cur = 0
+                continue
+            if rows and rows[0].get("_vacio"):
+                if c in (ord("q"), ord("Q")):
+                    return
+                if c in (curses.KEY_BACKSPACE, 127, 8):
+                    filtro = ""
+                continue
+
+            if c in (curses.KEY_UP, ord("k")):
+                cur = (cur - 1) % len(rows)
+            elif c in (curses.KEY_DOWN, ord("j")):
+                cur = (cur + 1) % len(rows)
+            elif c == curses.KEY_HOME:
+                cur = 0
+            elif c == curses.KEY_END:
+                cur = len(rows) - 1
+            elif c == ord(" "):
+                if ancla is not None:          # modo rango: marca de ancla a cursor
+                    for i in range(min(ancla, cur), max(ancla, cur) + 1):
+                        marcadas.add(rows[i]["name"])
+                    ancla = None
+                else:
+                    marcadas.symmetric_difference_update({rows[cur]["name"]})
+                    cur = min(cur + 1, len(rows) - 1)
+            elif c in (ord("v"), ord("V")):
+                ancla = None if ancla is not None else cur
+            elif c in (ord("a"), ord("A")):
+                nombres = {r["name"] for r in rows}
+                marcadas = (marcadas - nombres) if nombres <= marcadas else (marcadas | nombres)
+            elif c in (ord("i"), ord("I")):
+                marcadas ^= {r["name"] for r in rows}
+            elif c in (ord("d"), ord("D")):
+                quietas = {r["name"] for r in rows if (r["idle"] or 0) >= INACTIVA}
+                if not quietas:
+                    aviso = _("None has been idle for over an hour.")
+                marcadas |= quietas
+            elif c in (ord("q"), ord("Q")):
+                return          # ESC no vale para salir: llega suelto cuando el
+                                # terminal parte una secuencia de flecha en dos
+            elif c in (ord("r"), ord("R")):
+                if muertas and not marcadas:
+                    aviso = _("Mark which ones you want to resume first.")
+                    continue
+                sel = [r for r in base if r["name"] in marcadas] or rows
+                sel = [r for r in sel if not r["attached"]]
+                if not sel:
+                    aviso = _("Those already have a tab open.")
+                    continue
+                if not ejecutar:
+                    res["out"] = ("reopen", sel)
+                    return
+                aviso, todas = ejecutar("reopen", sel)
+                res["toco"] = True
+                marcadas.clear()
+                ancla = None
+                continue
+            elif c in (curses.KEY_ENTER, 10, 13):
+                # No se sale del selector: la pestana desde la que miras la lista
+                # se queda como estaba y puedes abrir otra a continuacion.
+                if rows[cur].get("_vacio"):
+                    continue
+                if not hay_warp():
+                    res["out"] = ("open", [rows[cur]])
+                    return          # sin ventana nueva hay que soltar el tty primero
+                abierto = abrir_sesion(rows[cur], callado=True)
+                aviso = (_("Opened in a new window: {t}", t=recorta(abierto, w - 40))
+                         if abierto else _("Don't know how to open that one."))
+                continue
+            elif c in (ord("x"), ord("X"), curses.KEY_DC):
+                if not marcadas:
+                    aviso = _("Mark what you want to close with SPACE first.")
+                    continue
+                sel = [r for r in base if r["name"] in marcadas]
+                ajenas = [r for r in sel if r.get("fuente", "claude") != "claude"
+                          or r.get("_sin_proceso")]
+                if ajenas:
+                    aviso = _("{n} are history, not processes: nothing to close."
+                              " Unmark them.", n=len(ajenas))
+                    continue
+                vivas = sum(1 for r in sel if r["working"])
+                verbo_c = _("Discard") if muertas else _("Close")
+                muestra = sel[:5]
+                alto_c, ancho_c = len(muestra) + 6, min(74, w - 4)
+                win = curses.newwin(alto_c, ancho_c, max(0, (h - alto_c) // 2),
+                                    max(0, (w - ancho_c) // 2))
+                win.box()
+                win.addnstr(1, 3, _("{v} {n} session(s):", v=verbo_c, n=len(sel)),
+                            ancho_c - 6, curses.A_BOLD)
+                for k, rr in enumerate(muestra):
+                    marca = " \u25cf" if rr["working"] else "  "
+                    win.addnstr(2 + k, 3,
+                                "\u00b7 " + recorta(rr["title_full"], ancho_c - 12) + marca,
+                                ancho_c - 6, C(1) if rr["working"] else 0)
+                if len(sel) > len(muestra):
+                    win.addnstr(2 + len(muestra), 5,
+                                _("and {n} more", n=len(sel) - len(muestra)),
+                                ancho_c - 8, curses.A_DIM)
+                if vivas:
+                    win.addnstr(alto_c - 3, 3,
+                                _("HEADS UP: {n} are working right now", n=vivas),
+                                ancho_c - 6, C(2) | curses.A_BOLD)
+                win.addnstr(alto_c - 2, 3, _("[y] confirm    [any other key] cancel"),
+                            ancho_c - 6, CF(7) | curses.A_BOLD)
+                win.refresh()
+                win.timeout(-1)
+                if tecla_limpia(win) in (ord("s"), ord("S"), ord("y"), ord("Y")):
+                    if not ejecutar:
+                        res["out"] = ("close", sel)
+                        return
+                    aviso, todas = ejecutar("close", sel)
+                    res["toco"] = True
+                    marcadas.clear()
+                    ancla, cur, top = None, 0, 0
+                    if not todas and not extra:
+                        return
+                    continue
+                aviso = _("Cancelled, nothing was closed.")
+
+    try:
+        curses.wrapper(run)
+    except Exception:
+        if _env("DEBUG"):
+            raise
+        return None
+    finally:
+        # `endwin()` deshace lo que activo ncurses, no el 1003/1006 que pusimos a
+        # mano: sin esto la terminal se queda escupiendo eventos de raton al shell.
+        if res.get("raton"):
+            try:
+                sys.stdout.write("\033[?1003l\033[?1006l")
+                sys.stdout.flush()
+            except Exception:
+                pass
+    # Salir despues de haber hecho algo no es "no hacer nada": quien llama no debe
+    # reimprimir la lista vieja ni anunciar "sin cambios".
+    return res["out"] or (("hecho", []) if res["toco"] else None)
+
+
+# ─────────────────── sesiones de los otros CLI de agente ───────────────────
+# Claude no es el unico que deja sesiones reanudables por aqui. Estas no viven en
+# tmux (no las lanza nuestro wrapper): son historial en disco, se listan como
+# muertas y se abren con el `resume` de su propio CLI.
+CODEX_INDEX = HOME / ".codex/session_index.jsonl"
+GEMINI_TMP = HOME / ".gemini/tmp"
+ANTIGRAVITY = HOME / ".gemini/antigravity-cli/conversations"
+
+
+def _fila_externa(fuente, sid, titulo, epoch, abrir, cwd=""):
+    return {"name": sid, "created": int(epoch or 0), "attached": False,
+            "meta": {"cwd": cwd}, "pid": "", "mem_mb": None,
+            "title": (titulo[:33] + "\u2026") if len(titulo) > 34 else titulo,
+            "title_full": titulo, "idle": max(0, time.time() - epoch) if epoch else None,
+            "working": False, "fuente": fuente, "abrir": abrir}
+
+
+def _iso(ts):
+    try:
+        return dt_parse(ts)
+    except Exception:
+        return 0
+
+
+def dt_parse(ts):
+    return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+
+
+def sesiones_codex(limite=40):
+    """Del indice que Codex ya mantiene: {id, thread_name, updated_at} por linea.
+
+    Se lee el indice y no los 441 rollouts: el fichero por sesion pesa megas y el
+    indice trae exactamente titulo y fecha, que es lo unico que se pinta.
+    """
+    if not CODEX_INDEX.is_file():
+        return []
+    vistos = {}
+    try:
+        for linea in _tail(CODEX_INDEX, 512 * 1024).decode("utf-8", "replace").splitlines():
+            try:
+                j = json.loads(linea)
+            except Exception:
+                continue
+            if j.get("id"):
+                vistos[j["id"]] = j
+    except Exception:
+        return []
+    out = []
+    for j in vistos.values():
+        out.append(_fila_externa("codex", j["id"],
+                                 j.get("thread_name") or "(sin nombre)",
+                                 _iso(j.get("updated_at") or ""),
+                                 ["codex", "resume", j["id"]]))
+    out.sort(key=lambda r: -(r["created"] or 0))
+    return out[:limite]
+
+
+def _sesiones_json_dir(fuente, raiz, patron, abrir_cmd, limite=20):
+    """Gemini y Antigravity guardan un fichero por conversacion. Hoy sus carpetas
+    estan vacias (verificado 2026-08-25); esto las recoge en cuanto escriban algo."""
+    if not raiz.is_dir():
+        return []
+    out = []
+    for f in sorted(raiz.glob(patron), key=lambda x: -x.stat().st_mtime)[:limite]:
+        titulo = f.stem
+        try:
+            j = json.loads(f.read_text()[:200000])
+            for k in ("title", "name", "summary", "thread_name"):
+                if isinstance(j, dict) and j.get(k):
+                    titulo = str(j[k])
+                    break
+        except Exception:
+            pass
+        out.append(_fila_externa(fuente, f.stem, titulo, f.stat().st_mtime,
+                                 abrir_cmd + [f.stem]))
+    return out
+
+
+def sesiones_externas(vistos=()):
+    if DEMO:
+        return [r for r in sesiones_demo() if r.get("fuente") != "claude"]
+    # El historial de Claude va aqui y no en la lista principal a proposito: son
+    # sesiones reanudables, no abiertas. Mezclarlas enterraria las cinco que estan
+    # vivas bajo cuarenta que no lo estan.
+    fuera = [f for f in sesiones_de_disco(vistos=vistos, solo_activas=False, limite=40)
+             if f["fuente"] == "historial"]
+    fuera += sesiones_codex()
+    fuera += _sesiones_json_dir("gemini", GEMINI_TMP, "*/chats/*.json", ["gemini", "--resume"])
+    fuera += _sesiones_json_dir("antigravity", ANTIGRAVITY, "*.json", ["antigravity", "resume"])
+    return fuera
+
+
+def orphans():
+    if DEMO:
+        return []
+    if not LIVE.is_dir():
+        return []
+    entries = [read_entry(f) for f in sorted(LIVE.glob("*.env"))]
+    entries = [e for e in entries if e]
+    running = {e.get("id") for e in entries if e.get("id") and alive(e.get("pid"))}
+    out = []
+    for e in entries:
+        if alive(e.get("pid")):
+            continue
+        if e.get("id") in running:      # ya reabierta en otra pestana viva
+            continue
+        e["_transcript"] = transcript_of(e)
+        out.append(e)
+    return out
+
+
+def describe(e):
+    sid = e.get("id") or _("(id not resolved)")
+    started = e.get("started", "?")
+    cwd = e.get("cwd", "?")
+    ok = "ok" if e.get("_transcript") else _("NO TRANSCRIPT")
+    flags = " ".join(e.get("resume_flags__list") or [])
+    extra = f"   flags {flags}" if flags else ""
+    line = (f"  {label(e):<34} {sid}  [{ok}]\n"
+            + "      cwd " + str(cwd) + "   "
+            + _("opened {t}", t=started) + extra)
+    if e.get("_transcript"):
+        ultimo = last_user_text(e["_transcript"])
+        if ultimo and not ultimo.lower().startswith(label(e).rstrip("\u2026").lower()[:24]):
+            line += "\n      " + _("last:") + f" {ultimo[:88]}"
+    return line
+
+
+def write_launch_config(items):
+    LAUNCH.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f"name: {CONFIG_NAME}", "windows:", "  - tabs:"]
+    for e in items:
+        title = label(e).replace('"', "'")
+        flags = e.get("resume_flags__list") or []
+        cmd = " ".join(["claude", "--resume", e["id"]] + [shlex.quote(f) for f in flags])
+        lines += [
+            f'      - title: "{title}"',
+            "        layout:",
+            f'          cwd: "{e["cwd"]}"',
+            "          commands:",
+            f"            - exec: {cmd}",
+        ]
+    path = LAUNCH / f"{CONFIG_NAME}.yaml"
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def archive(items, folder):
+    dest = ROOT / folder / time.strftime("%Y%m%d-%H%M%S")
+    dest.mkdir(parents=True, exist_ok=True)
+    for e in items:
+        try:
+            shutil.move(str(e["_file"]), str(dest / e["_file"].name))
+        except OSError:
+            pass
+    return dest
+
+
+def cmd_add(argv):
+    sid = argv[0]
+    cwd = str(pathlib.Path.cwd())
+    title = None
+    i = 1
+    while i < len(argv):
+        if argv[i] == "--cwd":
+            cwd = argv[i + 1]; i += 2
+        elif argv[i] == "--title":
+            title = argv[i + 1]; i += 2
+        else:
+            i += 1
+    proj = "".join(c if c.isalnum() else "-" for c in cwd)
+    LIVE.mkdir(parents=True, exist_ok=True)
+    f = LIVE / f"manual-{sid[:8]}-{int(time.time())}.env"
+    f.write_text(
+        f"id={shlex.quote(sid)}\n"
+        f"cwd={shlex.quote(cwd)}\n"
+        f"project_dir={shlex.quote(str(HOME / '.claude/projects' / proj))}\n"
+        "pid=\n"
+        f"started={shlex.quote(datetime.datetime.now().astimezone().strftime('%Y-%m-%dT%H:%M:%S%z'))}\n"
+        f"title={shlex.quote(title or pathlib.Path(cwd).name)}\n"
+        f"title_explicit={'1' if title else ''}\n"
+    )
+    print(f"registrada {sid} -> {f.name}")
+
+
+def _T():
+    """El diccionario vive aqui abajo, lejos del codigo, porque es una tabla de datos
+    y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
+    `_()`: una que falte se pinta en ingles y se ve al momento."""
+    TEXTOS["es"] = {
+        " idle": " en espera",
+        " in a command": " en un comando",
+        " open": " abiertas",
+        " resumable": " reanudables",
+        " total": " en total",
+        " writing": " escribiendo",
+        "(id not resolved)": "(id sin resolver)",
+        "(nothing matches)": "(nada coincide)",
+        "All sessions": "Todas las sesiones",
+        "Cancelled, nothing was closed.": "Cancelado, no se ha cerrado nada.",
+        "Claude sessions": "Sesiones de Claude",
+        "Close": "Cerrar",
+        "Discard": "Descartar",
+        "Discarded {n} entries.": "Descartadas {n} entradas.",
+        "Don't know how to open that one.": "No se como abrir esa.",
+        "Don't know how to open {s}.": "No se como abrir {s}.",
+        "ENTER": "ENTER",
+        "HEADS UP: {n} are working right now": "OJO: {n} estan trabajando ahora mismo",
+        "I don't understand that selection: {e}": "No entiendo la seleccion: {e}",
+        "Keys": "Teclas",
+        "Mark what you want to close with SPACE first.": "Marca antes con ESPACIO lo que quieras cerrar.",
+        "Mark which ones you want to resume first.": "Marca primero cuales quieres reanudar.",
+        "NO TRANSCRIPT": "SIN TRANSCRIPT",
+        "NO TRANSCRIPT: closing it loses it": "SIN TRANSCRIPT: al cerrarla no se recupera",
+        "NO TRANSCRIPT: not recoverable": "SIN TRANSCRIPT: no se recupera",
+        "No changes.": "Sin cambios.",
+        "No changes. Run `{p}` to come back.": "Sin cambios. `{p}` para volver.",
+        "No sessions running and none orphaned.": "No hay sesiones corriendo ni huerfanas.",
+        "No sessions running.": "No hay sesiones corriendo.",
+        "None has been idle for over an hour.": "Ninguna lleva mas de 1h parada.",
+        "Opened in a new window: {t}": "Abierta en una ventana nueva: {t}",
+        "Opening in a new window: {t}": "Abriendo en una ventana nueva: {t}",
+        "Opening {n} tabs -> {p}": "Abriendo {n} pestanas -> {p}",
+        "Opening: {t}": "Abriendo: {t}",
+        "Reattaching {n} tabs -> {p}": "Reenganchando {n} pestanas -> {p}",
+        "SPACE": "ESPACIO",
+        "Sessions that died": "Sesiones que murieron",
+        "Stopped {n} sessions.": "Paradas {n} sesiones.",
+        "Stopped {s}.": "Parada {s}.",
+        "They all already have a tab open.": "Todas estan ya abiertas en una pestana.",
+        "Those already have a tab open.": "Esas ya tienen pestana abierta.",
+        "[in a tab]": "[en una pestana]",
+        "[y] confirm    [any other key] cancel": "[s] confirmar    [cualquier otra] cancelar",
+        "`{p}` to manage them": "`{p}` para gestionarlas",
+        "all": "todas",
+        "and {n} more": "y {n} mas",
+        "arrows": "flechas",
+        "click selects, double click opens": "click selecciona, doble click abre",
+        "close": "cerrar",
+        "close the marked ones (asks first)": "cerrar las marcadas (pide confirmacion)",
+        "filter": "filtrar",
+        "filter by title as you type": "filtrar por titulo mientras escribes",
+        "filter: ": "filtro: ",
+        "first / last": "primera / ultima",
+        "help": "ayuda",
+        "history": "historial",
+        "home/end": "inicio/fin",
+        "idle": "en espera",
+        "last:": "ultimo:",
+        "mark": "marcar",
+        "mark / unmark": "marcar / desmarcar",
+        "mark all / invert": "marcar todas / invertir",
+        "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
+        "memory": "memoria",
+        "mouse": "raton",
+        "move (j / k too)": "moverse (tambien j / k)",
+        "no data": "sin datos",
+        "now": "ahora",
+        "open": "abrir",
+        "open for": "abierta",
+        "open for {t}": "abierta hace {t}",
+        "open it (a NEW window when Warp is there)": "abrir (en una VENTANA NUEVA si hay Warp)",
+        "opened {t}": "abierta {t}",
+        "other CLI": "otro CLI",
+        "project": "proyecto",
+        "quit": "salir",
+        "quit without touching anything": "salir sin tocar nada",
+        "range mode: drop an anchor, SPACE marks to the cursor": "modo rango: fija ancla, ESPACIO marca hasta el cursor",
+        "reopen the marked ones as tabs": "reabrir las marcadas en pestanas",
+        "right click, or click the bar on the left: mark": "click derecho o en la barra de la izquierda: marcar",
+        "running": "ejecutando",
+        "session": "sesion",
+        "source": "origen",
+        "status": "estado",
+        "stopped, waiting on you": "parada, te espera a ti",
+        "switch CLI: claude, history, codex, gemini, all": "cambiar de CLI: claude, historial, codex, gemini, todas",
+        "waiting on a command of its own": "esperando a que termine un comando suyo",
+        "waiting on you": "te espera a ti",
+        "wheel scrolls; tabs and buttons below are clickable": "rueda: desplaza; pestanas y botones de abajo se pinchan",
+        "writing its reply": "escribiendo la respuesta",
+        "{f} \u00b7 ENTER resumes it": "{f} \u00b7 ENTER lo reanuda",
+        "{n} Claude session(s) can be resumed": "{n} sesion(es) de Claude se pueden reanudar",
+        "{n} Claude session(s) open": "{n} sesion(es) de Claude abiertas",
+        "{n} Claude session(s) still running": "{n} sesion(es) de Claude siguen corriendo",
+        "{n} MB of history": "{n} MB de historial",
+        "{n} are history, not processes: nothing to close. Unmark them.": "{n} son historial, no procesos: no hay nada que cerrar. Quitalas de la seleccion.",
+        "{n} closed and archived. The history is still on disk.": "{n} cerrada(s) y archivada(s). El historial sigue en disco.",
+        "{n} marked to close": "{n} marcada(s) para cerrar",
+        "{n} marked to discard": "{n} marcada(s) para descartar",
+        "{n} reattached as tabs -> {p}": "{n} reenganchada(s) en pestanas -> {p}",
+        "{n} resumable session(s):": "{n} sesion(es) reanudables:",
+        "{n} running something right now": "{n} ejecutando ahora mismo",
+        "{n} session(s) closed. Their history is still on disk: `claude-sessions --list` won't list them again, but `claude --resume <id>` brings them back.": "{n} sesion(es) cerradas. Su historial sigue en disco: `claude-sessions --list` no las volvera a listar, pero `claude --resume <id>` las recupera.",
+        "{n} working": "{n} trabajando",
+        "{t} ago": "hace {t}",
+        "{t} on the same tool: it may be stuck": "lleva {t} en la misma herramienta: puede estar colgada",
+        "{v} sessions": "Sesiones de {v}",
+        "{v} {n} session(s):": "{v} {n} sesion(es):",
+        "↕  {a}–{b} of {n}": "↕  {a}–{b} de {n}",
+        "▸ right now": "▸ ahora mismo",
+        "▸ what it last replied": "▸ lo ultimo que te contesto",
+        "▸ what you last said": "▸ lo ultimo que le dijiste"
+    }
+
+
+_T()
+
+
+VERSION = "1.0.0"
+
+
+def main():
+    argv = sys.argv[1:]
+    if {"-h", "--help"} & set(argv):
+        # El docstring ES la ayuda: dos textos que decir lo mismo acaban diciendo
+        # cosas distintas, y el que se queda viejo siempre es el de --help.
+        print((__doc__ or "").strip().replace("sereno ", PROG + " ", 1)
+              .replace("\n  sereno ", "\n  " + PROG + " "))
+        return 0
+    if "--version" in argv:
+        print(f"{PROG} {VERSION}")
+        return 0
+    if argv and argv[0] == "--add":
+        return cmd_add(argv[1:])
+
+    hook = "--hook" in argv
+    if DEMO:
+        # Nada de esto toca la maquina: ni tmux, ni Warp, ni el registro.
+        if hook:
+            hook_line(live_sessions(), None)
+            return 0
+        if "--list" in argv or not sys.stdin.isatty():
+            print_live(sesiones_demo())
+            return 0
+        # Al selector van SOLO las vivas, como en el flujo real: pasarle tambien las
+        # reanudables las duplicaba en cuanto TAB cargaba `extra`.
+        pick_ui(live_sessions(), ejecutar=lambda verbo, sel: (
+            _("{n} closed and archived. The history is still on disk.", n=len(sel))
+            if verbo == "close" else _("{n} reattached as tabs -> {p}",
+                                       n=len(sel), p="demo"), live_sessions()),
+                recargar=live_sessions)
+        return 0
+    rows = live_sessions()
+
+    # ── parar ──
+    if "--stop-all" in argv:
+        if not rows:
+            print(_("No sessions running."))
+            return 0
+        tmux_kill()
+        print(_("Stopped {n} sessions.", n=len(rows)))
+        return 0
+    if "--stop" in argv:
+        name = argv[argv.index("--stop") + 1]
+        tmux_kill(name)
+        print(_("Stopped {s}.", s=name))
+        return 0
+    for flag, forget in (("--close-sel", True), ("--stop-sel", False)):
+        if flag in argv:
+            try:
+                expr = argv[argv.index(flag) + 1]
+            except IndexError:
+                print(f"{flag} necesita una seleccion (ej: \"1,4-6\" o \"espera\")")
+                return 2
+            idx = parse_sel(expr, rows)
+            if idx is None:
+                print(_("I don't understand that selection: {e}", e=expr))
+                return 2
+            n = stop_rows([rows[i] for i in idx], forget)
+            print(f"{n} parada(s){' y archivada(s)' if forget else ''}.")
+            return 0
+
+    # ── sesiones vivas en tmux: siguen corriendo con Warp cerrado ──
+    if rows:
+        if hook:
+            hook_line(rows, None)      # al abrir terminal: una linea, no un menu
+            return 0
+
+        ejecutando = sum(1 for r in rows if r["working"])
+        cabecera = ("\n\033[1m" + _("{n} Claude session(s) still running", n=len(rows))
+                    + (" \u2014 " + _("{n} running something right now", n=ejecutando)
+                       if ejecutando else "") + ":\033[0m")
+        sueltas = [r for r in rows if not r["attached"]]
+
+        if "--list" in argv:
+            rows = live_sessions(con_ram=True)   # listar a mano si admite el coste
+            print(cabecera)
+            print_live(rows)
+            return 0
+
+        if "--yes" in argv:
+            if not sueltas:
+                print(cabecera); print_live(rows)
+                print("\n  " + _("They all already have a tab open."))
+                return 0
+            return reopen(sueltas)
+
+        if not sys.stdin.isatty():
+            print(cabecera)
+            print_live(rows)
+            print("\n  `claude-sessions` para gestionarlas.")
+            return 0
+
+        rows = live_sessions(con_ram=True)      # el TUI si pinta RAM y titulos finos
+
+        def ejecutar(verbo, sel):
+            """Hace el trabajo y devuelve la lista fresca, sin salir del selector."""
+            if verbo == "close":
+                n = stop_rows(sel, forget=True)
+                aviso = _("{n} closed and archived. The history is still on disk.", n=n)
+            else:
+                path = write_attach_config(sel)
+                subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
+                aviso = _("{n} reattached as tabs -> {p}", n=len(sel), p=path.name)
+            return aviso, live_sessions(con_ram=True)
+
+        accion = pick_ui(rows, ejecutar=ejecutar,
+                         recargar=lambda: live_sessions(con_ram=True))
+        if accion is None:          # salio con q, o el terminal no admite el selector
+            print(cabecera)
+            print_live(rows)
+            print("\n  " + _("No changes."))
+            return 0
+        verbo, sel = accion
+        if verbo == "hecho":
+            return 0
+        if verbo == "open":
+            return abrir_sesion(sel[0])
+        if verbo == "reopen":
+            return reopen(sel)
+        n = stop_rows(sel, forget=True)
+        print("\n" + _("{n} session(s) closed. Their history is still on disk:"
+                        " `claude-sessions --list` won't list them again, but"
+                        " `claude --resume <id>` brings them back.", n=n))
+        return 0
+
+    # ── sin tmux vivo: quedan las que murieron de verdad (o son pre-tmux) ──
+    items = orphans()
+
+    # Sin registro y sin tmux —una maquina donde nadie instalo nuestro wrapper— el
+    # historial de `~/.claude/projects` es TODO lo que hay, y lo escribe el propio CLI.
+    # Antes se contestaba "no hay sesiones" teniendo cuarenta reanudables delante.
+    if not items:
+        hist = sesiones_de_disco(limite=40)
+        if hist:
+            if hook or not sys.stdin.isatty():
+                return 0           # al abrir terminal no se avisa de historial viejo
+            if "--list" in argv:
+                print("\n\033[1m" + _("{n} resumable session(s):", n=len(hist)) + "\033[0m")
+                print_live(hist)
+                return 0
+            accion = pick_ui(hist, recargar=lambda: sesiones_de_disco(limite=40))
+            if accion and accion[0] == "open":
+                return abrir_sesion(accion[1][0])
+            return 0
+
+    resumable = [e for e in items if e.get("id") and e.get("_transcript")]
+
+    if "--list" in argv:
+        if not items:
+            print(_("No sessions running and none orphaned."))
+        for e in items:
+            print(describe(e))
+        return 0
+
+    if not items:
+        if not hook:
+            print(_("No sessions running and none orphaned."))
+        return 0
+
+    if hook:
+        hook_line(None, items)
+        return 0
+
+    if "--dismiss" in argv:
+        archive(items, "dismissed")
+        print(_("Discarded {n} entries.", n=len(items)))
+        return 0
+
+    cabecera = (f"\n\033[1mHay {len(items)} sesion(es) que murieron sin dejar proceso"
+                " (reanudables desde su transcript):\033[0m")
+
+    skipped = [e for e in items if e not in resumable]
+    if not resumable:
+        print(cabecera)
+        for e in items:
+            print(describe(e))
+        print(f"\n  Ninguna se puede reanudar (sin id o sin transcript); se descartan.")
+        archive(items, "dismissed")
+        return 0
+
+    def _fila(e):
+        titulo = ai_title(e) or label(e, 200)
+        return {"name": e.get("id", ""), "created": int(e.get("started_epoch") or 0),
+                "attached": False, "meta": e, "pid": "", "mem_mb": None,
+                "title": label(e), "title_full": titulo,
+                "idle": idle_secs(e), "working": False,
+                "pulso": {"escribe": False, "herramienta": False}}
+
+    if "--yes" not in argv and sys.stdin.isatty():
+        # Mismo selector que para las vivas: marcar = quitarlas de en medio,
+        # r = reanudarlas. Un apagon deja aqui una lista larga y no todas interesan.
+        def ejecutar_h(verbo, sel):
+            elegidas = [r["meta"] for r in sel]
+            if verbo == "close":
+                archive(elegidas, "dismissed")
+                aviso = f"{len(elegidas)} descartada(s): no se volveran a ofrecer."
+            else:
+                path = write_launch_config(elegidas)
+                archive(elegidas, "restored")
+                subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
+                aviso = f"{len(elegidas)} reanudada(s) -> {path.name}"
+            quedan = [e for e in orphans() if e.get("id") and e.get("_transcript")]
+            return aviso, [_fila(e) for e in quedan]
+
+        accion = pick_ui([_fila(e) for e in resumable], muertas=True, ejecutar=ejecutar_h)
+        if accion is None:
+            print(cabecera)
+            for e in items:
+                print(describe(e))
+            print("\n  " + _("No changes. Run `{p}` to come back.", p=PROG))
+            return 0
+        verbo, sel = accion
+        if verbo == "hecho":
+            return 0
+        if verbo == "open":
+            return abrir_sesion(sel[0])
+        elegidas = [r["meta"] for r in sel]
+        if verbo == "close":
+            archive(elegidas, "dismissed")
+            print(f"\n{len(elegidas)} descartada(s): no se volveran a ofrecer."
+                  " Su historial sigue en disco (`claude --resume <id>`).")
+            return 0
+        resumable = elegidas
+    elif "--yes" not in argv:
+        print(cabecera)
+        for e in items:
+            print(describe(e))
+        print("\n  (no interactivo: no se reabre nada. `claude-sessions --yes` para forzar)")
+        return 0
+
+    path = write_launch_config(resumable)
+    archive(resumable + skipped, "restored")
+    subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
+    print("\n" + _("Opening {n} tabs -> {p}", n=len(resumable), p=path))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

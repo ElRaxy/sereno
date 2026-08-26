@@ -1,0 +1,34 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  test:
+    # El script solo usa la stdlib, asi que lo unico que hay que probar de verdad es
+    # que arranca y que la interfaz no depende de nada del entorno del autor.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.8", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: compila
+        run: python -m py_compile sereno
+      - name: arranca en una maquina sin sesiones
+        run: |
+          python sereno --version
+          python sereno --help > /dev/null
+          python sereno --list
+          python sereno --hook
+      - name: modo demo, en los dos idiomas
+        run: |
+          SERENO_DEMO=1 SERENO_LANG=en python sereno --list
+          SERENO_DEMO=1 SERENO_LANG=es python sereno --list
+      - name: el modo demo no toca datos reales
+        run: python tests/test_demo_aislado.py
+      - name: los textos traducidos casan con las claves
+        run: python tests/test_i18n.py
