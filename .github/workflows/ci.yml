@@ -34,3 +34,5 @@ jobs:
         run: python tests/test_i18n.py
       - name: el TUI arranca en un pty, pinta y sale
         run: python tests/test_tui_arranca.py
+      - name: no abre conexiones ni lanza binarios sin declarar
+        run: python tests/test_sin_red.py

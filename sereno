@@ -1362,6 +1362,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
             anchura_t = max(12, min(largo, (w - (52 if lateral else 3)) - fijas))
             ancho_lista = anchura_t + fijas
             ancho_lista += 1              # una columna en blanco para el scrollbar
+            # Tope duro contra el borde. `anchura_t` tiene un minimo de 12 columnas, asi
+            # que en una ventana estrecha `ancho_lista` acababa siendo MAYOR que la
+            # pantalla y el relleno de la fila del cursor escribia fuera: curses no
+            # avisa, aborta con `addnwstr() returned ERR` y se lleva el programa. Lo
+            # cazo el test del pty en el CI, donde la ventana es pequena.
+            ancho_lista = max(12, min(ancho_lista, w - 2))
             ancho_det = max(0, w - ancho_lista - 3) if lateral else 0
             if lateral and ancho_det < 26:
                 lateral, ancho_det, ancho_lista = False, 0, anchura_t + fijas
@@ -1391,7 +1397,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
                         return
                     attr = (CF(par) if foco else CH(par) if roza else C(par)) | extra
                     stdscr.addnstr(fila_y, x, txt, ancho_lista - x, attr)
-                    x += ancho(txt)
+                    # Acotado: `addnstr` recorta lo que pinta, pero `x` avanzaba el
+                    # ancho ENTERO del texto, asi que en una ventana estrecha se salia
+                    # de la pantalla y el siguiente addnstr moria con ERR.
+                    x = min(x + ancho(txt), ancho_lista)
 
                 sin_rastro = (r.get("fuente", "claude") == "claude"
                               and not r.get("_vacio") and not r.get("_demo")
@@ -1426,9 +1435,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None):
                     5 if cuota > 0.75 else 7 if cuota > 0.4 else 8)
                 put(f"{(_mb(r['mem_mb']) if r['mem_mb'] else ''):>8} ", 4)
                 put("\u25aa" if r["attached"] and not r.get("_sin_proceso") else " ", 6)
-                if foco or roza:
-                    stdscr.addnstr(fila_y, x, " " * max(0, ancho_lista - x),
-                                   max(0, ancho_lista - x), CF(0) if foco else CH(0))
+                relleno = max(0, ancho_lista - x)
+                if (foco or roza) and relleno:      # con n=0, addnstr devuelve ERR
+                    stdscr.addnstr(fila_y, x, " " * relleno, relleno,
+                                   CF(0) if foco else CH(0))
 
             y = fila0 + alto
             if len(rows) > alto:
