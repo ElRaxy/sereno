@@ -85,15 +85,15 @@ and checks whether the last `tool_use` ever got its matching `tool_result`.
 That single check is the difference between *"it hung"* and *"it's working, leave it alone"*.
 
 ```mermaid
-flowchart TD
+flowchart LR
     T["last 80 lines of the transcript"] --> A{"a tool_use still<br>without its tool_result?"}
-    A -->|yes| S1["ORANGE - in a command"]
+    A -->|yes| S1["🟠 in a command"]
     A -->|no| B{"file written to<br>in the last 90 s?"}
-    B -->|yes| S2["GREEN - writing"]
+    B -->|yes| S2["🟢 writing"]
     B -->|no| C{"idle for<br>under six hours?"}
-    C -->|yes| S3["WHITE - waiting on you"]
-    C -->|no| S4["GREY - stopped, waiting on you"]
-    T -.->|"no transcript"| S5["unknown - never guessed"]
+    C -->|yes| S3["⚪ waiting on you"]
+    C -->|no| S4["⚫ stopped"]
+    T -.->|"no transcript"| S5["unknown — never guessed"]
 
     classDef fact fill:#1f2430,stroke:#5c6773,color:#e6e6e6
     classDef ask fill:#2b3242,stroke:#5c6773,color:#e6e6e6

@@ -84,15 +84,15 @@ transcript y comprueba si el último `tool_use` llegó a recibir su `tool_result
 Esa comprobación es toda la diferencia entre *«se ha colgado»* y *«está trabajando, no la toques»*.
 
 ```mermaid
-flowchart TD
-    T["ultimas 80 lineas del transcript"] --> A{"un tool_use sin<br>su tool_result?"}
-    A -->|si| S1["NARANJA - en un comando"]
-    A -->|no| B{"escrito en los<br>ultimos 90 s?"}
-    B -->|si| S2["VERDE - escribiendo"]
+flowchart LR
+    T["últimas 80 líneas del transcript"] --> A{"un tool_use sin<br>su tool_result?"}
+    A -->|sí| S1["🟠 en un comando"]
+    A -->|no| B{"escrito en los<br>últimos 90 s?"}
+    B -->|sí| S2["🟢 escribiendo"]
     B -->|no| C{"parada desde hace<br>menos de seis horas?"}
-    C -->|si| S3["BLANCO - te espera a ti"]
-    C -->|no| S4["GRIS - parada, te espera a ti"]
-    T -.->|"sin transcript"| S5["desconocido - nunca se adivina"]
+    C -->|sí| S3["⚪ te espera a ti"]
+    C -->|no| S4["⚫ parada"]
+    T -.->|"sin transcript"| S5["desconocido — nunca se adivina"]
 
     classDef fact fill:#1f2430,stroke:#5c6773,color:#e6e6e6
     classDef ask fill:#2b3242,stroke:#5c6773,color:#e6e6e6
