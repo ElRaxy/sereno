@@ -38,6 +38,10 @@ own.
 - `--find` opened the picker on the live tab, which hid its own results behind "nothing matches".
 - An unknown flag was swallowed: `sereno --jsonn` opened the picker, so a script asking for JSON
   got a TUI waiting for keys. It now says so, and suggests the closest real flag.
+- A resumed session was read from the transcript it stopped writing to, so one that was working
+  showed as idle, and sometimes twice. On resume the new transcript copies the old lines, and
+  those lines keep their original `session_id` while the line's own `sessionId` is the new one:
+  that pair is an exact link to the successor, so there is no guessing by timestamps.
 - Selection shortcuts (`idle`, `detached`, `all`) work in both languages.
 - With no sessions at all, the first screen says what to do next, and if `~/.claude/projects` is
   missing it says that too: the CLI writes that folder, so its absence is a diagnosis.
