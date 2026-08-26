@@ -12,6 +12,7 @@ optional and only add live process control; without them everything is read from
 ~/.claude/projects, which the CLI itself writes.
 
   sereno                 the visual picker (arrows/mouse, SPACE marks, ENTER opens)
+  sereno --demo          fake sessions, safe for screenshots and for a first look
   sereno --list          plain list, touches nothing
   sereno --json [--all]  the same facts as JSON, without any conversation in it
   sereno --watch         sit there and tell you when a session stops and waits on you
@@ -2514,6 +2515,16 @@ def _T():
         "mark all / invert": "marcar todas / invertir",
         "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
         "memory": "memoria",
+        "No sessions, and {d} does not exist.":
+            "No hay sesiones, y {d} no existe.",
+        "That folder is written by Claude Code itself, so this "
+        "looks like a machine where it has not run yet.":
+            "Esa carpeta la escribe el propio Claude Code, asi que esto parece "
+            "una maquina donde todavia no ha corrido.",
+        "Try `{p} --demo` to see what this does.":
+            "Prueba `{p} --demo` para ver que hace esto.",
+        "Open one with `claude` and run `{p}` again.":
+            "Abre una con `claude` y vuelve a ejecutar `{p}`.",
         "unknown option: {f}": "opcion desconocida: {f}",
         "Did you mean {g}?": "\u00bfQuerias decir {g}?",
         "`{p} --help` lists them all.": "`{p} --help` las lista todas.",
@@ -2616,6 +2627,7 @@ VERSION = "1.0.0"
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
+    "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
 }
@@ -2665,8 +2677,33 @@ def flags_desconocidos(argv):
     return fuera
 
 
+def nada_que_ensenar():
+    """Que decir cuando no hay ni una sesion. Es la primera pantalla de mucha gente.
+
+    "No sessions" a secas no distingue "aun no has abierto ninguna" de "esto no
+    funciona en tu maquina", y quien acaba de instalarlo asume lo segundo. Si ni
+    siquiera existe la carpeta que escribe el CLI, eso es un diagnostico y hay que
+    darlo: casi siempre significa que Claude Code no ha corrido nunca aqui.
+    """
+    if not DEMO and not PROJECTS.is_dir():
+        return (_("No sessions, and {d} does not exist.", d="~/.claude/projects")
+                + "\n  " + _("That folder is written by Claude Code itself, so this "
+                             "looks like a machine where it has not run yet.")
+                + "\n  " + _("Try `{p} --demo` to see what this does.", p=PROG))
+    return (_("No sessions running and none orphaned.")
+            + "\n  " + _("Open one with `claude` and run `{p}` again.", p=PROG))
+
+
 def main():
     argv = sys.argv[1:]
+    if "--demo" in argv:
+        # La variable de entorno escrita corta. Se toca la global en vez de reejecutar
+        # el proceso: un `execv` perderia el nombre con el que te invocaron, y todos
+        # los mensajes que lo nombran empezarian a mentir.
+        global DEMO
+        DEMO = True
+        os.environ["SERENO_DEMO"] = "1"
+        argv = [a for a in argv if a != "--demo"]
     for malo in flags_desconocidos(argv):
         cerca = _parecido(malo)
         print(_("unknown option: {f}", f=malo)
@@ -2869,14 +2906,14 @@ def main():
 
     if "--list" in argv:
         if not items:
-            print(_("No sessions running and none orphaned."))
+            print(nada_que_ensenar())
         for e in items:
             print(describe(e))
         return 0
 
     if not items:
         if not hook:
-            print(_("No sessions running and none orphaned."))
+            print(nada_que_ensenar())
         return 0
 
     if hook:

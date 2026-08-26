@@ -228,7 +228,7 @@ not five.
 ### 🎭 Try it without touching your data
 
 ```bash
-SERENO_DEMO=1 sereno
+sereno --demo          # or SERENO_DEMO=1 sereno
 ```
 
 Invented sessions, invented projects. **Use this for anything you publish.** The detail panel

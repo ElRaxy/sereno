@@ -29,6 +29,8 @@ jobs:
           SERENO_DEMO=1 SERENO_LANG=en python sereno --list
           SERENO_DEMO=1 SERENO_LANG=es python sereno --list
           SERENO_DEMO=1 python sereno --json | python -c "import json,sys; assert json.load(sys.stdin)['sessions']"
+          python sereno --demo --list
+          python sereno --jsonn && exit 1 || test $? -eq 2
       - name: el modo demo no toca datos reales
         run: python tests/test_demo_aislado.py
       - name: los textos traducidos casan con las claves

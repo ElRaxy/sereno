@@ -228,7 +228,7 @@ no cinco.
 ### 🎭 Probarlo sin tocar tus datos
 
 ```bash
-SERENO_DEMO=1 sereno
+sereno --demo          # o SERENO_DEMO=1 sereno
 ```
 
 Sesiones inventadas, proyectos inventados. **Úsalo para cualquier cosa que publiques.** El panel
