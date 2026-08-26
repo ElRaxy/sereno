@@ -17,7 +17,12 @@ RED = {"socket", "ssl", "http", "urllib", "urllib2", "requests", "httpx", "ftpli
 
 # Todo binario externo que puede ejecutar. Si aparece uno nuevo, este test obliga a
 # anadirlo aqui a mano — que es justo el momento de preguntarse si debe estar.
-PERMITIDOS = {"ps", "open", "defaults", "tmux", "/bin/sh"}
+# Cada uno de estos esta aqui porque hace falta y porque no sale de la maquina:
+#   ps        -> RAM por arbol de procesos          defaults -> el idioma en macOS
+#   tmux      -> las sesiones vivas                 open     -> reabrir una pestana
+#   osascript -> el aviso de escritorio en macOS    notify-send -> el mismo en Linux
+# Anadir uno nuevo obliga a pasar por aqui, que es justo lo que se pretende.
+PERMITIDOS = {"ps", "open", "defaults", "tmux", "/bin/sh", "osascript", "notify-send"}
 
 
 def main():

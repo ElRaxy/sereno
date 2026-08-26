@@ -14,6 +14,7 @@ optional and only add live process control; without them everything is read from
   sereno                 the visual picker (arrows/mouse, SPACE marks, ENTER opens)
   sereno --list          plain list, touches nothing
   sereno --json          the same facts as JSON, without any conversation in it
+  sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --hook          one line if there is anything (for your shell rc)
   sereno --yes           reopen as tabs without asking
   sereno --dismiss       drop the orphan entries without reopening them
@@ -374,7 +375,7 @@ def rss_por_arbol(pids):
     return {p: suma(int(p), set()) / 1024 for p in pids if str(p).isdigit()}
 
 
-def live_sessions(con_ram=False, con_disco=True):
+def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     if DEMO:
         return [r for r in sesiones_demo() if r.get("fuente") == "claude"]
     """`con_ram` cuesta un `ps -eo` de toda la maquina: 220 ms medidos con 9 sesiones.
@@ -387,13 +388,18 @@ def live_sessions(con_ram=False, con_disco=True):
     saca las que se lanzaron desde VS Code o con la ruta completa al binario, que
     hasta ahora no aparecian en ningun sitio.
     """
+    # El pulso fino y la RAM iban atados porque hasta ahora solo los pedia el selector,
+    # que pinta las dos cosas. `--watch` quiere lo fino —es lo que detecta el cambio de
+    # estado— y NO quiere el `ps -eo` de toda la maquina cada veinte segundos.
+    if fino is None:
+        fino = con_ram
     metas = meta_by_tmux()
     paneles = tmux_list()
     mem = rss_por_arbol([p for *_resto, p in paneles if p]) if con_ram else {}
     rows = []
     for name, created, attached, titulo, pid in paneles:
         e = metas.get(name, {})
-        pu = pulso(e, fino=con_ram) if e else {"escribe": None, "herramienta": None}
+        pu = pulso(e, fino=fino) if e else {"escribe": None, "herramienta": None}
         # Orden de preferencia del titulo: lo que el usuario puso con /rename o el
         # aiTitle (los dos llegan por pane_title, en vivo) > el aiTitle del
         # transcript > el primer mensaje. Lo ultimo era la unica fuente y es la peor.
@@ -413,7 +419,11 @@ def live_sessions(con_ram=False, con_disco=True):
         })
     if con_disco:
         ids = {(r.get("meta") or {}).get("id") for r in rows}
-        rows += sesiones_de_disco(vistos=ids, solo_activas=True, fino=con_ram)
+        # `solo_activas=False` lo pide `--watch`: el filtro por mtime tira una sesion
+        # a los 90 segundos de callarse, que es EXACTAMENTE cuando acaba de terminar y
+        # hay que avisar. Sin tmux delante, el vigilante se quedaba sin ver el flanco
+        # que existe para ver. Lo caza `tests/test_watch_flanco.py`.
+        rows += sesiones_de_disco(vistos=ids, solo_activas=solo_activas, fino=fino)
     rows.sort(key=lambda r: (r["idle"] is None, -(r["idle"] or 0)))
     return rows
 
@@ -656,6 +666,68 @@ def filas_json(rows):
 def print_json(rows):
     print(json.dumps({"sereno": VERSION, "sessions": filas_json(rows)},
                      indent=2, ensure_ascii=False))
+
+
+# ─────────────────────────── --watch: el aviso al terminar ───────────────────────────
+# El caso es este: lanzas algo largo, te vas a otra ventana y la sesion termina sin que
+# nadie se entere. Lo que avisa NO es "esta parada" —lo estan casi todas casi siempre—
+# sino el FLANCO: la que hasta hace veinte segundos escribia o corria un comando y ahora
+# te espera. Por eso la primera vuelta no avisa de nada: solo fija la linea base.
+TRABAJANDO = ("writing", "in_command")
+
+
+def transiciones(antes, ahora):
+    """Filas que acaban de pasar de trabajar a esperarte. Funcion pura, a proposito:
+    el bucle es imposible de testear y esto es lo unico que puede equivocarse."""
+    salen = []
+    for r in ahora:
+        previo = antes.get(r["id"])
+        if previo in TRABAJANDO and r["state"] not in TRABAJANDO + ("unknown",):
+            salen.append(r)
+    return salen
+
+
+def notifica(titulo, cuerpo):
+    """Aviso del escritorio si el sistema tiene con que; si no, la campana del terminal.
+
+    Los dos programas son los nativos de cada sistema y no instalan nada: `osascript`
+    viene en macOS y `notify-send` esta en cualquier escritorio Linux. Si no hay
+    ninguno, el aviso no se pierde: sale por stdout igual, con un `\a`.
+    """
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["osascript", "-e",
+                            f'display notification {json.dumps(cuerpo)} '
+                            f'with title {json.dumps(titulo)}'],
+                           check=False, capture_output=True, timeout=5)
+        elif shutil.which("notify-send"):
+            subprocess.run(["notify-send", titulo, cuerpo],
+                           check=False, capture_output=True, timeout=5)
+    except Exception:
+        pass          # un aviso que falla no puede tumbar el vigilante
+
+
+def watch(cada=20):
+    print(_("Watching. Nothing is reported until a session stops working. Ctrl-C to quit."), flush=True)
+    antes = {}
+    primera = True
+    try:
+        while True:
+            filas = filas_json(live_sessions(fino=True, solo_activas=False))
+            for r in (() if primera else transiciones(antes, filas)):
+                que = r["title"] or r["id"]
+                donde = r["project"] or ""
+                sys.stdout.write("\a" + _("{hora}  {t} \u2014 waiting on you{d}",
+                                          hora=time.strftime("%H:%M"), t=que,
+                                          d=f"  ({donde})" if donde else "") + "\n")
+                sys.stdout.flush()
+                notifica(_("waiting on you"), f"{que}" + (f" \u00b7 {donde}" if donde else ""))
+            antes = {r["id"]: r["state"] for r in filas}
+            primera = False
+            time.sleep(cada)
+    except KeyboardInterrupt:
+        print()
+        return 0
 
 
 def fila_de_huerfana(e):
@@ -2320,6 +2392,11 @@ def _T():
         "mark all / invert": "marcar todas / invertir",
         "mark the ones idle for over an hour": "marcar las que llevan mas de 1h quietas",
         "memory": "memoria",
+        "Watching. Nothing is reported until a session stops working. Ctrl-C to quit.":
+            "Vigilando. No dice nada hasta que una sesion deje de trabajar. Ctrl-C para salir.",
+        "{hora}  {t} \u2014 waiting on you{d}": "{hora}  {t} \u2014 te espera a ti{d}",
+        "--every takes a number of seconds, 2 or more.":
+            "--every quiere un numero de segundos, 2 o mas.",
         "context": "contexto",
         "model": "modelo",
         "mouse": "raton",
@@ -2392,6 +2469,17 @@ def main():
         return 0
     if argv and argv[0] == "--add":
         return cmd_add(argv[1:])
+
+    if "--watch" in argv:
+        cada = 20
+        if "--every" in argv:
+            v = argv[argv.index("--every") + 1] if len(argv) > argv.index("--every") + 1 else ""
+            if v.isdigit() and int(v) >= 2:
+                cada = int(v)
+            else:
+                print(_("--every takes a number of seconds, 2 or more."))
+                return 2
+        return watch(cada)
 
     hook = "--hook" in argv
     if DEMO:

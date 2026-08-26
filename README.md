@@ -158,8 +158,26 @@ Python 3.8+. That's the whole dependency list. No venv, no lock file, no supply 
 sereno            # the picker
 sereno --list     # plain list, touches nothing
 sereno --json     # the same facts, for your statusline or your scripts
+sereno --watch    # sit there and tell you the moment one stops and waits on you
 sereno --help
 ```
+
+### `--watch`
+
+Leave it in a spare pane. It says nothing until a session **stops working** — the transition
+from writing (or running a command of its own) to waiting on you. Not "it is idle": most of
+them are idle most of the time, and an alert you get every twenty seconds is one you stop
+reading.
+
+```bash
+sereno --watch              # every 20s
+sereno --watch --every 60
+```
+
+You get a desktop notification (`osascript` on macOS, `notify-send` on Linux — both already on
+your system) and a line on stdout, so it works over SSH and pipes fine. The first pass is
+always silent: it only sets the baseline, otherwise starting it would announce everything you
+already knew.
 
 `--json` gives you every session with a stable `state`
 (`writing` · `in_command` · `waiting` · `stopped` · `unknown`), its context figures, memory and
@@ -265,8 +283,13 @@ unicodedata` and `curses`. Nothing it reads can leave your machine, because ther
 in it that can send anything anywhere.
 
 The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions),
-`open` (hand a session to Warp) and `defaults` (read your macOS locale). No telemetry, no
-analytics, no update check, nothing phoning home.
+`open` (hand a session to Warp), `defaults` (read your macOS locale) and — only under
+`--watch` — `osascript` / `notify-send` for the desktop alert. No telemetry, no analytics, no
+update check, nothing phoning home.
+
+One thing worth saying plainly: a `--watch` alert puts the **session title** into your system's
+notification centre, which on a shared or screen-shared machine is a place you may not want it.
+The alert carries the title and the project, never the conversation.
 
 `tests/test_sin_red.py` walks the AST on every CI run and fails if a networking import appears,
 or if a new external binary shows up that isn't on that list. You don't have to take my word

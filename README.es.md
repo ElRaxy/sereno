@@ -158,8 +158,26 @@ cadena de suministro. Lo mandas por `scp` a un servidor y funciona allí tambié
 sereno            # el selector
 sereno --list     # lista y ya, no toca nada
 sereno --json     # los mismos hechos, para tu statusline o tus scripts
+sereno --watch    # se queda ahí y te avisa en cuanto una para y te espera
 sereno --help
 ```
+
+### `--watch`
+
+Déjalo en un panel que te sobre. No dice nada hasta que una sesión **deja de trabajar**: el
+paso de estar escribiendo (o corriendo un comando suyo) a esperarte a ti. No "está parada":
+casi todas lo están casi siempre, y un aviso que salta cada veinte segundos es un aviso que
+dejas de leer.
+
+```bash
+sereno --watch              # cada 20s
+sereno --watch --every 60
+```
+
+Te llega un aviso de escritorio (`osascript` en macOS, `notify-send` en Linux — los dos ya
+están en tu sistema) y una línea por stdout, así que funciona por SSH y se puede canalizar. La
+primera vuelta siempre calla: solo fija la línea base, o arrancarlo te anunciaría todo lo que
+ya sabías.
 
 `--json` te da cada sesión con un `state` estable
 (`writing` · `in_command` · `waiting` · `stopped` · `unknown`), sus cifras de contexto, la
@@ -267,8 +285,14 @@ unicodedata` y `curses`. Nada de lo que lee puede salir de tu máquina, porque n
 nada capaz de mandar nada a ningún sitio.
 
 Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
-sesiones), `open` (pasarle una sesión a Warp) y `defaults` (leer tu locale en macOS). Sin
-telemetría, sin analíticas, sin comprobación de actualizaciones.
+sesiones), `open` (pasarle una sesión a Warp), `defaults` (leer tu locale en macOS) y —solo bajo
+`--watch`— `osascript` / `notify-send` para el aviso de escritorio. Sin telemetría, sin
+analíticas, sin comprobación de actualizaciones.
+
+Una cosa que conviene decir clara: un aviso de `--watch` mete el **título de la sesión** en el
+centro de notificaciones del sistema, que en una máquina compartida o mientras compartes
+pantalla es un sitio donde igual no lo quieres. El aviso lleva el título y el proyecto, nunca la
+conversación.
 
 `tests/test_sin_red.py` recorre el AST en cada vuelta de CI y falla si aparece un import de red,
 o un binario externo que no esté en esa lista. No hace falta que me creas: el test *es* la

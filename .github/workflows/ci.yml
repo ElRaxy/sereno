@@ -41,3 +41,5 @@ jobs:
         run: python tests/test_contexto.py
       - name: --json no saca conversacion y sus campos son tipados
         run: python tests/test_json_sin_conversacion.py
+      - name: --watch avisa en el flanco y no repite
+        run: python tests/test_watch_flanco.py
