@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/hero.webp" alt="Un sereno con su manojo de llaves levanta el farol en una calle empedrada donde los portales son ventanas de terminal, unas cuantas encendidas" width="880">
-
 # sereno
 
 ### Nueve sesiones de agente abiertas. ¿Cuál está atascada?
@@ -22,12 +20,9 @@ Un fichero de Python · cero dependencias · Claude Code, Codex, Gemini, Antigra
 
 [English](README.md) · **Español**
 
-</div>
+<br>
 
----
-
-<div align="center">
-  <img src="docs/demo.gif" alt="sereno funcionando sobre sesiones inventadas" width="880">
+<img src="docs/demo.gif" alt="sereno funcionando sobre sesiones inventadas" width="880">
 </div>
 
 ```bash
@@ -45,7 +40,7 @@ sereno
 - [Instalación](#-instalación)
 - [Uso](#-uso)
 - [De dónde salen los datos](#-de-dónde-salen-los-datos)
-- [Comparativa](#-comparativa)
+- [Lo que hace, y lo que no](#-lo-que-hace-y-lo-que-no-hace-a-propósito)
 - [Privacidad](#-privacidad)
 - [Requisitos](#-requisitos)
 - [Preguntas frecuentes](#-preguntas-frecuentes)
@@ -80,7 +75,7 @@ la última pantalla de cada una y perder el hilo de lo que estabas haciendo.
 | 🟢 **escribiendo** | está redactando la respuesta ahora mismo | — |
 | 🟠 **en un comando** | lanzó una herramienta y el resultado no ha vuelto | **este es el que importa** |
 | ⚪ **te espera a ti** | terminó y nadie ha contestado | igualito que "se ha caído" |
-| ⚫ **parada, te espera a ti** | lo mismo, pero hace rato | estas son las que conviene cerrar |
+| ⚫ **parada, te espera a ti** | lo mismo, pero hace más de seis horas | estas son las que conviene cerrar |
 
 Un agente metido en un `Bash` de tres minutos **no escribe nada en su transcript**, así que por
 fecha de modificación parece parado — y parado parece abandonado. `sereno` lee la cola del
@@ -88,28 +83,60 @@ transcript y comprueba si el último `tool_use` llegó a recibir su `tool_result
 
 Esa comprobación es toda la diferencia entre *«se ha colgado»* y *«está trabajando, no la toques»*.
 
-> Cada estado lo compone **el código** a partir de hechos tipados leídos del transcript. A ningún
-> modelo se le pide que resuma nada, así que nada puede decirte con aplomo que una sesión va bien
-> cuando no va.
+```mermaid
+flowchart TD
+    T["ultimas 80 lineas del transcript"] --> A{"un tool_use sin<br>su tool_result?"}
+    A -->|si| S1["NARANJA - en un comando"]
+    A -->|no| B{"escrito en los<br>ultimos 90 s?"}
+    B -->|si| S2["VERDE - escribiendo"]
+    B -->|no| C{"parada desde hace<br>menos de seis horas?"}
+    C -->|si| S3["BLANCO - te espera a ti"]
+    C -->|no| S4["GRIS - parada, te espera a ti"]
+    T -.->|"sin transcript"| S5["desconocido - nunca se adivina"]
+
+    classDef fact fill:#1f2430,stroke:#5c6773,color:#e6e6e6
+    classDef ask fill:#2b3242,stroke:#5c6773,color:#e6e6e6
+    classDef out fill:#3a3f4b,stroke:#8a8f99,color:#ffffff
+    class T fact
+    class A,B,C ask
+    class S1,S2,S3,S4,S5 out
+```
+
+Para un `ps`, los cuatro son el mismo proceso vivo. Y el orden también cuenta: **la comprobación
+de la herramienta gana a «está escribiendo»**, porque la línea del `tool_use` acaba de
+escribirse en el fichero, así que las dos son ciertas a la vez y solo la segunda dice algo.
+
+> Cada estado lo compone **el código** a partir de hechos tipados leídos del transcript: dos
+> booleanos y una fecha. A ningún modelo se le pide que resuma nada, así que nada puede decirte
+> con aplomo que una sesión va bien cuando no va. Si los hechos faltan, la fila dice
+> `desconocido` en vez de elegir la respuesta amable.
 
 ---
 
 ## 📖 Leer una fila
 
 ```
- ▎ Refactor payment webhooks  ◐ checkout-api ⎇feat/webhooks   now  ▰▰▰▰▱ 88% ▇ 512 MB
- │            │               │       │           │            │      │     │  │    │
- │            │               │       │           │            │      │     │  │    └ memoria
- │            │               │       │           │            │      │     │  └ cuota sobre la mayor
- │            │               │       │           │            │      │     └ % de la ventana
- │            │               │       │           │            │      └ contexto gastado
- │            │               │       │           │            └ tiempo parada, con color
- │            │               │       │           └ rama de git
- │            │               │       └ proyecto
- │            │               └ ◐ en un comando · ● escribiendo · nada = te espera
- │            └ título — el que Claude se puso, o tu /rename
+ ▎ ◐ Refactor payment webhooks  checkout-api ⎇feat/webhooks      now ▰▰▰▰▱  88% 512 MB
+ │ │            │                    │            │               │     │     │     │
+ │ │            │                    │            │               │     │     │     └ memoria
+ │ │            │                    │            │               │     │     └ % de la ventana
+ │ │            │                    │            │               │     └ contexto gastado
+ │ │            │                    │            │               └ tiempo parada
+ │ │            │                    │            └ rama de git
+ │ │            │                    └ proyecto
+ │ │            └ título — el que Claude se puso, o tu /rename
+ │ └ ◐ en un comando · ● escribiendo · nada = te espera
  └ cursor. Se pone amarillo cuando la fila está marcada.
 ```
+
+**El título es lo último que se recorta.** Estrecha la ventana y ceden antes las columnas de
+apoyo, en este orden: la memoria, luego el proyecto (que se estrecha antes de irse) y por
+último la barra de contexto. El título aguanta entero hasta unas 45 columnas, porque es lo
+único que distingue una sesión de otra. Y ensanchar no vuelve a quitar ninguna columna, así que
+redimensionar no hace saltar la fila.
+
+Una columna que no tiene nada que decir no ocupa: sin tmux no hay columna de memoria, y en una
+pestaña de Codex no hay columna de contexto, en vez de dieciocho blancos en cada línea.
 
 El panel de la derecha enseña **el último prompt y la última respuesta** de esa sesión, para
 que puedas decidir si volver a ella sin abrirla — y además las cifras exactas de contexto
@@ -254,6 +281,49 @@ sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
 sereno --json --all      # añade el historial reanudable, el equivalente de pulsar TAB
 ```
 
+<details>
+<summary><strong>Tres sitios donde merece la pena engancharlo</strong></summary>
+
+<br>
+
+**Un prompt de shell que diga cuántas te esperan.** Sale barato para correrlo en cada prompt, y
+calla cuando la respuesta es cero:
+
+```bash
+sereno_espera() {
+  local n
+  n=$(sereno --json 2>/dev/null | jq '[.sessions[] | select(.state=="waiting")] | length')
+  [ "${n:-0}" -gt 0 ] && printf ' ⏳%s' "$n"
+}
+PS1='$(sereno_espera) \w $ '
+```
+
+**Una barra de tmux con la sesión más cerca de compactar.** La que interesa saber es la que se
+está quedando sin ventana, no la que más memoria gasta:
+
+```bash
+# .tmux.conf
+set -g status-right '#(sereno --json | jq -r "[.sessions[] | select(.context_max>0)] \
+  | max_by(.context_tokens/.context_max) \
+  | \"\(.title[0:24]) \(.context_tokens*100/.context_max | floor)%\"") '
+```
+
+**Cualquier cosa que tenga que esperar a que un agente termine.** `state` es un enum cerrado, así
+que esto es un bucle y no una apuesta:
+
+```bash
+until [ "$(sereno --json | jq -r '.sessions[] | select(.id=="'"$id"'") | .state')" = waiting ]; do
+  sleep 20
+done
+say "te reclama"
+```
+
+Todos los campos son tipados y todos los estados salen de ese mismo enum, así que aquí nada tiene
+que interpretar prosa. `context_max` vale `null` cuando el tope no consta, que es por lo que la
+línea de tmux filtra por él antes de dividir.
+
+</details>
+
 | tecla | |
 |:--|:--|
 | `↑` `↓` / `j` `k` | moverse |
@@ -296,11 +366,25 @@ Imprime una línea cuando hay algo corriendo, y absolutamente nada cuando no.
 
 ## 💾 De dónde salen los datos
 
-De `~/.claude/projects`, que lo escribe Claude Code por su cuenta. Sin configuración, sin
-demonio, sin telemetría, sin nada que montar: lo instalas y ya conoce todas las sesiones que has
-abierto en tu vida.
+Claude Code ya lo escribe todo, en `~/.claude/projects/<proyecto>/<uuid>.jsonl`: una línea de JSON
+por evento, según va corriendo la sesión. `sereno` lee las **últimas 80 líneas** de como mucho 40
+de esos ficheros y saca de ahí todo lo demás. No hay nada más: ni fichero de configuración, ni
+demonio, ni índice, ni telemetría, ni una llamada a ninguna API. Lo instalas y ya conoce todas las
+sesiones que has abierto en tu vida.
 
-Las de Codex, Gemini y Antigravity salen de sus propias carpetas de historial y se abren con el
+| qué lee | qué saca de ahí |
+|:--|:--|
+| la fecha de modificación | si está escribiendo ahora mismo |
+| el último par `tool_use` / `tool_result` | si está atascada dentro de un comando |
+| el `message.usage` de la última respuesta | contexto gastado, y el modelo |
+| `cwd`, `gitBranch` | proyecto y rama |
+| `aiTitle`, `lastPrompt` | el título y el panel |
+
+Eso cuesta **4 ms** para las sesiones vivas y **16 ms** para el historial entero, medido contra
+1.248 transcripts y 3,8 GB. Y se cachea por fecha de modificación, así que un fichero que no se ha
+movido no se lee dos veces.
+
+Las de Codex, Gemini y Antigravity salen de sus propias carpetas de historial y se reabren con el
 `resume` de su CLI. Son ficheros en disco, no procesos vivos, así que `sereno` se niega a
 «cerrarlas» en vez de fingir que ha hecho algo.
 
@@ -313,29 +397,44 @@ Si tus sesiones corren dentro de tmux, además tienes memoria en vivo por sesió
 una terminal enganchada, y poder matarlas de verdad. En macOS con Warp, `ENTER` abre la sesión en
 una **ventana nueva** en vez de quedarse con la que estás mirando.
 
-Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria, y `ENTER` hace `exec`
-sobre la terminal actual.
+Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria — que entonces no
+ocupa nada, en vez de quedarse ahí vacía — y `ENTER` hace `exec` sobre la terminal actual.
 
 </details>
 
 ---
 
-## 📊 Comparativa
+## 📊 Lo que hace, y lo que no hace a propósito
 
-Casi todo lo que hay en este hueco **lanza y orquesta** sesiones. Esto las **mira**, y ese es todo
-el diseño.
+Casi todo lo demás que hay en este hueco **lanza y orquesta** sesiones: arranca él los agentes, así
+que los conoce porque los ha hecho él. `sereno` no arranca nada. Lee lo que los CLI ya escribieron,
+que es justo por lo que ve sesiones que abriste el mes pasado, desde una terminal de la que no ha
+oído hablar, en una máquina a la que has entrado por SSH.
 
-|  | sereno | gestores de tmux | apps de escritorio |
+**Nunca va a:**
+
+- **lanzar ni orquestar agentes.** Esa es la mitad llena de este hueco, y la mitad que necesita
+  adueñarse de tu flujo de trabajo para funcionar. Usa uno de esos para levantar una flota, y luego
+  este para ver qué está haciendo.
+- **escribir en un transcript, ni en nada que sea de una sesión.** Mata los procesos que le marques,
+  y esa es toda la destrucción que lleva dentro.
+- **mandar nada a ninguna parte.** No tiene una sola línea de red, y un test del CI tumba la build
+  si aparece alguna.
+- **preguntarle a un modelo qué le parece.** Cada estado lo compone el código a partir de hechos
+  tipados.
+
+Lo que eso te da, en concreto:
+
+|  | sereno | lanzadores y gestores | apps de escritorio |
 |:--|:--:|:--:|:--:|
+| Ve sesiones que no arrancó él | ✅ | ❌ | 🟡 |
 | Estado en vivo por sesión | ✅ | ❌ | 🟡 |
 | Último prompt y última respuesta | ✅ | ❌ | 🟡 |
+| Contexto gastado por sesión | ✅ | ❌ | ❌ |
 | Funciona sin montar nada | ✅ | necesita su lanzador | hay que instalarla |
 | Codex y Gemini también | ✅ | solo Claude | solo Claude |
 | Va por SSH | ✅ | ✅ | ❌ |
 | Dependencias | **ninguna** | tmux | Electron / Swift |
-
-Si lo que quieres es *lanzar* una flota de agentes, usa uno de esos — y luego usa este para ver
-qué está haciendo la flota.
 
 ---
 
@@ -446,19 +545,30 @@ Ya está. No crea configuración, ni caché, ni carpeta de estado propia.
 
 ## 🔧 Configuración
 
-| Variable | |
-|:--|:--|
-| `SERENO_LANG` | `en` o `es`. Por defecto, tu locale (en macOS, `AppleLocale`) |
-| `SERENO_DEMO` | `1` para sesiones falsas |
-| `SERENO_CTX_MAX` | tope de contexto en tokens, si la deducción de arriba falla |
-| `SERENO_TMUX_SOCK` | socket de tmux que se lee. Por defecto `claude-code` |
-| `SERENO_REGISTRY` | dónde vive el registro opcional del lanzador |
+No hay fichero de configuración. Todo son variables de entorno, así que de esto no queda nada en
+tu máquina si borras el script.
+
+| Variable | Por defecto | |
+|:--|:--|:--|
+| `SERENO_LANG` | tu locale | `en` o `es`. En macOS lee `AppleLocale` |
+| `SERENO_DEMO` | apagado | `1` para sesiones inventadas. Ponla antes de cualquier captura |
+| `SERENO_CTX_MAX` | deducido | tope de contexto en tokens, cuando la cascada falla |
+| `SERENO_TMUX_SOCK` | `claude-code` | qué socket de tmux se lee |
+| `SERENO_REGISTRY` | `~/.claude/warp-sessions` | dónde vive el registro opcional del lanzador |
+| `SERENO_BIN` | `~/.local/bin` | dónde deja el fichero `install.sh` |
+| `SERENO_DEBUG` | apagado | `1` para que el selector no se trague un error de curses. Útil
+  si sale sin decir por qué |
+
+```bash
+# ventana de un millón, en inglés, sin tocar nada permanente
+SERENO_CTX_MAX=1000000 SERENO_LANG=en sereno
+```
 
 ---
 
 ## 🧠 Sobre el código
 
-Un fichero, ~2.000 líneas, solo librería estándar.
+Un fichero, unas 3.200 líneas, solo librería estándar.
 
 Los comentarios están **en castellano** a propósito. Explican *por qué* está cada cosa como está,
 casi siempre nombrando el incidente que lo provocó, y traducirlos lo aplanaría a prosa genérica.

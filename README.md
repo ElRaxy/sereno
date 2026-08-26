@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/hero.webp" alt="A Spanish night watchman with his ring of door keys, raising a lantern in a cobbled street where the doorways are terminal windows, a few of them lit" width="880">
-
 # sereno
 
 ### Nine agent sessions open. Which one is stuck?
@@ -22,12 +20,10 @@ One Python file · zero dependencies · Claude Code, Codex, Gemini, Antigravity
 
 **English** · [Español](README.es.md)
 
-</div>
+<br>
 
----
+<img src="docs/demo.gif" alt="sereno running against fake sessions" width="880">
 
-<div align="center">
-  <img src="docs/demo.gif" alt="sereno running against fake sessions" width="880">
 </div>
 
 ```bash
@@ -45,7 +41,7 @@ sereno
 - [Install](#-install)
 - [Use](#-use)
 - [Where the data comes from](#-where-the-data-comes-from)
-- [How it compares](#-how-it-compares)
+- [What it does, and what it doesn't](#-what-it-does-and-what-it-deliberately-doesnt)
 - [Privacy](#-privacy)
 - [Requirements](#-requirements)
 - [FAQ](#-faq)
@@ -80,36 +76,68 @@ all nine, reading the last screen of each, and losing your place.
 | 🟢 **writing** | producing an answer right now | — |
 | 🟠 **in a command** | it issued a tool call and the result never came back | **this is the one that matters** |
 | ⚪ **waiting on you** | it finished, nobody replied | looks identical to "it crashed" |
-| ⚫ **stopped, waiting on you** | same, but a while ago | these are the ones worth closing |
+| ⚫ **stopped, waiting on you** | same, but over six hours ago | these are the ones worth closing |
 
 An agent sitting in a three-minute `Bash` call **writes nothing to its transcript**, so by
-file mtime it looks idle — and idle looks abandoned. `sereno` reads the tail of the
-transcript and checks whether the last `tool_use` ever got its matching `tool_result`.
+file mtime it looks idle — and idle looks abandoned. `sereno` reads the tail of the transcript
+and checks whether the last `tool_use` ever got its matching `tool_result`.
 
 That single check is the difference between *"it hung"* and *"it's working, leave it alone"*.
 
-> Every state is composed **in code** from typed facts read off the transcript. No model is
-> asked to summarise anything, so nothing can confidently tell you a session is fine when it
-> isn't.
+```mermaid
+flowchart TD
+    T["last 80 lines of the transcript"] --> A{"a tool_use still<br>without its tool_result?"}
+    A -->|yes| S1["ORANGE - in a command"]
+    A -->|no| B{"file written to<br>in the last 90 s?"}
+    B -->|yes| S2["GREEN - writing"]
+    B -->|no| C{"idle for<br>under six hours?"}
+    C -->|yes| S3["WHITE - waiting on you"]
+    C -->|no| S4["GREY - stopped, waiting on you"]
+    T -.->|"no transcript"| S5["unknown - never guessed"]
+
+    classDef fact fill:#1f2430,stroke:#5c6773,color:#e6e6e6
+    classDef ask fill:#2b3242,stroke:#5c6773,color:#e6e6e6
+    classDef out fill:#3a3f4b,stroke:#8a8f99,color:#ffffff
+    class T fact
+    class A,B,C ask
+    class S1,S2,S3,S4,S5 out
+```
+
+To `ps`, all four are the same live process. The order matters too: **the tool check wins over
+"is it writing"**, because a `tool_use` line was itself just written to the file, so both are
+true at once and only the second one tells you anything.
+
+> Every state is composed **in code** from typed facts read off the transcript — two booleans
+> and a timestamp. No model is asked to summarise anything, so nothing can confidently tell
+> you a session is fine when it isn't. When the facts are missing the row says `unknown`
+> rather than picking the friendly answer.
 
 ---
 
 ## 📖 Reading a row
 
 ```
- ▎ Refactor payment webhooks  ◐ checkout-api ⎇feat/webhooks   now  ▰▰▰▰▱ 88% ▇ 512 MB
- │            │               │       │           │            │      │     │  │    │
- │            │               │       │           │            │      │     │  │    └ memory
- │            │               │       │           │            │      │     │  └ share of the biggest
- │            │               │       │           │            │      │     └ % of the context window
- │            │               │       │           │            │      └ context used
- │            │               │       │           │            └ idle time, coloured by age
- │            │               │       │           └ git branch
- │            │               │       └ project
- │            │               └ ◐ in a command · ● writing · nothing = waiting on you
- │            └ title — the one Claude gave itself, or your /rename
+ ▎ ◐ Refactor payment webhooks  checkout-api ⎇feat/webhooks      now ▰▰▰▰▱  88% 512 MB
+ │ │            │                    │            │               │     │     │     │
+ │ │            │                    │            │               │     │     │     └ memory
+ │ │            │                    │            │               │     │     └ % of the window
+ │ │            │                    │            │               │     └ context used
+ │ │            │                    │            │               └ idle time, by age
+ │ │            │                    │            └ git branch
+ │ │            │                    └ project
+ │ │            └ title — the one Claude gave itself, or your /rename
+ │ └ ◐ in a command · ● writing · nothing = waiting on you
  └ cursor. Turns yellow when the row is marked.
 ```
+
+**The title is the last thing to be cut.** Narrow the window and the support columns go first,
+in this order: memory, then the project (which narrows before it goes), then the context bar.
+The title keeps its width down to about 45 columns, because it is the one thing that tells two
+sessions apart. Widening never takes a column away again, so resizing doesn't make the row
+jump.
+
+A column with nothing to say takes no space at all: no tmux means no memory column, and a
+Codex tab means no context column, rather than eighteen blanks on every line.
 
 The panel on the right shows that session's **last prompt and last reply**, so you can decide
 whether to go back to it without opening it — plus the exact context figures (`176k / 200k`)
@@ -253,6 +281,49 @@ sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
 sereno --json --all      # add the resumable history, the equivalent of pressing TAB
 ```
 
+<details>
+<summary><strong>Three things worth wiring it into</strong></summary>
+
+<br>
+
+**A shell prompt that says how many are waiting on you.** Cheap enough to run on every prompt,
+and silent when the answer is zero:
+
+```bash
+sereno_wait() {
+  local n
+  n=$(sereno --json 2>/dev/null | jq '[.sessions[] | select(.state=="waiting")] | length')
+  [ "${n:-0}" -gt 0 ] && printf ' ⏳%s' "$n"
+}
+PS1='$(sereno_wait) \w $ '
+```
+
+**A tmux status bar with the session closest to compacting.** The one you want to know about is
+the one running out of window, not the one using the most memory:
+
+```bash
+# .tmux.conf
+set -g status-right '#(sereno --json | jq -r "[.sessions[] | select(.context_max>0)] \
+  | max_by(.context_tokens/.context_max) \
+  | \"\(.title[0:24]) \(.context_tokens*100/.context_max | floor)%\"") '
+```
+
+**Anything that needs to wait for an agent to finish.** `state` is a closed enum, so this is a
+loop and not a guess:
+
+```bash
+until [ "$(sereno --json | jq -r '.sessions[] | select(.id=="'"$id"'") | .state')" = waiting ]; do
+  sleep 20
+done
+say "it wants you"
+```
+
+Every field is typed and every state comes from that same enum, so nothing here has to parse
+prose. `context_max` is `null` when the ceiling is unknown, which is why the tmux line filters
+on it first.
+
+</details>
+
 | key | |
 |:--|:--|
 | `↑` `↓` / `j` `k` | move |
@@ -294,45 +365,75 @@ Prints one line when something is running, and absolutely nothing when there isn
 
 ## 💾 Where the data comes from
 
-`~/.claude/projects`, which Claude Code writes on its own. No config, no daemon, no telemetry,
-nothing to set up — install it and it already knows about every session you have ever run.
+Claude Code already writes everything, in `~/.claude/projects/<project>/<uuid>.jsonl`: one line
+of JSON per event, appended as the session runs. `sereno` reads the **last 80 lines** of at most
+40 of those files and derives everything from them. Nothing else exists — no config file, no
+daemon, no index, no telemetry, no API call. Install it and it already knows about every session
+you have ever run.
 
-Codex, Gemini and Antigravity sessions come from their own history directories and open with
-their own `resume` command. They are files on disk, not live processes, so `sereno` refuses to
-"close" them rather than pretending it did something.
+| what it reads | what it gets out of it |
+|:--|:--|
+| the file's mtime | is it writing right now |
+| the last `tool_use` / `tool_result` pair | is it stuck inside a command |
+| `message.usage` on the last reply | context spent, and the model |
+| `cwd`, `gitBranch` | project and branch |
+| `aiTitle`, `lastPrompt` | the title and the panel |
+
+That costs **4 ms** for the live sessions and **16 ms** for the whole history, measured against
+1,248 transcripts and 3.8 GB. The results are cached by mtime, so a file that hasn't moved isn't
+read twice.
+
+Codex, Gemini and Antigravity come from their own history directories and reopen with their own
+`resume` command. They are files on disk, not live processes, so `sereno` refuses to "close" them
+rather than pretending it did something.
 
 <details>
 <summary><strong>Optional: tmux and Warp</strong></summary>
 
 <br>
 
-If your sessions run inside tmux you also get live memory per session, which ones already have
-a terminal attached, and the ability to actually kill them. On macOS with Warp, `ENTER` opens a
+If your sessions run inside tmux you also get live memory per session, which ones already have a
+terminal attached, and the ability to actually kill them. On macOS with Warp, `ENTER` opens a
 session in a **new window** instead of taking over the one you're reading.
 
-Both optional. Without them everything works except the memory column, and `ENTER` execs into
-the session in the current terminal.
+Both optional. Without them everything works except the memory column — which then takes no space
+at all, rather than sitting there empty — and `ENTER` execs into the session in the current
+terminal.
 
 </details>
 
 ---
 
-## 📊 How it compares
+## 📊 What it does, and what it deliberately doesn't
 
-Most tools in this space **launch and orchestrate** sessions. This one **watches** them, and
-that's the whole design.
+Almost everything else in this space **launches and orchestrates** sessions: it starts the agents,
+so it knows about them because it made them. `sereno` starts nothing. It reads what the CLIs
+already wrote, which is why it sees sessions you opened last month, from a terminal it has never
+heard of, on a machine you're SSH'd into.
 
-|  | sereno | tmux session managers | desktop apps |
+**It will never:**
+
+- **launch or orchestrate agents.** That's the whole crowded half of this space, and the half
+  that has to own your workflow to work at all. Use one of those to spawn a fleet, then use this
+  to see what the fleet is doing.
+- **write to a transcript, or to anything that belongs to a session.** It kills processes you
+  pick, and that's the only destructive thing in it.
+- **send anything anywhere.** There is no networking code at all, and a test in CI fails the
+  build if any appears.
+- **ask a model what it thinks.** Every state is composed in code from typed facts.
+
+What that buys you, concretely:
+
+|  | sereno | launchers and session managers | desktop apps |
 |:--|:--:|:--:|:--:|
+| Sees sessions it didn't start | ✅ | ❌ | 🟡 |
 | Live per-session state | ✅ | ❌ | 🟡 |
 | Last prompt + last reply | ✅ | ❌ | 🟡 |
+| Context spent per session | ✅ | ❌ | ❌ |
 | Works with zero setup | ✅ | needs its launcher | needs install |
 | Codex / Gemini too | ✅ | Claude only | Claude only |
 | Runs over SSH | ✅ | ✅ | ❌ |
 | Dependencies | **none** | tmux | Electron / Swift |
-
-If you want something to *spawn* a fleet of agents, use one of those — and then use this to
-see what the fleet is doing.
 
 ---
 
@@ -443,19 +544,30 @@ That's it. It creates no config, no cache and no state directory of its own.
 
 ## 🔧 Configuration
 
-| Variable | |
-|:--|:--|
-| `SERENO_LANG` | `en` or `es`. Defaults to your locale (on macOS, `AppleLocale`) |
-| `SERENO_DEMO` | `1` for fake sessions |
-| `SERENO_CTX_MAX` | context ceiling in tokens, if the guess above gets it wrong |
-| `SERENO_TMUX_SOCK` | tmux socket to read. Default `claude-code` |
-| `SERENO_REGISTRY` | where the optional launcher registry lives |
+There is no config file. Everything is an environment variable, so nothing about it survives
+you deleting the script.
+
+| Variable | Default | |
+|:--|:--|:--|
+| `SERENO_LANG` | your locale | `en` or `es`. On macOS it reads `AppleLocale` |
+| `SERENO_DEMO` | off | `1` for invented sessions. Set it before any screenshot |
+| `SERENO_CTX_MAX` | worked out | context ceiling in tokens, when the cascade gets it wrong |
+| `SERENO_TMUX_SOCK` | `claude-code` | which tmux socket to read |
+| `SERENO_REGISTRY` | `~/.claude/warp-sessions` | where the optional launcher registry lives |
+| `SERENO_BIN` | `~/.local/bin` | where `install.sh` puts the file |
+| `SERENO_DEBUG` | off | `1` stops the picker swallowing a curses error. Use it if it
+  exits without saying why |
+
+```bash
+# a one-million window, in English, without touching anything permanent
+SERENO_CTX_MAX=1000000 SERENO_LANG=en sereno
+```
 
 ---
 
 ## 🧠 Notes on the source
 
-One file, ~2.000 lines, standard library only.
+One file, about 3,200 lines, standard library only.
 
 **The comments are in Spanish.** They explain *why* each decision is the way it is, usually
 naming the incident that caused it, and translating that would flatten it into generic prose.
