@@ -2798,9 +2798,9 @@ def _clave_orden(r, modo):
     if modo == "spend":
         # Entrada nueva mas salida, y la cache LEIDA fuera, por lo mismo que ya explica
         # `_uso_texto`: es material releido y es cien veces mayor que todo lo demas.
-        # Da igual poco cual de las tres se elija —medidas sobre los 40 transcripts de
+        # Cual de las tres se elija da bastante igual: medidos los 40 transcripts de
         # esta maquina, `out`, `in+cw+out` y `cr` correlacionan rho >= 0,98 entre si y
-        # comparten el top-5—, asi que se toma la que se explica en una linea.
+        # comparten el top-5, asi que se toma la que se explica en una linea.
         u = r.get("_uso") or {}
         return -((u.get("in") or 0) + (u.get("cw") or 0) + (u.get("out") or 0))
     if modo == "memory":
@@ -4101,7 +4101,6 @@ def _T():
         "{v} in a repo another session is editing":
             "{v} en un repo que otra sesión está editando",
         "activity": "actividad",
-        "spend": "gasto",
         "copied: {s}": "copiado: {s}",
         "copy the session id": "copiar el id de la sesión",
         "first / last (g / G too)": "primera / última (g / G también)",
@@ -4109,6 +4108,7 @@ def _T():
         "sort: ": "orden: ",
         "sort: activity, context, project, memory, spend / invert":
             "ordenar: actividad, contexto, proyecto, memoria, gasto / invertir",
+        "spend": "gasto",
         "HEADS UP: {n} are working right now": "OJO: {n} están trabajando ahora mismo",
         "I don't understand that selection: {e}": "No entiendo la selección: {e}",
         "Keys": "Teclas",
