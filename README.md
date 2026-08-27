@@ -191,12 +191,20 @@ one-million window still records itself as `claude-opus-5`, exactly like a 200k 
 works it out in this order, and stops at the first that answers:
 
 1. `SERENO_CTX_MAX`, if you set it.
-2. A `[1m]` suffix on the model in the transcript.
-3. The `model` in your `~/.claude/settings.json` — where the suffix actually lives today.
-4. The context already seen. A session holding 560k is not on a 200k ceiling.
+2. The `model` in your `~/.claude/settings.json` — where the suffix actually lives today.
+3. A `[1m]` suffix on the model in the transcript.
+4. The `cost-state` line the CLI writes when it closes. Its `modelUsage` is keyed by
+   `claude-opus-5[1m]`, **with** the suffix — the only thing here that speaks about *this*
+   session rather than the whole machine. It is rare (15 of 517 transcripts here) but not
+   arguable, and it lands inside the tail sereno already reads.
+5. The context already seen. A session holding 560k is not on a 200k ceiling.
 
-Rule 4 is what keeps the bar honest: the percentage can never read above 100%, and there is a
+Rule 5 is what keeps the bar honest: the percentage can never read above 100%, and there is a
 test that fails if it ever does.
+
+Rule 4 only ever raises the ceiling. A `cost-state` without the suffix is evidence the session
+is *not* on the big window, but it would arrive after rule 2 has already answered with your
+global config — fixing that means reordering the whole cascade, which is a separate decision.
 
 ---
 

@@ -665,6 +665,20 @@ def pulso(e, secs=90, fino=True):
             for b0 in cont0:
                 if isinstance(b0, dict) and b0.get("type") == "tool_use":
                     toca += _toques(b0, ts)
+        # El CLI escribe al cerrar una linea `cost-state` con el gasto POR MODELO, y
+        # la clave de ese diccionario si trae el sufijo: `claude-opus-5[1m]`. Es el
+        # unico sitio del transcript donde la ventana de la sesion aparece escrita —
+        # `message.model` dice `claude-opus-5` a secas aunque corra en el millon.
+        # Medido sobre los 517 transcripts de esta maquina: 15 traen la linea, y las
+        # 15 dentro de las ultimas 80, que son las que esta pasada ya lee. Se publica
+        # el hecho (`la escribio con sufijo`), no el tope: el tope lo compone
+        # `tope_contexto()`.
+        if j.get("type") == "cost-state":
+            uso_modelo = j.get("modelUsage")
+            if isinstance(uso_modelo, dict) and uso_modelo:
+                extra["ventana_1m"] = any("[1m]" in str(k).lower()
+                                          for k in uso_modelo)
+            continue
         if j.get("isSidechain"):
             continue
         msg = j.get("message") or {}
@@ -1160,7 +1174,8 @@ def filas_json(rows):
             "attached": bool(r.get("attached")),
             "memory_mb": None if r.get("mem_mb") is None else round(r["mem_mb"]),
             "context_tokens": ctx,
-            "context_max": tope_contexto(pu.get("modelo"), ctx) if ctx else None,
+            "context_max": tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"))
+                           if ctx else None,
             "model": pu.get("modelo"),
             "pid": r.get("pid") or None,
             # Los cuatro crudos y ninguna suma: juntar la cache leida con la entrada da
@@ -1437,7 +1452,8 @@ def print_live(rows):
         edad = _dur(now - r["created"]) if r["created"] else "?"
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx")
-        pct = (f"  {round(100 * ctx / tope_contexto(pu.get('modelo'), ctx)):>3}%"
+        pct = (f"  {round(100 * ctx / tope_contexto(pu.get('modelo'), ctx,
+                                            pu.get('ventana_1m'))):>3}%"
                if ctx else "      ")
         # `--list` es lo que sale en un pipe y en una terminal sin tty: si el aviso
         # solo viviera en el selector, quien lea la lista se lo pierde justo cuando importa.
@@ -2414,13 +2430,22 @@ def _mb(x):
 # deduce por una cascada de hechos, en este orden, y el ultimo corrige a los demas:
 #
 #   1. `SERENO_CTX_MAX`, si el usuario lo fija a mano. Manda sobre todo lo demas.
-#   2. El sufijo `[1m]` en el modelo del propio transcript, por si algun dia llega.
-#   3. El `model` de `~/.claude/settings.json`, que es donde vive hoy (`"opus[1m]"`).
-#   4. El contexto YA observado: si la sesion lleva 560k, el tope no es 200k. Esto es
-#      lo que impide pintar un 207%, que es lo que salia con la regla 2 sola.
+#   2. El `model` de `~/.claude/settings.json`, que es donde vive hoy (`"opus[1m]"`).
+#   3. El sufijo `[1m]` en el modelo del propio transcript, por si algun dia llega.
+#   4. La linea `cost-state` que el CLI escribe al cerrar: su `modelUsage` va indexado
+#      por `claude-opus-5[1m]`, CON el sufijo. Es lo unico de aqui que habla de ESTA
+#      sesion y no de la maquina entera. Aparece poco —15 de 517 transcripts— pero
+#      cuando aparece no se discute, y cae dentro de las 80 lineas que `pulso()` ya lee.
+#   5. El contexto YA observado: si la sesion lleva 560k, el tope no es 200k. Esto es
+#      lo que impide pintar un 207%, que es lo que salia con la regla 3 sola.
 #
-# La 3 es la floja: es config global y una sesion lanzada con otro `--model` no la
-# cumple. Por eso existe la 1, y por eso la 4 va detras y no delante.
+# La 2 es la floja: es config global y una sesion lanzada con otro `--model` no la
+# cumple. Por eso existe la 1, y por eso la 5 va detras y no delante.
+#
+# Lo que la 4 NO hace: bajar de un millon a 200k. Una `cost-state` sin sufijo es
+# evidencia de que la sesion no corre en la ventana grande, pero llegaria DESPUES de la
+# 2, que ya habra respondido con la config global. Corregir eso exige reordenar la
+# cascada entera y es otra decision, no un efecto secundario de esta.
 CTX_1M = 1_000_000
 CTX_STD = 200_000
 
@@ -2443,11 +2468,15 @@ def _ctx_max_config():
     return _ctx_max_config._v
 
 
-def tope_contexto(modelo, ctx=0):
+def tope_contexto(modelo, ctx=0, ventana_1m=None):
     forzado = _ctx_max_config()
     if forzado:
         return forzado
     if "[1m]" in (modelo or "").lower():
+        return CTX_1M
+    # `None` es "no lo escribio", que no es lo mismo que `False`, y por eso se compara
+    # con `is True`: un dato ausente no decide nada y cae a la regla de abajo.
+    if ventana_1m is True:
         return CTX_1M
     return CTX_1M if (ctx or 0) > CTX_STD else CTX_STD
 
@@ -2652,7 +2681,7 @@ def _clave_orden(r, modo):
         # fraccion. Ordenar por tokens crudos pondria la holgada delante de la llena.
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx") or 0
-        return -(ctx / tope_contexto(pu.get("modelo"), ctx))
+        return -(ctx / tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m")))
     if modo == "project":
         return ((r.get("proyecto") or "").lower(), (r.get("rama") or "").lower(),
                 r.get("idle") or 0)
@@ -3093,7 +3122,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # no lo publica, y cero seria mentira.
                 if an_ctx:
                     ctx = pu.get("ctx")
-                    tope_ctx = tope_contexto(pu.get("modelo"), ctx)
+                    tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"))
                     lleno = (ctx or 0) / tope_ctx
                     put(barra(ctx, tope_ctx), color_contexto(lleno))
                     put(f" {round(lleno * 100):>3}%" if ctx else "     ",
@@ -3153,7 +3182,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # cosa. Cuesta 10 columnas y las hay de sobra.
                 pu_cur = rows[cur].get("pulso") or {}
                 ctx_cur = pu_cur.get("ctx")
-                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur)
+                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
+                                         pu_cur.get("ventana_1m"))
                 uso_cur = uso_de(rows[cur])
                 campos = [
                     (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")

@@ -190,12 +190,21 @@ millón se registra como `claude-opus-5`, igual que una de 200k. Así que sereno
 este orden, y para en el primero que responde:
 
 1. `SERENO_CTX_MAX`, si lo pones tú.
-2. Un sufijo `[1m]` en el modelo del transcript.
-3. El `model` de tu `~/.claude/settings.json`, que es donde vive hoy ese sufijo.
-4. El contexto que ya se ha visto. Una sesión con 560k dentro no tiene un tope de 200k.
+2. El `model` de tu `~/.claude/settings.json`, que es donde vive hoy ese sufijo.
+3. Un sufijo `[1m]` en el modelo del transcript.
+4. La línea `cost-state` que el CLI escribe al cerrar. Su `modelUsage` va indexado por
+   `claude-opus-5[1m]`, **con** el sufijo — lo único de aquí que habla de *esta* sesión y no
+   de la máquina entera. Aparece poco (15 de 517 transcripts en esta máquina) pero cuando
+   aparece no se discute, y cae dentro de la cola que sereno ya lee.
+5. El contexto que ya se ha visto. Una sesión con 560k dentro no tiene un tope de 200k.
 
-La regla 4 es la que mantiene honesta la barra: el porcentaje no puede pasar del 100%, y hay
+La regla 5 es la que mantiene honesta la barra: el porcentaje no puede pasar del 100%, y hay
 un test que falla si algún día lo hace.
+
+La regla 4 solo sube el tope, nunca lo baja. Un `cost-state` sin sufijo es evidencia de que la
+sesión **no** corre en la ventana grande, pero llegaría después de que la regla 2 haya
+contestado con tu configuración global — arreglar eso obliga a reordenar la cascada entera, que
+es otra decisión.
 
 ---
 

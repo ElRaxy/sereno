@@ -33,14 +33,28 @@ def main():
     igual("modelo desconocido", tope("un-modelo-que-no-existe", 10), CTX_STD)
     igual("modelo ausente", tope(None, 10), CTX_STD)
 
+    # La linea `cost-state` que escribe el propio CLI: su `modelUsage` va indexado por
+    # `claude-opus-5[1m]`, con el sufijo que `message.model` no trae. Es el unico hecho
+    # de la cascada que habla de ESTA sesion y no de la maquina entera.
+    igual("cost-state con sufijo", tope("claude-opus-5", 50_000, True), CTX_1M)
+    # Y los dos que no deciden nada: `False` es "la escribio y no llevaba sufijo",
+    # `None` es "no la escribio". Ninguno de los dos puede subir el tope, y ninguno
+    # puede bajarlo por debajo de lo ya observado.
+    igual("cost-state sin sufijo", tope("claude-opus-5", 50_000, False), CTX_STD)
+    igual("sin cost-state", tope("claude-opus-5", 50_000, None), CTX_STD)
+    igual("cost-state sin sufijo no baja lo observado",
+          tope("claude-opus-5", 560_080, False), CTX_1M)
+
     # La propiedad que de verdad importa, sobre todo el rango: pase lo que pase, la
     # barra no puede pasar del 100%. Si algun dia se anade un tope intermedio, esto
     # sigue vigilando el invariante sin tener que reescribir los casos de arriba.
     for modelo in ("claude-opus-5", "claude-opus-5[1m]", "claude-sonnet-5", ""):
         for ctx in (1, 1_000, 199_999, 200_001, 560_080, 999_999):
-            pct = 100 * ctx / tope(modelo, ctx)
-            if pct > 100:
-                fallos.append(f"{modelo or 'sin modelo'} con {ctx:,} pinta {pct:.0f}%")
+            for v1m in (None, True, False):
+                pct = 100 * ctx / tope(modelo, ctx, v1m)
+                if pct > 100:
+                    fallos.append(f"{modelo or 'sin modelo'} con {ctx:,} y "
+                                  f"ventana_1m={v1m} pinta {pct:.0f}%")
 
     # Y en la lista, las filas de la demo tampoco.
     for r in ns["sesiones_demo"]():

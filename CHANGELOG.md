@@ -13,6 +13,13 @@ else in between resets the count — two empty greps with an edit between them a
 sweep. "Twenty minutes on one call" gets no line of its own: `status` already says that, and
 the same fact twice is not a second opinion.
 
+**The context ceiling now has one fact about the session itself.** It used to be worked out
+from your global `settings.json` and from how much context had already been seen — nothing that
+knew whether *this* session was launched on the one-million window. The `cost-state` line the
+CLI writes when it closes keys its `modelUsage` by `claude-opus-5[1m]`, suffix included. It is
+rare (15 of 517 transcripts here) and it only ever raises the ceiling, but when it is there it
+settles the question, and it costs no extra reading.
+
 **What a session has burned, with `--usage`.** The context bar says how full the window is right
 now; it says nothing about the twelve hours already spent, because a session that compacted three
 times reads 20%. The new flag adds tokens in and out, cache read, replies, compactions and the
