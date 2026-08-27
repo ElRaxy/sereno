@@ -1171,12 +1171,31 @@ def _ruta_demo(i):
     return fuera
 
 
+# Identificadores de mentira, uno por fila y fijos. Existen para que el panel y la tecla
+# que copia ensenen un id con la forma del de verdad: sin ellos la demo cae al nombre de
+# la fila (`demo-infra-3`) y las capturas del README ensenan algo que no se parece a lo
+# que ve un usuario. Son rutas que no existen y NADIE las abre: `_uso` y `_det` van
+# precocinados, y `tests/test_demo_aislado.py` vigila que la demo no toque disco.
+_DEMO_IDS = ("7f3a91c4-2b18-4de6-9a05-3c7e18b2d640",
+             "c81d5e02-9f47-4a3b-8e12-6d90fa4c7b53",
+             "2a6b0f79-51cc-4e8d-b374-90e2af158c6b",
+             "9d47c3a8-8e61-42f0-a95c-1b7d604ef382",
+             "5e29b71d-3a04-4c97-8f6b-27ac91d05e48",
+             "b0c8f452-7d93-4a16-9e28-5f31c86ba07d",
+             "134e97ab-6c25-4b80-a7d1-8e02936f5c19",
+             "e6a15b83-40df-49c2-b58e-72910dc4a3f7",
+             "a92f0c61-1e57-4d38-96ba-4c83e7f10b25")
+
+
 def sesiones_demo():
     rows = []
     for i, (tit, proy, rama, idle, mb, esc, tool, pr, resp, cmd, fu) in enumerate(_DEMO):
         rows.append({
             "name": f"demo-{proy}-{i}", "created": int(time.time() - idle - 3600),
-            "attached": i % 2 == 0, "meta": {"cwd": f"/Users/you/code/{proy}"},
+            "attached": i % 2 == 0,
+            "meta": {"cwd": f"/Users/you/code/{proy}",
+                     "_transcript": pathlib.Path(
+                         f"/tmp/sereno-demo/{_DEMO_IDS[i % len(_DEMO_IDS)]}.jsonl")},
             "pid": "", "mem_mb": mb, "_sin_proceso": True, "_demo": True,
             "title": (tit[:33] + "\u2026") if len(tit) > 34 else tit,
             "title_full": tit, "idle": float(idle),
