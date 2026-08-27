@@ -172,8 +172,37 @@ def main():
             if not isinstance(par, int):
                 fallos.append(f"par de color no numerico: {par!r}")
 
-    # ── la demo trae recorrido, y ensena los dos casos ──────────────────────────
+    # ── el aviso en la LISTA ────────────────────────────────────────────────────
+    # El enum que sale por `--json` es publico y va en ingles; el interno esta en
+    # castellano como el resto del fuente. Que no se despareje sin que nada falle.
+    if set(ns["_STUCK_JSON"]) != {"bucle", "barrido"}:
+        fallos.append(f"el mapa a --json no cubre el enum: {ns['_STUCK_JSON']}")
+    if set(ns["_TEXTO_ATASCO"]) != {"bucle", "barrido"}:
+        fallos.append(f"falta la frase corta de alguna alerta: {set(ns['_TEXTO_ATASCO'])}")
+    # `\u21bb` comparte columna con `\u29c9` en la fila, asi que tiene que medir lo
+    # mismo: una de mas en curses no da error, envuelve el sobrante a la fila siguiente.
+    for glifo in ("\u21bb", "\u29c9"):
+        if ns["ancho"](glifo) != 1:
+            fallos.append(f"{glifo!r} ocupa {ns['ancho'](glifo)} columnas, no 1")
+
     filas = ns["sesiones_demo"]()
+    # La demo tiene que ensenar el simbolo en la lista, y eso exige una fila que se
+    # atasque SIN chocar: cuando coinciden gana el choque, que es el que puede costar
+    # trabajo perdido. Sin esa fila, la captura del README no lo enseñaria nunca.
+    sola = [r for r in filas
+            if (r.get("pulso") or {}).get("atasco") and not r.get("colision")]
+    if not sola:
+        fallos.append("ninguna fila de la demo se atasca sin chocar: el simbolo de la "
+                      "lista no saldria en ninguna captura")
+    for r in filas:
+        at = (r.get("pulso") or {}).get("atasco")
+        if at is None:
+            fallos.append(f"{r['name']}: la demo no publica `atasco`")
+        elif at != alertas(sintomas((r.get("_det") or {}).get("ruta") or [])):
+            fallos.append(f"{r['name']}: el atasco de la lista no cuadra con el "
+                          "recorrido que pinta el panel")
+
+    # ── la demo trae recorrido, y ensena los dos casos ──────────────────────────
     if not any((r.get("_det") or {}).get("ruta") for r in filas):
         fallos.append("la demo no trae recorrido: la captura del README saldria sin el")
     vistas = set()
