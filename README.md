@@ -805,6 +805,12 @@ Regenerate the demo with `vhs demo.tape` ([vhs](https://github.com/charmbracelet
 look at the frames before you commit them. `SERENO_DEMO=1` first, always: the panel shows real
 prompts.
 
+The social card is `docs/social-preview.png`, and the four steps that rebuild it are in the
+header of `docs/social-preview.html`. Its strip is a real capture of the program in demo mode,
+not a mockup, so it goes stale when the interface changes. It is the one artefact that cannot be
+pushed from here: GitHub has no API for it, so it is uploaded by hand in **Settings › General ›
+Social preview** and checked by reading the `og:image` of the repo's public page.
+
 Anything exploitable goes to [`SECURITY.md`](SECURITY.md), not to a public issue.
 
 ---
