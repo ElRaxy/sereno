@@ -468,7 +468,7 @@ on it first.
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
 | `x` | close the marked ones — asks first, and warns if any is mid-task |
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
-| `y` | copy the session id, the one `claude --resume` takes |
+| `y` | copy the session id, the one `claude --resume` takes (or click it — see below) |
 | `/` | filter by title as you type |
 | `TAB` | Claude · resumable history · Codex · Gemini · all |
 | `?` | everything else |
@@ -476,6 +476,18 @@ on it first.
 **The mouse works.** Click to select, double click to open, right click (or the bar on the
 left edge) to mark, wheel to scroll. The tabs at the top and the buttons along the bottom are
 real buttons.
+
+**And underlined values copy when you click them.** While sereno is running you cannot
+drag-select with the mouse — mouse reporting is on, so the terminal hands the drag to the app —
+so the values you were going to retype are a click instead: the project, the session id, and the
+headers of *what you last said* and *what it last replied*, which copy the whole text and not the
+part that fitted. It goes through OSC 52, which needs no extra program and survives SSH; the
+status line always says what actually landed on the clipboard.
+
+Two of them copy something you cannot read on screen, on purpose: `project` shows
+`docs-site · main` and copies `/Users/you/code/docs-site`, and the reply header copies the reply
+whole. A click that copied what was painted would hand you back what you had just finished
+reading.
 
 Nothing drops you out of the picker. Closing four sessions and opening a fifth is one visit,
 not five.

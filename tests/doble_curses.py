@@ -27,6 +27,12 @@ class Pantalla:
         # `sereno` por su cuenta.
         s.h, s.w, s.teclas, s.ancho = h, w, list(teclas), ancho
         s.celdas, s.solapes, s.fuera, s.fotogramas = {}, [], [], []
+        # Los atributos van en su propio mapa y no pegados al caracter para no
+        # tocar `celdas`, que ya leen dos tests. Aqui NO sirve para mirar colores:
+        # `C()` devuelve un par de color y en el doble los pares valen 0. Sirve
+        # para las constantes de curses —A_BOLD, A_UNDERLINE—, que se copian del
+        # modulo real y llegan con su valor de verdad.
+        s.atributos = {}
         s.fotograma = 0
 
     # ── lo que se mide ──────────────────────────────────────────────────────
@@ -52,6 +58,7 @@ class Pantalla:
                     and not (_CAJA(previo) and _CAJA(ch))):
                 s.solapes.append((s.fotograma, y, col, previo, ch, texto[:30]))
             s.celdas[(y, col)] = ch
+            s.atributos[(y, col)] = attr
             col += paso
 
     def erase(s):
@@ -60,6 +67,7 @@ class Pantalla:
         if s.celdas:
             s.fotogramas.append(dict(s.celdas))
         s.celdas.clear()
+        s.atributos.clear()
         s.fotograma += 1
 
     def getmaxyx(s):
