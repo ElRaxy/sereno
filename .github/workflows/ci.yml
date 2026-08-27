@@ -76,5 +76,7 @@ jobs:
         run: python tests/test_barra_pico.py
       - name: una sesion que nunca contesto cae al fondo y no cuenta como reanudable
         run: python tests/test_sesion_vacia.py
+      - name: los valores del panel se copian al pincharlos, y copian lo que toca
+        run: python tests/test_copiar_del_panel.py
       - name: nada usa sintaxis posterior a 3.8, que es el suelo del repo
         run: python tests/test_suelo_38.py

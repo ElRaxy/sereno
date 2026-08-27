@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.13.0
+
+**The values you were going to retype are one click away.**
+
+Until now a single thing could be copied — the session id, with `y`. Everything else in the panel
+you had to read and type again, and while sereno is running you cannot even drag-select it: mouse
+reporting is on, so the terminal hands the drag to the app instead of selecting text.
+
+Four values now carry a copy zone, marked with an **underline**: the project, the session id, and
+the headers of *what you last said* and *what it last replied*. Click one and it goes to the
+clipboard, over OSC 52 — no new binary, and it works over SSH.
+
+Two of the four copy something you could **not** read on screen:
+
+- **`project`** shows `docs-site · main` and copies `/Users/you/code/docs-site`. On the 40 history
+  sessions of the machine this was written on, the full path was visible **0 times out of 40** — a
+  click that copied what was painted would copy exactly what you had just finished reading.
+- **the reply header** copies the whole reply, not the part that fitted. **15 of 37** replies were
+  painted truncated.
+
+The status line always says what actually landed on the clipboard, so a value that differs from its
+label is never a silent surprise. Fields with nothing worth pasting — status, memory, context,
+model, spend — are not underlined and do not react.
+
 ## 1.12.0
 
 **Sessions that never got a reply stop competing for the top of the list.**
