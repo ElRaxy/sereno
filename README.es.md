@@ -403,6 +403,7 @@ línea de tmux filtra por él antes de dividir.
 | `ENTER` | abrirla |
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
+| `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
 | `/` | filtrar por título mientras escribes |
 | `TAB` | Claude · historial reanudable · Codex · Gemini · todas |
 | `?` | el resto |
@@ -447,6 +448,25 @@ Esa otra cosa viaja aparte, como `api_cost_usd` y solo en `--json --usage`: el `
 escribió el CLI con sus propios precios, relatado tal cual. `sereno` no lleva tabla de tarifas
 —una en un repo público caduca sin avisar a nadie— y nunca pinta un dólar en el TUI, donde en un
 plan de suscripción sería dinero que no has pagado.
+
+#### Ordenar por lo gastado
+
+`s` recorre los modos y el quinto es **gasto**: arriba la que más ha consumido, entrada nueva más
+salida. Es el único de los cinco que ordena por un dato que hay que ir a buscar al transcript, así
+que solo lee al entrar en el modo — 94 ms las 8 sesiones vivas de esta máquina y 389 ms las 40 del
+historial la primera vez, y luego nada.
+
+No es la barra de contexto con otro nombre, y el caso que los separa es el de arriba: **compactar
+vacía la ventana y no devuelve lo ya consumido**. Medido aquí sobre 40 sesiones, las tres que
+habían compactado eran 2ª, 3ª y 4ª por gasto y 5ª, 7ª y 8ª por contexto. Frente a *actividad* no
+se parecen en nada (rho 0,13): esa ordena por lo reciente, no por lo acumulado.
+
+Da bastante igual qué cifra se tome —`out`, `entrada+salida` y `caché leída` correlacionan
+rho ≥ 0,98 entre sí sobre esos 40 transcripts y comparten el mismo top 5—, así que se toma la que
+se puede explicar en una línea. El dinero queda fuera por otra razón: el `totalCostUSD` solo lo
+escribe el CLI **al cerrar**, así que estaba en 16 de 40 sesiones y en **ninguna** de las vivas.
+
+Se puede dejar puesto: `SERENO_SORT=spend`, o `-spend` para invertirlo.
 
 ### 🎭 Probarlo sin tocar tus datos
 
@@ -660,6 +680,7 @@ tu máquina si borras el script.
 | `SERENO_LANG` | tu locale | `en` o `es`. En macOS lee `AppleLocale` |
 | `SERENO_DEMO` | apagado | `1` para sesiones inventadas. Ponla antes de cualquier captura |
 | `SERENO_CTX_MAX` | deducido | tope de contexto en tokens, cuando la cascada falla |
+| `SERENO_SORT` | `activity` | con qué orden abre el selector: `context`, `project`, `memory`, `spend`. Un `-` delante lo invierte |
 | `SERENO_TMUX_SOCK` | `claude-code` | qué socket de tmux se lee |
 | `SERENO_REGISTRY` | `~/.claude/warp-sessions` | dónde vive el registro opcional del lanzador |
 | `SERENO_BIN` | `~/.local/bin` | dónde deja el fichero `install.sh` |
@@ -714,7 +735,7 @@ Issues y pull requests bienvenidos, en castellano o en inglés. Antes de abrir u
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-Son diez, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
+Son dieciocho, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
 algo que falla **en silencio**, que es justo por lo que existen:
 
 - **`test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco de
@@ -731,6 +752,9 @@ algo que falla **en silencio**, que es justo por lo que existen:
   búsquedas vacías seguidas, y lo que no se pudo observar nunca cuenta como éxito.
 - **`test_panel_geometria.py`** — el terminal se sustituye por un doble que apunta cada
   escritura, así ninguna celda se pinta dos veces ni nada se sale del marco.
+- **`test_orden_en_pantalla.py`** — la tecla del orden llega hasta `gasto` y la lista se pinta en
+  ese orden. Con las filas VACIADAS de consumo: la demo lo trae precocinado, y con él puesto el
+  test pasaba igual sin el cableado que dice probar.
 - **`test_suelo_38.py`** — nada usa sintaxis posterior a 3.8. El CI ya corre en 3.8, pero
   avisa tarde: quien escribió la línea tiene 3.12 y ahí compila sin rechistar.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,

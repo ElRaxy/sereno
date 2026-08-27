@@ -22,13 +22,14 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ns = {"__name__": "sereno_test"}
 exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
 ordena, casa, MODOS = ns["ordena"], ns["casa"], ns["MODOS_ORDEN"]
+carga_uso = ns["carga_uso"]
 sesiones_demo, tope_contexto = ns["sesiones_demo"], ns["tope_contexto"]
 
 
 def fila(name, titulo="t", proy="", rama="", idle=0.0, ctx=None, modelo="claude-opus-5",
-         mem=None):
+         mem=None, uso=None):
     return {"name": name, "title_full": titulo, "proyecto": proy, "rama": rama,
-            "idle": idle, "mem_mb": mem,
+            "idle": idle, "mem_mb": mem, "_uso": uso,
             "pulso": {"escribe": False, "herramienta": False,
                       "ctx": ctx, "modelo": modelo}}
 
@@ -60,12 +61,13 @@ def main():
 
     # 3. Un hueco no es un cero: las filas sin el dato van al final en LAS DOS
     #    direcciones. Tratarlas como 0 las pondria las primeras al invertir.
-    huecos = [fila("a", ctx=180_000, mem=500, proy="api"),
+    gasto = {"in": 10, "cw": 90, "out": 50, "turnos": 7, "compacta": 0}
+    huecos = [fila("a", ctx=180_000, mem=500, proy="api", uso=gasto),
               fila("b", ctx=None, mem=None, proy=""),
-              fila("c", ctx=20_000, mem=100, proy="web"),
+              fila("c", ctx=20_000, mem=100, proy="web", uso=gasto),
               fila("d", ctx=None, mem=None, proy="")]
     for modo, sin in (("context", {"b", "d"}), ("memory", {"b", "d"}),
-                      ("project", {"b", "d"})):
+                      ("project", {"b", "d"}), ("spend", {"b", "d"})):
         for inv in (False, True):
             cola = {r["name"] for r in ordena(huecos, modo, inv)[-len(sin):]}
             if cola != sin:
@@ -93,6 +95,51 @@ def main():
           fila("a1", proy="alfa", idle=5), fila("b2", proy="beta", idle=800)]
     if [r["name"] for r in ordena(pr, "project")] != ["a1", "a2", "b1", "b2"]:
         fallos.append("project: no agrupa por proyecto y actividad dentro")
+
+    # 6bis. `spend` no es `context` con otro nombre, y este es el caso que lo separa:
+    #       una sesion COMPACTADA tiene el contexto bajo y el gasto intacto, porque
+    #       compactar tira la ventana y no devuelve lo ya consumido. Medido sobre las 40
+    #       sesiones de esta maquina, gasto y contexto correlacionan rho=0,85 y gasto y
+    #       actividad rho=0,13; las tres sesiones compactadas eran 2a, 3a y 4a por gasto
+    #       y 5a, 7a y 8a por contexto. La demo reproduce ese caso a proposito.
+    #       Los dos nombres y los dos `idle` van del REVES a proposito: si el escenario
+    #       empata en nombre y en actividad, el test pasa igual con `spend` cayendo al
+    #       orden por defecto — comprobado, lo daba por bueno. Aqui el alfabetico y la
+    #       actividad piden ["a-llena", "z-gastona"], y solo el gasto pide lo contrario.
+    gs = [fila("z-gastona", idle=800, ctx=24_000,
+               uso={"in": 400, "cw": 1_070_000, "out": 196_000,
+                    "turnos": 229, "compacta": 1}),
+          fila("a-llena", idle=5, ctx=176_000,
+               uso={"in": 1_200, "cw": 300_000, "out": 40_000,
+                    "turnos": 60, "compacta": 0})]
+    if [r["name"] for r in ordena(gs, "spend")] != ["z-gastona", "a-llena"]:
+        fallos.append("spend: no pone delante la que mas ha consumido")
+    for otro in ("context", "activity", "project", "memory"):
+        if [r["name"] for r in ordena(gs, otro)] == ["z-gastona", "a-llena"]:
+            fallos.append(f"spend: el escenario no lo distingue de {otro}")
+
+    # 6ter. `ordena` no toca disco. `spend` ordena por un dato que hay que ir a buscar,
+    #       asi que si nadie paso por `carga_uso` las filas son huecos y se quedan donde
+    #       estaban: la lista se repinta cuatro veces por segundo y no puede ser el sitio
+    #       donde se abren cuarenta transcripts.
+    crudas = [fila("a", idle=5), fila("b", idle=900)]
+    if [r["name"] for r in ordena(crudas, "spend")] != ["a", "b"]:
+        fallos.append("spend sin carga_uso: no deja la lista como estaba")
+
+    # 6quater. Y `carga_uso` solo lee en el modo que lo necesita. Un contador delata
+    #          cualquier lectura de mas: son 389 ms las 40 filas la primera vez.
+    leidos = []
+    demo_uso = [dict(r, _uso=None) for r in demo]
+    guardado = ns["uso_de"]
+    ns["uso_de"] = lambda r: leidos.append(r.get("name"))
+    try:
+        for modo in MODOS:
+            del leidos[:]
+            carga_uso(list(demo_uso), modo)
+            if bool(leidos) != (modo == "spend"):
+                fallos.append(f"carga_uso lee {len(leidos)} filas en modo {modo}")
+    finally:
+        ns["uso_de"] = guardado
 
     # 7. Un modo que no existe cae al de por defecto en vez de reventar. `SERENO_SORT`
     #    lo escribe una persona en su .zshrc y una errata no puede tirar el programa.

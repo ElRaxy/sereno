@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.7.0
+
+**`s` has a fifth sort: by what each session has burned.** New input plus output, heaviest first,
+alongside activity, context, project and memory.
+
+It is not the context bar wearing another hat, and the case that separates them is compacting:
+it empties the window and does not give back what was already spent. Measured across the 40
+sessions on this machine, the three that had compacted ranked 2nd, 3rd and 4th by spend and 5th,
+7th and 8th by context. Against activity there is no resemblance at all — rho 0.13.
+
+It is the only one of the five that sorts on something it has to go and read, so it reads once,
+on entering the mode: 94 ms for 8 live sessions, 389 ms for the 40 in history, then nothing. The
+other four cost the same as before, and `ordena()` still touches no disk — a separate pass loads
+what it will need.
+
+Which figure to sort on barely matters: `out`, `input+output` and `cache read` correlate at
+rho >= 0.98 across those transcripts and share the same top 5, so it takes the one that fits in a
+line. Money is out for a different reason — `totalCostUSD` is only written on exit, so it was
+present in 16 of 40 sessions and in none of the live ones.
+
+`SERENO_SORT=spend` leaves it on, `-spend` inverts it.
+
 ## 1.6.0
 
 **`--watch` has a third thing to tell you: a session that starts going in circles.** It already
