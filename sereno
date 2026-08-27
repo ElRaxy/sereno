@@ -1419,9 +1419,37 @@ def notifica(titulo, cuerpo):
         pass          # un aviso que falla no puede tumbar el vigilante
 
 
+def atascos_nuevos(antes, ahora):
+    """Sesiones que ACABAN de atascarse, con el aviso que es nuevo. Pura, como las dos
+    de arriba y por lo mismo: el bucle no se puede probar y esto si.
+
+    Se compara aviso a aviso y no "estaba atascada / lo esta": una sesion que lleva
+    veinte minutos dando vueltas avisaria en cada vuelta del bucle, y a los tres avisos
+    se deja de leer. Pero si ademas empieza a barrer, eso si es nuevo y se dice.
+    """
+    salen = []
+    for r in ahora:
+        previo = set(antes.get(r["id"]) or ())
+        for a in (r.get("stuck") or ()):
+            if a not in previo:
+                salen.append((r, a))
+    return salen
+
+
+# La frase del aviso, por clave del enum publico. Vive aparte del `_TEXTO_ATASCO` de la
+# lista porque aqui la sesion se nombra y alli no: "X esta dando vueltas" frente a
+# "atascada en un bucle".
+_AVISO_WATCH = {
+    "loop": lambda t, d: _("{hora}  \u21bb {t} keeps running the same failing command{d}",
+                           hora=time.strftime("%H:%M"), t=t, d=d),
+    "sweep": lambda t, d: _("{hora}  \u21bb {t} is searching and finding nothing{d}",
+                            hora=time.strftime("%H:%M"), t=t, d=d),
+}
+
+
 def watch(cada=20):
     print(_("Watching. Nothing is reported until a session stops working. Ctrl-C to quit."), flush=True)
-    antes, pares = {}, {}
+    antes, pares, atascados = {}, {}, {}
     primera = True
     try:
         while True:
@@ -1445,8 +1473,19 @@ def watch(cada=20):
                     hora=time.strftime("%H:%M"), a=a, b=b) + "\n")
                 sys.stdout.flush()
                 notifica(_("two sessions in the same place"), f"{a} \u00b7 {b}")
+            # Y el tercero: que una sesion empiece a dar vueltas. Es el unico de los
+            # tres que avisa de algo que la sesion se esta haciendo a si misma, y el
+            # unico que puedes atender sin prisa — por eso va el ultimo de los tres.
+            for r, a in (() if primera else atascos_nuevos(atascados, filas)):
+                que = r["title"] or r["id"]
+                donde = f"  ({r['project']})" if r["project"] else ""
+                sys.stdout.write("\a" + _AVISO_WATCH[a](que, donde) + "\n")
+                sys.stdout.flush()
+                notifica(_("going in circles"), que + (f" \u00b7 {r['project']}"
+                                                      if r["project"] else ""))
             antes = {r["id"]: r["state"] for r in filas}
             pares = pares_choque(filas)
+            atascados = {r["id"]: r.get("stuck") or [] for r in filas}
             primera = False
             time.sleep(cada)
     except KeyboardInterrupt:
@@ -3983,6 +4022,11 @@ def _T():
         " writing": " escribiendo",
         "(+{n} earlier)": "(+{n} antes)",
         "(id not resolved)": "(id sin resolver)",
+        "going in circles": "dando vueltas",
+        "{hora}  ↻ {t} keeps running the same failing command{d}":
+            "{hora}  ↻ {t} repite el mismo comando, que sigue fallando{d}",
+        "{hora}  ↻ {t} is searching and finding nothing{d}":
+            "{hora}  ↻ {t} busca y no encuentra nada{d}",
         "stuck in a loop": "atascada en un bucle",
         "searching and finding nothing": "buscando sin encontrar nada",
         "the same command has failed {n} times":
@@ -4185,7 +4229,7 @@ def _T():
 _T()
 
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
