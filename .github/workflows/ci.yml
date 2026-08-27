@@ -58,3 +58,15 @@ jobs:
         run: python tests/test_sesion_reanudada.py
       - name: el titulo es lo ultimo que se recorta al estrechar la ventana
         run: python tests/test_reparto_columnas.py
+      - name: el orden no baraja la lista y el filtro mira lo que se ve
+        run: python tests/test_orden.py
+      - name: dos sesiones en el mismo sitio se ven, y una sola no inventa nada
+        run: python tests/test_colisiones.py
+      - name: el consumo no cuenta dos veces la misma respuesta
+        run: python tests/test_uso.py
+      - name: el recorrido cuenta bucles y barridos, y ninguna fila se sale
+        run: python tests/test_recorrido.py
+      - name: ninguna celda del panel se pinta dos veces ni se sale del marco
+        run: python tests/test_panel_geometria.py
+      - name: nada usa sintaxis posterior a 3.8, que es el suelo del repo
+        run: python tests/test_suelo_38.py

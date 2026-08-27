@@ -15,6 +15,7 @@ optional and only add live process control; without them everything is read from
   sereno --demo          fake sessions, safe for screenshots and for a first look
   sereno --list          plain list, touches nothing
   sereno --json [--all]  the same facts as JSON, without any conversation in it
+  sereno --usage         add what each session has burned (reads whole transcripts)
   sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
@@ -24,14 +25,16 @@ optional and only add live process control; without them everything is read from
   sereno --stop-sel  "idle"    stop them but leave them resumable
 
 Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
-SERENO_TMUX_SOCK, SERENO_REGISTRY.
+SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_SORT=activity|context|project|memory
+(prefix with `-` to invert: SERENO_SORT=-activity).
 
 Los comentarios de este fichero estan en castellano a proposito: explican POR QUE
 esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
 
 MIT licence. https://github.com/ElRaxy/sereno
 """
-import os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib, unicodedata
+import base64, os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib
+import unicodedata
 
 HOME = pathlib.Path.home()
 # El nombre con el que te han invocado: el repo lo instala como `sereno`, pero por un
@@ -297,6 +300,322 @@ def meta_by_tmux():
     return out
 
 
+# ─────────────────────────── colisiones entre sesiones ───────────────────────────
+# Dos sesiones vivas escribiendo en el mismo sitio no se ven entre ellas: cada una cree
+# que el fichero es suyo. Los dos accidentes reales de esta maquina tienen esa forma
+# —una saco a otro repo el modulo que la de al lado estaba editando, y un `git commit`
+# sin pathspec se llevo el indice que otra habia dejado preparado— y ninguno de los dos
+# dio error: se descubrieron despues, leyendo el diff.
+#
+# Lo que se observa son TOQUES: (epoch, clase, ruta, verbo).
+#
+#   "w"     escritura a un fichero concreto: Edit/Write/MultiEdit/NotebookEdit, y los
+#           dos extremos de un `mv`.
+#   "repo"  orden de git que actua sobre TODO el repo aunque nombre un fichero:
+#           `git commit` sin pathspec, `git add -A`, `git checkout .`, `git reset
+#           --hard`, `git clean -f`, `git stash`. Su ruta es la raiz del repo.
+#   "dir"   `rm -r <dir>`: se lleva por delante lo que cuelgue de ahi.
+#
+# El veredicto NO nace aqui. `hechos_colision()` constata y `nivel_colision()` compone,
+# que es la frontera que pide `.claude/rules/llm-decision-boundary.md`.
+
+# Cuanto atras cuenta un toque. Medido sobre 40 transcripts de esta maquina: las 80
+# lineas que `pulso()` ya lee abarcan entre 0,7 y 21 minutos segun lo hablador que sea
+# el agente, y 3 minutos en el caso tipico. Quince es lo que tarda la union de varios
+# refrescos en llenar esa ventana sin leer un byte de mas, y sigue significando "la
+# otra sesion estaba aqui en esta misma sentada". Mas alla de eso lo que hay no es una
+# carrera entre dos sesiones: es trabajo secuencial, y avisar de el es ruido.
+VENTANA_COL = 15 * 60
+# Compartir repo NO es chocar: en un monorepo lo comparten todas. Se avisa de "misma
+# carpeta" para arriba.
+COLISION_MINIMA = 2
+# Lo que cada sesion ha tocado, acumulado entre refrescos. `pulso()` ve las ultimas 80
+# lineas y nada mas; guardando lo visto, la ventana efectiva crece sola mientras sereno
+# siga abierto y no cuesta ni una lectura extra.
+_HUELLAS = {}
+_TOPE_TOQUES = 300
+_RAICES = {}
+
+_TROZOS = re.compile(r"&&|\|\||;|\n|\|")
+# Se corta ANTES de tokenizar: un `$(...)`, un heredoc o una redireccion meten dentro
+# del comando texto que no son argumentos suyos, y `git commit -m "$(cat <<'EOF'` es
+# como se escribe de verdad un commit largo aqui.
+_CORTE = re.compile(r"\$\(|<<|>")
+_CON_VALOR = {"-m", "--message", "-C", "--reuse-message", "-c", "--reedit-message",
+              "--author", "--date", "-F", "--file", "-S", "--gpg-sign", "--cleanup",
+              "--fixup", "--squash", "-t", "--template", "--trailer"}
+_ENVOLTORIO = ("sudo", "env", "nohup", "time", "command")
+# Solo estas escriben. `Read`, `Glob` y `Grep` tambien traen `file_path` o `path`, y
+# mirar un fichero no choca con nadie.
+_TOOLS_ESCRIBEN = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+
+
+def raiz_repo(d):
+    """La carpeta que contiene el `.git`, subiendo desde `d`. "" si no hay ninguna.
+
+    Sin lanzar `git`: `tests/test_sin_red.py` fija la lista de binarios permitidos y
+    esto no necesita ninguno — es un `exists()` por nivel y una cache por carpeta.
+
+    Distinguir repos importa mas de lo que parece. Medido el 2026-08-26 con dos
+    sesiones commiteando a la vez: una en `~/Desktop/VanguardIA` y otra en
+    `.../src/Anubis/seo-guardian`, que vive DENTRO pero es repo propio. Sin subir a
+    buscar el `.git` las dos habrian figurado compartiendo indice.
+    """
+    if not d or DEMO:
+        return ""
+    if d in _RAICES:
+        return _RAICES[d]
+    p, raiz = pathlib.Path(d), ""
+    for _nivel in range(20):
+        if (p / ".git").exists():
+            raiz = str(p)
+            break
+        if p.parent == p:
+            break
+        p = p.parent
+    _RAICES[d] = raiz
+    return raiz
+
+
+def _tokens(trozo):
+    """Los argumentos de un tramo de shell, o lo que se pueda sacar de el.
+
+    `shlex` revienta con comillas sin cerrar, que es lo normal cuando el tramo sale de
+    partir un comando de varias lineas. Ahi se cae a partir por blancos, que para
+    decidir "¿esto nombra un fichero?" basta.
+    """
+    trozo = _CORTE.split(trozo, 1)[0]
+    try:
+        tok = shlex.split(trozo)
+    except ValueError:
+        tok = trozo.split()
+    while tok and (tok[0] in _ENVOLTORIO or "=" in tok[0]):
+        tok = tok[1:]          # `sudo`, `VAR=x` y demas prefijos no son el comando
+    return tok
+
+
+def _sin_pathspec(resto):
+    """Un `git commit` sin fichero detras se lleva el INDICE, que es compartido.
+
+    Es el accidente registrado: ocho sesiones en el mismo repo, una commitea y arrastra
+    lo que otra habia dejado preparado con `git add`. Nombrando el fichero no pasa.
+    """
+    saltar = False
+    for t in resto:
+        if saltar:
+            saltar = False
+            continue
+        if t == "--":
+            return False
+        if not t.startswith("-"):
+            return False
+        if t in _CON_VALOR:
+            saltar = True
+    return True
+
+
+def _anchas(cmd):
+    """Ordenes de un `Bash` que tocan mas de lo que nombran: [(clase, ruta, verbo)].
+
+    Deliberadamente NO se leen redirecciones (`> fichero`), `tee`, `sed -i` ni `cp`.
+    Medido sobre los 505 comandos Bash de los ultimos 40 transcripts: la regex de
+    redireccion daba 717 aciertos y casi todos eran `/dev/null`, un `2>&1`, una
+    variable sin expandir o el `60` de un `head -60`. Un detector que grita 717 veces
+    no lo mira nadie. `mv` si entra aunque en la muestra saliera 0 veces: es
+    exactamente el accidente de sacar un modulo que otra sesion esta editando.
+    """
+    fuera = []
+    for trozo in _TROZOS.split(cmd):
+        tok = _tokens(trozo)
+        if len(tok) >= 2 and tok[0] == "git":
+            sub, resto = tok[1], tok[2:]
+            if sub == "commit" and _sin_pathspec(resto):
+                fuera.append(("repo", "", "git commit"))
+            elif sub == "add" and any(a in ("-A", "--all", "-u", "--update", ".", ":/")
+                                      for a in resto):
+                fuera.append(("repo", "", "git add"))
+            elif sub in ("checkout", "restore") and any(a in (".", ":/") for a in resto):
+                fuera.append(("repo", "", "git " + sub))
+            elif sub == "reset" and any(a in ("--hard", "--mixed") for a in resto):
+                fuera.append(("repo", "", "git reset"))
+            elif sub == "clean" and any(re.match(r"-[a-zA-Z]*f", a) for a in resto):
+                fuera.append(("repo", "", "git clean"))
+            elif sub == "stash" and (not resto or resto[0] in
+                                     ("push", "save", "-u", "--include-untracked")):
+                fuera.append(("repo", "", "git stash"))
+        elif len(tok) >= 2 and tok[0] == "rm" and any(re.match(r"-[a-zA-Z]*[rR]", a)
+                                                      for a in tok[1:]):
+            fuera += [("dir", a, "rm -r") for a in tok[1:] if not a.startswith("-")]
+        elif len(tok) >= 3 and tok[0] == "mv":
+            # Los DOS extremos: mover deja huerfano a quien editaba el origen, y pisa
+            # a quien estuviera escribiendo el destino.
+            fuera += [("w", a, "mv") for a in tok[1:] if not a.startswith("-")]
+    return fuera
+
+
+def _toques(b, ts):
+    """Lo que escribe un bloque `tool_use`, en toques crudos (rutas sin resolver).
+
+    Reusa `_arg_tool()`, que es la misma tabla `_TOOL_ARG` con la que `_resume_tool()`
+    pinta la linea del panel: un solo sitio donde se decide que argumento identifica
+    una llamada, dos lectores distintos de ese hecho.
+    """
+    nom = b.get("name") or ""
+    clave, valor = _arg_tool(b)
+    if nom in _TOOLS_ESCRIBEN and clave in ("file_path", "notebook_path"):
+        return [(ts, "w", valor, nom)]
+    if nom == "Bash" and clave == "command":
+        return [(ts, clase, ruta, verbo) for clase, ruta, verbo in _anchas(valor)]
+    return []
+
+
+def _resuelve(toques, cwd):
+    """Rutas absolutas y normalizadas, contra el `cwd` de la sesion.
+
+    Claude Code pasa `file_path` absoluto siempre —comprobado sobre los transcripts de
+    esta maquina— asi que esto es para lo que sale de un `Bash`, que si viene relativo.
+    Un toque de clase "repo" apunta al repo entero: su ruta ES la raiz del repo.
+    """
+    fuera = []
+    for ts, clase, ruta, verbo in toques:
+        if clase == "repo":
+            ruta = raiz_repo(cwd) or cwd
+        elif ruta.startswith("/"):
+            ruta = os.path.normpath(ruta)
+        elif cwd:
+            ruta = os.path.normpath(os.path.join(cwd, ruta))
+        if ruta:
+            fuera.append((ts, clase, ruta, verbo))
+    return fuera
+
+
+def recuerda_toques(sid, toques, ahora=None):
+    """Mezcla lo recien visto con lo ya sabido de esa sesion y devuelve su huella viva.
+
+    Idempotente a proposito: la fila de una sesion parada sale de `_CACHE_DISCO` con los
+    mismos toques vuelta tras vuelta, y volver a mezclarlos no puede cambiar nada.
+
+    La poda por ventana va aqui y no al consultar: asi el diccionario no crece con las
+    horas que lleve sereno abierto, que es la unica forma que tiene esto de hacerse
+    grande.
+    """
+    ahora = time.time() if ahora is None else ahora
+    h = _HUELLAS.setdefault(sid, {})
+    for ts, clase, ruta, verbo in (toques or ()):
+        k = (clase, ruta, verbo)
+        h[k] = max(ts, h.get(k, 0))
+    viejo = ahora - VENTANA_COL
+    for k in [k for k, ts in h.items() if ts < viejo]:
+        del h[k]
+    if len(h) > _TOPE_TOQUES:
+        # Un barrido que toca mil ficheros no puede comerse la memoria del selector.
+        for k, _ts in sorted(h.items(), key=lambda kv: kv[1])[:len(h) - _TOPE_TOQUES]:
+            del h[k]
+    if not h:
+        _HUELLAS.pop(sid, None)
+    return h
+
+
+def hechos_colision(mia, otra, ahora=None):
+    """Que comparten dos sesiones, en hechos. Sin veredicto: lo compone `nivel_colision`.
+
+    `mia` y `otra` son {"repo": str, "toques": {(clase, ruta, verbo): epoch}}. Los
+    campos simetricos valen para las dos; los contadores miran a `otra`, porque lo que
+    se le ensena a una sesion es lo que esta haciendo LA DE AL LADO.
+    """
+    ahora = time.time() if ahora is None else ahora
+    fmia = {r for (c, r, _v) in mia["toques"] if c == "w"}
+    fotra = {r for (c, r, _v) in otra["toques"] if c == "w"}
+    comunes = fmia & fotra
+    dmia = {os.path.dirname(r) for r in fmia}
+    dotra = {os.path.dirname(r) for r in fotra}
+    mismo_repo = bool(mia["repo"]) and mia["repo"] == otra["repo"]
+
+    # Una orden ancha solo choca si cae sobre terreno que la otra esta escribiendo: un
+    # `git commit` en un repo donde no trabaja nadie mas no se lleva nada de nadie. Es
+    # lo que evita que el aviso salte en cada commit de una sesion que va sola.
+    ancha, ancha_mia = "", False
+    for suya, quien, ajenos in ((True, mia, fotra), (False, otra, fmia)):
+        for (clase, ruta, verbo), _ts in quien["toques"].items():
+            if clase == "repo" and mismo_repo:
+                ancha, ancha_mia = verbo, suya
+            elif clase == "dir" and any(f.startswith(ruta.rstrip("/") + "/")
+                                        for f in ajenos):
+                ancha, ancha_mia = verbo, suya
+
+    # Cuanto pisa la OTRA sobre terreno compartido: la medida de si esto esta caliente
+    # ahora o es un rastro de hace un rato. Sin terreno compartido no hay que contar.
+    terreno = comunes or ({r for r in fotra if os.path.dirname(r) in dmia}
+                          if dmia & dotra else set())
+    calientes = [ts for (c, r, _v), ts in otra["toques"].items()
+                 if (c == "w" and r in terreno) or (c != "w" and mismo_repo)]
+    return {
+        "mismo_fichero": bool(comunes),
+        "mismo_directorio": bool(dmia & dotra),
+        "mismo_repo": mismo_repo,
+        "ficheros": tuple(sorted(comunes)),
+        "escrituras_recientes": len(calientes),
+        "segundos_desde_la_ultima": int(ahora - max(calientes)) if calientes else None,
+        "orden_ancha": ancha,
+        "orden_es_mia": ancha_mia,
+    }
+
+
+def nivel_colision(h):
+    """0 nada · 1 mismo repo · 2 misma carpeta · 3 mismo fichero · 4 orden ancha.
+
+    El 1 NO es un choque y no se pinta: en un monorepo lo comparten todas las sesiones a
+    la vez, y un aviso que sale siempre no avisa de nada. Existe como escalon para que
+    el 4 pueda apoyarse en el.
+
+    El 4 va por encima del 3 a proposito. Dos sesiones editando el mismo fichero lo
+    notas al guardar; un `git commit` sin pathspec en un repo que otra esta tocando se
+    lleva su indice sin que nada falle, y eso solo se ve leyendo el diff despues.
+    """
+    if h["orden_ancha"]:
+        return 4
+    if h["mismo_fichero"]:
+        return 3
+    if h["mismo_directorio"]:
+        return 2
+    if h["mismo_repo"]:
+        return 1
+    return 0
+
+
+def colisiones(rows):
+    """Anota en cada fila con quien choca, si con alguien. Devuelve las mismas `rows`.
+
+    O(n^2) sobre las filas que tienen toques en la ventana, que en la practica son dos o
+    tres. Aun con las 40 del historial serian 1.600 intersecciones de conjuntos de
+    decenas de elementos: por debajo del milisegundo, y solo se paga cuando hay algo que
+    cruzar.
+    """
+    ahora = time.time()
+    vivas = []
+    for r in rows:
+        pu = r.get("pulso") or {}
+        r["colision"] = None
+        toques = recuerda_toques(r["name"], pu.get("escrituras"), ahora)
+        if toques:
+            cwd = pu.get("cwd") or (r.get("meta") or {}).get("cwd") or ""
+            vivas.append((r, {"repo": raiz_repo(cwd), "toques": toques}))
+
+    for i, (ra, ha) in enumerate(vivas):
+        for rb, hb in vivas[i + 1:]:
+            if ra["name"] == rb["name"]:
+                continue          # una sesion reanudada puede llegar por dos vias
+            for yo, mia, otro, suya in ((ra, ha, rb, hb), (rb, hb, ra, ha)):
+                h = hechos_colision(mia, suya, ahora)
+                h["nivel"] = nivel_colision(h)
+                h["con"] = otro["name"]
+                h["titulo"] = otro.get("title_full") or otro.get("title") or ""
+                if h["nivel"] >= COLISION_MINIMA and (
+                        yo["colision"] is None or h["nivel"] > yo["colision"]["nivel"]):
+                    yo["colision"] = h
+    return rows
+
+
 def pulso(e, secs=90, fino=True):
     """Hechos sobre lo que hace la sesion. El veredicto lo compone quien llame.
 
@@ -315,16 +634,19 @@ def pulso(e, secs=90, fino=True):
     if not t:
         return {"escribe": None, "herramienta": None}
     try:
-        escribe = (time.time() - t.stat().st_mtime) < secs
+        # El `mtime` hace ademas de reloj de respaldo para las lineas sin `timestamp`:
+        # sin el, un toque sin fecha nace con epoch 0 y se poda al instante, en silencio.
+        mtime = t.stat().st_mtime
     except OSError:
         return {"escribe": None, "herramienta": None}
+    escribe = (time.time() - mtime) < secs
     if not fino:
         # El aviso de abrir terminal solo cuenta sesiones: leer la cola de todos los
         # transcripts para afinar le costaria 100 ms en vez de 30, y no cambia lo que
         # imprime. Lo fino lo pide el selector, que si lo pinta.
         return {"escribe": escribe, "herramienta": None}
 
-    pendientes, ultimo_tool, extra = set(), False, {}
+    pendientes, ultimo_tool, extra, toca = set(), False, {}, []
     for raw in ultimas_lineas(t, 80):
         try:
             j = json.loads(raw)
@@ -333,6 +655,30 @@ def pulso(e, secs=90, fino=True):
         for k in ("cwd", "gitBranch", "lastPrompt", "aiTitle"):
             if j.get(k):
                 extra[k] = j[k]            # de una pasada: no hay que releer despues
+        # Los ficheros que toca la sesion, para el detector de choques. Va ANTES del
+        # corte de `isSidechain` a proposito: lo que escribe un subagente lo escribe la
+        # sesion, y quien se lleve el fichero por delante no distingue cual de los dos
+        # lo hizo. No cuesta una lectura: esta cola ya esta abierta.
+        cont0 = (j.get("message") or {}).get("content")
+        if isinstance(cont0, list):
+            ts = _iso(j.get("timestamp") or "") or mtime
+            for b0 in cont0:
+                if isinstance(b0, dict) and b0.get("type") == "tool_use":
+                    toca += _toques(b0, ts)
+        # El CLI escribe al cerrar una linea `cost-state` con el gasto POR MODELO, y
+        # la clave de ese diccionario si trae el sufijo: `claude-opus-5[1m]`. Es el
+        # unico sitio del transcript donde la ventana de la sesion aparece escrita —
+        # `message.model` dice `claude-opus-5` a secas aunque corra en el millon.
+        # Medido sobre los 517 transcripts de esta maquina: 15 traen la linea, y las
+        # 15 dentro de las ultimas 80, que son las que esta pasada ya lee. Se publica
+        # el hecho (`la escribio con sufijo`), no el tope: el tope lo compone
+        # `tope_contexto()`.
+        if j.get("type") == "cost-state":
+            uso_modelo = j.get("modelUsage")
+            if isinstance(uso_modelo, dict) and uso_modelo:
+                extra["ventana_1m"] = any("[1m]" in str(k).lower()
+                                          for k in uso_modelo)
+            continue
         if j.get("isSidechain"):
             continue
         msg = j.get("message") or {}
@@ -366,6 +712,10 @@ def pulso(e, secs=90, fino=True):
                            if isinstance(b, dict) and b.get("type") == "tool_result"}
             if not pendientes:
                 ultimo_tool = False
+    if toca:
+        # Se resuelve al final porque el `cwd` sale de esta misma pasada y las primeras
+        # lineas pueden llegar antes que el.
+        extra["escrituras"] = _resuelve(toca, extra.get("cwd") or "")
     return {"escribe": escribe, "herramienta": bool(pendientes) and ultimo_tool,
             **extra}
 
@@ -445,8 +795,6 @@ def rss_por_arbol(pids):
 
 
 def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
-    if DEMO:
-        return [r for r in sesiones_demo() if r.get("fuente") == "claude"]
     """`con_ram` cuesta un `ps -eo` de toda la maquina: 220 ms medidos con 9 sesiones.
 
     El hook que corre al abrir terminal solo dice cuantas hay, asi que ahi no se
@@ -457,6 +805,12 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     saca las que se lanzaron desde VS Code o con la ruta completa al binario, que
     hasta ahora no aparecian en ningun sitio.
     """
+    # La demo sale por aqui, pero POR DEBAJO del `sort` del final: cuando se colaba
+    # antes, las capturas y el GIF del README ensenaban un orden —de menos a mas
+    # parada— que el programa de verdad no producia nunca. La unica vista que se
+    # revisa a ojo era justo la que esquivaba la regla.
+    if DEMO:
+        return ordena([r for r in sesiones_demo() if r.get("fuente") == "claude"])
     # El pulso fino y la RAM iban atados porque hasta ahora solo los pedia el selector,
     # que pinta las dos cosas. `--watch` quiere lo fino —es lo que detecta el cambio de
     # estado— y NO quiere el `ps -eo` de toda la maquina cada veinte segundos.
@@ -501,8 +855,10 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
         # hay que avisar. Sin tmux delante, el vigilante se quedaba sin ver el flanco
         # que existe para ver. Lo caza `tests/test_watch_flanco.py`.
         rows += sesiones_de_disco(vistos=ids, solo_activas=solo_activas, fino=fino)
-    rows.sort(key=lambda r: (r["idle"] is None, -(r["idle"] or 0)))
-    return rows
+    # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
+    # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
+    # cursor, que es lo que abre ENTER.
+    return colisiones(ordena(rows))
 
 
 # ─────────────── sesiones leidas del historial, sin tmux ni registro ───────────────
@@ -603,6 +959,11 @@ def fila_de_transcript(p, mt=None, fino=True):
 # del README sale de datos que no existen, y ademas se puede probar el layout sin
 # tener cinco sesiones abiertas.
 DEMO = _env("DEMO", "0") not in ("", "0")
+# `--usage`: el acumulado obliga a leer el transcript entero, y un `--json` que
+# alimenta una statusline se llama cada pocos segundos. Apagado por defecto, y cuando
+# esta apagado los campos salen a `null` y NO a cero: un dato que no se ha medido no
+# es un cero.
+USO = False
 
 _DEMO = [
     # titulo, proyecto, rama, idle, MB, escribe, herramienta, prompt, respuesta, tool,
@@ -674,6 +1035,61 @@ _DEMO_CTX = (
     {"ctx": 12_000, "modelo": "claude-haiku-4-5"},
 )
 
+# Consumo de mentira, en paralelo a `_DEMO_CTX`. Las cifras son del orden de las reales
+# medidas en esta maquina: la cache leida cien veces la entrada, y el ritmo entre 1,4k y
+# 2,1k por minuto. La quinta fila lleva tres compactaciones a proposito: es el caso que
+# este dato existe para explicar, un contexto bajo en una sesion que lleva horas.
+_DEMO_USO = (
+    {"in": 1_200, "out": 194_378, "cw": 1_646_733, "cr": 77_218_269,
+     "turnos": 259, "compacta": 0, "activo": 6_960.0, "usd": None},
+    {"in": 1_042, "out": 414_831, "cw": 2_125_425, "cr": 128_435_885,
+     "turnos": 521, "compacta": 2, "activo": 17_940.0, "usd": None},
+    {"in": 882, "out": 140_559, "cw": 436_049, "cr": 26_413_017,
+     "turnos": 129, "compacta": 0, "activo": 4_260.0, "usd": None},
+    {"in": 458, "out": 196_362, "cw": 1_071_413, "cr": 61_614_069,
+     "turnos": 229, "compacta": 1, "activo": 6_960.0, "usd": None},
+    {"in": 1_984, "out": 765_291, "cw": 2_993_300, "cr": 299_643_093,
+     "turnos": 992, "compacta": 3, "activo": 22_020.0, "usd": None},
+    {"in": 334, "out": 138_544, "cw": 512_961, "cr": 37_574_214,
+     "turnos": 167, "compacta": 0, "activo": 5_220.0, "usd": None},
+    {"in": 86, "out": 29_035, "cw": 253_649, "cr": 5_693_619,
+     "turnos": 43, "compacta": 0, "activo": 900.0, "usd": None},
+)
+
+
+# El recorrido de la demo. (resumen, segundos, error, vacio_si_es_busqueda).
+# La primera sesion ensena el caso que esto existe para cazar —el mismo comando fallando
+# tres veces y un cuarto intento corriendo— y la segunda, el barrido sin resultados.
+_DEMO_RUTA = {
+    0: [("Read \u00b7 tests/webhooks/test_retry.py", 2, False, None),
+        ("Edit \u00b7 src/webhooks/handler.py", 1, False, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", 34, True, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", 31, True, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", 33, True, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", None, False, None)],
+    1: [("Read \u00b7 tests/test_login.py", 2, False, None),
+        ("Edit \u00b7 tests/test_login.py", 1, False, None),
+        ("Bash \u00b7 rg -n freeze_time tests/", 1, True, True),
+        ("Bash \u00b7 rg -n 'clock|monotonic' tests/", 1, True, True)],
+    2: [("Bash \u00b7 git log --oneline v2.3..HEAD", 3, False, None),
+        ("Write \u00b7 NOTES.md", 1, False, None)],
+}
+
+
+def _ruta_demo(i):
+    """Eventos inventados con la MISMA forma que los de verdad: si el modelo de datos
+    cambia, la demo deja de cuadrar y el test lo dice."""
+    ahora, pasos = time.time(), _DEMO_RUTA.get(i, [])
+    fuera = []
+    for k, (res, dur, err, vacio) in enumerate(pasos):
+        fuera.append({"nom": res.split(" ")[0], "res": res,
+                      "t0": ahora - 60 * (len(pasos) - k),
+                      "dur": None if dur is None else float(dur),
+                      "pend": dur is None, "err": err, "cod": 1 if err else 0,
+                      "bytes": 0 if (err or vacio) else 400,
+                      "busca": vacio is not None, "vacio": vacio})
+    return fuera
+
 
 def sesiones_demo():
     rows = []
@@ -689,14 +1105,27 @@ def sesiones_demo():
             "proyecto": proy, "rama": rama,
             "working": bool(esc or tool),
             "fuente": fu,
+            # `_uso` precocinado: `uso_de()` lo respeta y no abre ningun transcript.
+            "_uso": dict(_DEMO_USO[i]) if i < len(_DEMO_USO) else None,
             # `_det` precocinado: `detalles()` lo respeta y no abre ningun transcript.
             "_det": {"fase": None, "peso": (3 + i * 7) * 1024 * 1024,
                      "lastPrompt": pr, "resp": resp, "tool": cmd or None,
+                     "ruta": _ruta_demo(i),
                      "gitBranch": rama, "cwd": f"/Users/you/code/{proy}"},
         })
+    # Dos de las falsas chocan a proposito: es el caso que el detector existe para
+    # ensenar, y sin el la captura del README no lo cuenta. Rutas inventadas, como todo lo
+    # demas de aqui. `raiz_repo()` devuelve "" en demo, asi que se queda en nivel 3
+    # (mismo fichero) sin tocar el disco de verdad.
+    ahora = time.time()
+    rows[0]["pulso"]["escrituras"] = [
+        (ahora - 40, "w", "/Users/you/code/checkout-api/src/webhooks.py", "Edit"),
+        (ahora - 95, "w", "/Users/you/code/checkout-api/tests/test_webhooks.py", "Write")]
+    rows[1]["pulso"]["escrituras"] = [
+        (ahora - 25, "w", "/Users/you/code/checkout-api/src/webhooks.py", "Edit")]
     for r in rows:
         r["_det"]["fase"] = _fase(r)
-    return rows
+    return colisiones(rows)
 
 
 # `_fase()` devuelve una frase traducida, que es lo correcto para una persona y lo peor
@@ -726,6 +1155,10 @@ def filas_json(rows):
     for r in rows:
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx")
+        # Solo con `--usage`: leer el acumulado obliga a recorrer el transcript entero.
+        # Sin el flag los ocho campos van a `null` y NO a cero, que es lo que permite a
+        # quien lo consuma distinguir "no se midio" de "no gasto nada".
+        u = uso_de(r) if USO else None
         fuera.append({
             "id": r.get("name") or "",
             "title": r.get("title_full") or r.get("title") or "",
@@ -741,9 +1174,32 @@ def filas_json(rows):
             "attached": bool(r.get("attached")),
             "memory_mb": None if r.get("mem_mb") is None else round(r["mem_mb"]),
             "context_tokens": ctx,
-            "context_max": tope_contexto(pu.get("modelo"), ctx) if ctx else None,
+            "context_max": tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"))
+                           if ctx else None,
             "model": pu.get("modelo"),
             "pid": r.get("pid") or None,
+            # Los cuatro crudos y ninguna suma: juntar la cache leida con la entrada da
+            # una cifra cien veces mayor que el material real. Quien quiera un total lo
+            # compone, sabiendo lo que esta sumando.
+            "input_tokens": u["in"] if u else None,
+            "output_tokens": u["out"] if u else None,
+            "cache_write_tokens": u["cw"] if u else None,
+            "cache_read_tokens": u["cr"] if u else None,
+            "assistant_turns": u["turnos"] if u else None,
+            "compactions": u["compacta"] if u else None,
+            "working_seconds": round(u["activo"]) if u else None,
+            # Lo escribio el propio CLI con sus precios; `sereno` no calcula dinero ni
+            # lleva tabla de tarifas. En un plan de suscripcion es lo que HABRIA costado
+            # por API, no lo que has pagado. Fuera del TUI a proposito.
+            "api_cost_usd": u["usd"] if u else None,
+            # Con quien choca y cuanto. Van las CIFRAS, nunca las rutas: `--json` se
+            # canaliza a barras de estado y a scripts de terceros, y un path de cliente
+            # dice tanto como una frase de la conversacion. El panel si las ensena,
+            # porque lo mira una persona en su propia pantalla.
+            "clash_level": (r.get("colision") or {}).get("nivel") or 0,
+            "clash_with": (r.get("colision") or {}).get("con") or None,
+            "clash_files": len((r.get("colision") or {}).get("ficheros") or ()),
+            "clash_command": (r.get("colision") or {}).get("orden_ancha") or None,
         })
     return fuera
 
@@ -881,6 +1337,36 @@ def transiciones(antes, ahora):
     return salen
 
 
+def pares_choque(filas):
+    """{par: nivel} de una foto. La clave es el PAR ordenado, no la sesion: un choque es
+    una relacion entre dos, y contarlo por sesion lo cuenta dos veces."""
+    fuera = {}
+    for r in filas:
+        if r.get("clash_with"):
+            par = tuple(sorted((r["id"], r["clash_with"])))
+            fuera[par] = max(fuera.get(par, 0), r["clash_level"])
+    return fuera
+
+
+def choques_nuevos(antes, ahora):
+    """Pares que ACABAN de empezar a chocar, o que han empeorado. Pura, como
+    `transiciones` y por lo mismo: el bucle no se puede testear y esto si.
+
+    Se compara nivel a nivel, no presencia: subir de "misma carpeta" a "mismo fichero" es
+    noticia; seguir en el mismo nivel diez minutos, no. Y el par se marca en cuanto lo
+    saca la primera de las dos filas, para no avisar dos veces del mismo choque.
+    """
+    salen, vistos = [], dict(antes)
+    for r in ahora:
+        if not r.get("clash_with") or r.get("clash_level", 0) < COLISION_MINIMA:
+            continue
+        par = tuple(sorted((r["id"], r["clash_with"])))
+        if r["clash_level"] > vistos.get(par, 0):
+            vistos[par] = r["clash_level"]
+            salen.append((par, r))
+    return salen
+
+
 def notifica(titulo, cuerpo):
     """Aviso del escritorio si el sistema tiene con que; si no, la campana del terminal.
 
@@ -903,7 +1389,7 @@ def notifica(titulo, cuerpo):
 
 def watch(cada=20):
     print(_("Watching. Nothing is reported until a session stops working. Ctrl-C to quit."), flush=True)
-    antes = {}
+    antes, pares = {}, {}
     primera = True
     try:
         while True:
@@ -916,7 +1402,19 @@ def watch(cada=20):
                                           d=f"  ({donde})" if donde else "") + "\n")
                 sys.stdout.flush()
                 notifica(_("waiting on you"), f"{que}" + (f" \u00b7 {donde}" if donde else ""))
+            # El segundo flanco que existe: no que una sesion pare, sino que dos empiecen
+            # a escribir en el mismo sitio. Se avisa cuando NACE, igual que el otro: si se
+            # avisara del estado, un choque que dura media hora avisaria noventa veces.
+            titulos = {r["id"]: (r["title"] or r["id"]) for r in filas}
+            for par, r in (() if primera else choques_nuevos(pares, filas)):
+                a, b = (titulos.get(x, x) for x in par)
+                sys.stdout.write("\a" + _(
+                    "{hora}  \u29c9 {a} and {b} are writing in the same place",
+                    hora=time.strftime("%H:%M"), a=a, b=b) + "\n")
+                sys.stdout.flush()
+                notifica(_("two sessions in the same place"), f"{a} \u00b7 {b}")
             antes = {r["id"]: r["state"] for r in filas}
+            pares = pares_choque(filas)
             primera = False
             time.sleep(cada)
     except KeyboardInterrupt:
@@ -954,12 +1452,25 @@ def print_live(rows):
         edad = _dur(now - r["created"]) if r["created"] else "?"
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx")
-        pct = (f"  {round(100 * ctx / tope_contexto(pu.get('modelo'), ctx)):>3}%"
-               if ctx else "      ")
+        # El tope se saca ANTES del f-string: partir una expresion en dos lineas dentro
+        # de uno es legal desde 3.12 y un SyntaxError en 3.8, que es el suelo del repo.
+        tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m")) if ctx else 0
+        pct = f"  {round(100 * ctx / tope_ctx):>3}%" if ctx else "      "
+        # `--list` es lo que sale en un pipe y en una terminal sin tty: si el aviso
+        # solo viviera en el selector, quien lea la lista se lo pierde justo cuando importa.
+        choque = ("  \u29c9 " + _("clashes with another session")) if r.get("colision") else ""
         print(f"  {i:>2}. {ICONO.get(est, '?')} {r['title']:<34} "
               f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}  "
-              + _("open for {t}", t=edad) + att)
+              + _("open for {t}", t=edad) + att + choque)
         print(f"         {r['name']}")
+        if USO:
+            u = uso_de(r)
+            if u:
+                ritmo = _uso_ritmo(u)
+                extra = _uso_texto(u) + (("  \u00b7 " + ritmo) if ritmo else "")
+                if u["compacta"]:
+                    extra += "  \u00b7 " + _("{n} compaction(s)", n=u["compacta"])
+                print("         " + extra)
 
 
 def ESTADO_LARGO(est):
@@ -1208,6 +1719,191 @@ def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
     return [l.decode("utf-8", "replace") for l in lineas[-cuantas:] if l.strip()]
 
 
+# ─────────────────── lo que lleva gastado, no lo que ocupa ─────────────────
+# La barra de contexto dice cuanto OCUPA la ventana ahora mismo. No dice cuanto se ha
+# quemado: una sesion que ha compactado tres veces marca 20% con doce horas dentro.
+# Lo acumulado sale del `usage` de cada respuesta, y eso obliga a leer el transcript
+# ENTERO: las cifras estan repartidas por todo el fichero y la cola no sirve. Por eso
+# esto NO se calcula para la lista, sino para la fila bajo el cursor —igual que
+# `detalles()`— y se cachea por (fichero, tamano, mtime).
+#
+# Tres trampas medidas sobre los 739 transcripts de esta maquina, y las tres cambian el
+# numero que sale:
+#
+#   1. Una respuesta ocupa VARIAS lineas —un `thinking` y dos `tool_use` van en tres— y
+#      las tres repiten el MISMO `usage`. Sumarlas todas infla la salida entre un +49% y
+#      un +123% segun la sesion. Se deduplica por `message.id`, y basta compararlo con el
+#      anterior: en 14.507 lineas con `usage` de 60 transcripts, un id repetido nunca
+#      aparecio separado de sus hermanos. Eso ahorra guardar el conjunto entero de ids.
+#   2. `cache_read_input_tokens` NO es material nuevo: es lo ya enviado que se vuelve a
+#      leer, y es cien veces mayor que el resto (300M frente a 3M en una sesion de ocho
+#      horas). Sumarlo con la entrada da una cifra enorme que no significa nada, asi que
+#      va aparte y no se junta nunca con `in`/`cw`.
+#   3. La ultima linea de una sesion viva se esta escribiendo mientras la lees. Si se
+#      consume a medias, el `_pos` avanza sobre ella y esos tokens se pierden para siempre.
+#
+# Y una cuarta que no se puede arreglar desde aqui, pero hay que saberla: los turnos de
+# subagente y las llamadas a Haiku que el CLI hace por su cuenta (titulos, resumenes) NO
+# dejan linea en el transcript. Cruzado contra el `cost-state` que escribe el propio CLI,
+# esto cuadra al 0,1% en cinco transcripts de ocho y se queda hasta un 21% corto en dos.
+# Se llama `input_tokens`/`output_tokens` —lo que el transcript registro— y no "lo que te
+# han cobrado", que es otra cosa y viaja aparte en `usd`.
+TOPE_USO = 256 * 1024 * 1024      # por encima, `None`: mejor sin dato que a medias
+_CACHE_USO = {}
+_USO_CAMPOS = (("in", "input_tokens"), ("out", "output_tokens"),
+               ("cw", "cache_creation_input_tokens"),
+               ("cr", "cache_read_input_tokens"))
+
+
+def _epoch(ts):
+    """Segundos de un `2026-08-26T06:24:23.762Z`, troceando la cadena a mano.
+
+    No se usa `datetime.fromisoformat`: en 3.8 exige exactamente 3 o 6 decimales, y un
+    transcript escrito por otra version del CLI reventaria en silencio devolviendo 0 —
+    que aqui se confundiria con "esta sesion no ha trabajado nada". Solo se necesitan
+    segundos: lo que se mide son huecos entre respuestas, no instantes.
+    """
+    try:
+        return datetime.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]),
+                                 int(ts[11:13]), int(ts[14:16]), int(ts[17:19]),
+                                 tzinfo=datetime.timezone.utc).timestamp()
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+
+
+def _uso(path):
+    """Hechos acumulados del transcript entero, o None si no se pudo leer.
+
+    Devuelve tipos cerrados y NUNCA un total agregado: quien pinte decide que suma con
+    que, porque juntar la cache leida con la entrada nueva da un numero que no significa
+    nada. Los campos con guion bajo son estado para la lectura incremental y no salen
+    de aqui: `filas_json` los nombra uno a uno.
+
+    Coste medido en esta maquina: 0,11 ms la mediana de los transcripts, 223 ms el mayor
+    (89,3 MB, sin cache de pagina), 0,08 ms las 40 filas con la cache caliente y 2,6 ms
+    el refresco de una sesion viva (17 KB nuevos en 20 s).
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    guardado = _CACHE_USO.get(str(path))
+    if guardado and guardado[0] == st.st_size and guardado[1] == st.st_mtime:
+        return guardado[2]
+    if guardado and st.st_size >= guardado[0]:
+        d = dict(guardado[2])          # sigue creciendo: se lee solo lo nuevo
+    else:
+        # Encogio (o no habia nada): lo han reescrito y el offset ya no vale. Releer
+        # 89 MB una vez es mas barato que publicar una cifra que se quedo a medias.
+        if st.st_size > TOPE_USO:
+            return None
+        d = {"in": 0, "out": 0, "cw": 0, "cr": 0, "turnos": 0, "compacta": 0,
+             "activo": 0.0, "usd": None, "_pos": 0, "_ult": None, "_ts": 0.0}
+    try:
+        with path.open("rb") as f:
+            f.seek(d["_pos"])
+            for raw in f:
+                if not raw.endswith(b"\n"):
+                    break              # la esta escribiendo ahora: se lee la proxima vez
+                d["_pos"] += len(raw)
+                # Criba por bytes antes de parsear. Sobre el transcript de 89 MB baja de
+                # 136 ms a 79 ms y no pierde nada: los falsos positivos (un `tool_result`
+                # que menciona la palabra) los descarta el parseo de abajo.
+                if (b'"usage"' not in raw and b'cost-state' not in raw
+                        and b'compact_boundary' not in raw):
+                    continue
+                try:
+                    j = json.loads(raw)
+                except Exception:
+                    continue
+                tipo = j.get("type")
+                if tipo == "system" and j.get("subtype") == "compact_boundary":
+                    # Lo que explica una barra de contexto baja en una sesion larga.
+                    d["compacta"] += 1
+                    continue
+                if tipo == "cost-state":
+                    # Lo escribe el CLI al cerrar, con SUS precios. `sereno` no calcula
+                    # dinero: lo relata. Vale el ultimo, que es el vigente.
+                    v = j.get("totalCostUSD")
+                    if isinstance(v, (int, float)):
+                        d["usd"] = float(v)
+                    continue
+                if tipo != "assistant":
+                    continue
+                m = j.get("message") or {}
+                u = m.get("usage")
+                if not isinstance(u, dict):
+                    continue
+                mid = m.get("id")
+                if mid is not None and mid == d["_ult"]:
+                    continue           # otra linea de la MISMA respuesta: ya contada
+                d["_ult"] = mid
+                d["turnos"] += 1
+                for clave, campo in _USO_CAMPOS:
+                    d[clave] += u.get(campo) or 0
+                t = _epoch(j.get("timestamp") or "")
+                if t:
+                    # Trabajo = huecos entre respuestas que no pasan de `VIVA`. Se reusa
+                    # esa constante y no un numero nuevo porque el programa YA llama "no
+                    # esta escribiendo" a un transcript quieto 90 s: dos umbrales harian
+                    # que el panel y la lista se contradijeran. El `max(0, …)` es por los
+                    # transcripts reanudados, que traen lineas copiadas fuera de orden.
+                    if d["_ts"]:
+                        d["activo"] += max(0.0, min(t - d["_ts"], VIVA))
+                    d["_ts"] = t
+    except OSError:
+        return None
+    if len(_CACHE_USO) > 200:
+        _CACHE_USO.clear()             # la clave no lleva mtime: crece sin tope
+    _CACHE_USO[str(path)] = (st.st_size, st.st_mtime, d)
+    return d
+
+
+def uso_de(r):
+    """El acumulado de la fila, o None. Mismo trato que `detalles()`: se lee SOLO para
+    quien lo mira. La lista no lo pinta y `--json` solo con `--usage`, porque cuesta el
+    transcript entero y un `--json` que alimenta una statusline se llama cada pocos
+    segundos. Una fila de otro CLI no tiene transcript y devuelve None, que no es cero."""
+    if "_uso" in r:
+        return r["_uso"]
+    t = (r.get("meta") or {}).get("_transcript")
+    r["_uso"] = _uso(t) if t else None
+    return r["_uso"]
+
+
+def _uso_texto(u):
+    """`1.4M in · 403k out · 300M cache`. Tres cifras y ninguna sumada con otra.
+
+    La entrada nueva si junta `in` y `cw`: las dos son material que entra al modelo por
+    primera vez y la diferencia entre ellas es de facturacion, no de contenido. La cache
+    LEIDA no se junta con nada: es lo mismo releido, y en una sesion de ocho horas es cien
+    veces mayor que todo lo demas junto. Las cuatro partes siguen enteras en `--json`.
+    """
+    return _("{i} in · {o} out · {c} cache",
+             i=_tok(u["in"] + u["cw"]) or "0", o=_tok(u["out"]) or "0",
+             c=_tok(u["cr"]) or "0")
+
+
+def _uso_ritmo(u):
+    """`1.6k/min · 4h working`, o "" si no hay ni un minuto de trabajo medido.
+
+    Lo que separa una sesion que lleva tres horas quemando de una abierta hace tres horas
+    y parada hace dos NO es el ritmo —medido sobre diez transcripts, va siempre entre
+    1.383 y 2.084 tokens por minuto— sino los minutos activos. Por eso van los dos y los
+    minutos mandan.
+    """
+    if u["activo"] < 60:
+        return ""
+    # `_tok()` no vale aqui, y es el unico sitio del fichero donde no vale: redondea a
+    # miles enteros, y el ritmo medido cae SIEMPRE entre 1.383 y 2.084 tokens por minuto
+    # sobre diez transcripts. Con `_tok()` las diez filas dirian "1k/min" — un dato que
+    # no distingue nada ocupa sitio y no informa. Un decimal ya las separa.
+    r = int(u["out"] / (u["activo"] / 60))
+    return _("{r}/min · {t} working",
+             r=(f"{r / 1000:.1f}k" if r >= 1000 else str(r)),
+             t=_lapso(u["activo"]))
+
+
 def first_user_text(path, minlen=25):
     """Primer mensaje sustancial del usuario: es lo que identifica el hilo.
 
@@ -1384,11 +2080,51 @@ def _fase(r):
             else _("stopped, waiting on you"))
 
 
+def _texto_colision(cl):
+    """Que comparten las dos sesiones, en una linea. Se compone al pintar y no se
+    guarda hecha: el idioma se decide aqui, no cuando se observo el hecho."""
+    if not cl:
+        return ""
+    # Del fichero se ensenan las DOS ultimas partes de la ruta, no la ruta entera: el
+    # panel mide unas 48 columnas y un path absoluto se come la linea y sale cortado
+    # justo por donde informa, que es el final. `src/webhooks.py` distingue tanto como
+    # `/Users/tu/code/checkout-api/src/webhooks.py` y cabe.
+    donde = (" · ".join("/".join(f.rsplit("/", 2)[-2:]) for f in cl["ficheros"][:3])
+             if cl["ficheros"]
+             else _("same folder") if cl["mismo_directorio"] else _("same repo"))
+    trozos = [cl.get("titulo") or cl.get("con") or "", donde]
+    if cl.get("orden_ancha"):
+        trozos.append(_("you are about to run {v} here", v=cl["orden_ancha"])
+                      if cl.get("orden_es_mia")
+                      else _("{v} in a repo another session is editing",
+                             v=cl["orden_ancha"]))
+    if cl.get("segundos_desde_la_ultima") is not None:
+        trozos.append(_("{n} writes, the last one {t} ago",
+                        n=cl["escrituras_recientes"],
+                        t=_lapso(cl["segundos_desde_la_ultima"])))
+    return " · ".join(x for x in trozos if x)
+
+
 # El argumento que identifica una llamada cambia por herramienta: de un Bash lo que
 # importa es el comando, de un Edit el fichero. Nombre a secas ("Bash") no distingue
 # compilar de borrar media carpeta.
 _TOOL_ARG = ("command", "file_path", "pattern", "path", "url", "query",
              "description", "prompt", "notebook_path")
+
+
+def _arg_tool(b):
+    """La clave y el valor que identifican una llamada, de un bloque `tool_use`.
+
+    Vive aparte porque la quieren dos: `_resume_tool()` la pinta y el detector de
+    choques la interpreta. Sin esto la tabla acabaria copiada arriba, y dos copias
+    de la misma tabla se separan sin que nada falle.
+    """
+    ent = b.get("input") if isinstance(b.get("input"), dict) else {}
+    for k in _TOOL_ARG:
+        v = ent.get(k)
+        if isinstance(v, str) and v.strip():
+            return k, v
+    return "", ""
 
 
 def _sin_tabla(t):
@@ -1400,12 +2136,236 @@ def _sin_tabla(t):
 def _resume_tool(b):
     """'Bash \u00b7 git push origin main' a partir de un bloque tool_use."""
     nom = b.get("name") or "?"
-    ent = b.get("input") if isinstance(b.get("input"), dict) else {}
-    for k in _TOOL_ARG:
-        v = ent.get(k)
-        if isinstance(v, str) and v.strip():
-            return f"{nom} \u00b7 {_clean(v)}"
-    return nom
+    _, v = _arg_tool(b)
+    return f"{nom} \u00b7 {_clean(v)}" if v else nom
+
+
+# ────────────────────── el recorrido de una sesion ──────────────────────
+# El panel dice lo ULTIMO que hizo la sesion. Lo que no dice es el camino, que es
+# donde se ve si avanza o da vueltas: el mismo comando fallando tres veces, un barrido
+# de greps que no encuentra nada, una llamada que lleva veinte minutos. Todo eso sale
+# de la MISMA cola que `detalles()` ya abre, sin leer un byte de mas.
+#
+# La frontera: aqui abajo solo se CONSTATA —cuanto duro, si vino marcado como error,
+# cuantos caracteres devolvio—. El veredicto lo compone `alertas()` con esos numeros.
+# Un hecho que hay que explicar es un hecho mal elegido.
+
+MAX_EVENTOS = 12          # los que se guardan por sesion
+RUTA_VISIBLE = 6          # los que se pintan; el resto se cuenta, no se dibuja
+RUTA_FIJO = 10            # columnas del glifo + la duracion + sus blancos
+
+# Tres intentos identicos fallidos es donde para una persona, y es el mismo numero que
+# el presupuesto de rechazos del revisor: reintentar UNA vez es trabajo normal.
+UMBRAL_BUCLE = 3
+# El barrido va con dos y no con tres a proposito: un reintento fallido puede ser un
+# flake, pero una segunda busqueda que no encuentra nada ya dice que la hipotesis esta
+# mal planteada. Y ademas no cuesta nada: buscar es barato, seguir barriendo no.
+UMBRAL_BARRIDO = 2
+
+# Herramientas cuyo trabajo es buscar: que no encuentren nada es informacion. Que un
+# Read devuelva poco, no lo es.
+_BUSCAN = ("Grep", "Glob", "WebSearch", "ToolSearch")
+# Y los que llegan dentro de un Bash, que en la practica son la via habitual: medido
+# sobre los 12 transcripts mas recientes de esta maquina, 2.788 llamadas a Bash y cero
+# a Grep. Mirar solo el nombre de la herramienta dejaria el barrido invisible.
+_BUSCAN_SH = ("grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "locate")
+_CODIGO = re.compile(r"^Exit code (\d+)\s*\n?")
+# Lo que deja un comando que no devolvio nada. El primero esta medido en los
+# transcripts de esta maquina; los otros dos son los de Grep/Glob y NO se han podido
+# verificar aqui (cero llamadas a esas dos herramientas en los 120 ultimos
+# transcripts), asi que van de refuerzo: quien sostiene la deteccion es el cuerpo de
+# cero caracteres, que es lo que deja un grep sin aciertos.
+_SIN_NADA = ("(bash completed with no output)", "no files found", "no matches found")
+
+
+def _cabeza_sh(cmd):
+    """El programa que de verdad se ejecuta en un Bash.
+
+    Sin esto `sudo rg foo` figura como `sudo`, `LC_ALL=C grep x` como una asignacion y
+    `git grep -l x` como `git`: los tres son busquedas y los tres se perderian.
+    """
+    for palabra in cmd.split()[:5]:          # 5 tokens sobran: el comando esta ahi
+        nombre = palabra.rsplit("/", 1)[-1]
+        if "=" in palabra or nombre in ("sudo", "command", "time", "nice", "env", "git"):
+            continue
+        return nombre
+    return ""
+
+
+def _texto_resultado(b):
+    """(cuerpo, codigo_de_salida) de un bloque tool_result.
+
+    El `content` llega como cadena o como lista de trozos, y cuando viene de un Bash
+    empieza por `Exit code N`. Ese prefijo se separa en vez de contarlo como cuerpo: si
+    no, un `grep` que no encuentra nada devolveria once caracteres en vez de cero y
+    pareceria que si encontro algo.
+    """
+    c = b.get("content")
+    if isinstance(c, list):
+        c = "".join(x.get("text") or "" for x in c if isinstance(x, dict))
+    texto = c if isinstance(c, str) else ""
+    m = _CODIGO.match(texto)
+    if not m:
+        return texto.strip(), None
+    return texto[m.end():].strip(), int(m.group(1))
+
+
+def _evento(bloque, t0):
+    """Un evento recien nacido: lo que se sabe con solo ver el `tool_use`."""
+    nom = bloque.get("name") or "?"
+    ent = bloque.get("input") if isinstance(bloque.get("input"), dict) else {}
+    cmd = ent.get("command") if isinstance(ent.get("command"), str) else ""
+    return {"nom": nom, "res": _resume_tool(bloque), "t0": t0, "dur": None,
+            "pend": True, "err": False, "cod": None, "bytes": 0,
+            "busca": nom in _BUSCAN or _cabeza_sh(cmd) in _BUSCAN_SH, "vacio": None}
+
+
+def recorrido(lineas, tope=MAX_EVENTOS):
+    """Las ultimas llamadas a herramienta, en orden, con lo medible de cada una.
+
+    `lineas` son los objetos YA parseados de la cola del transcript: se pasa lo parseado
+    y no el fichero para que esto no vuelva a abrirlo ni a decodificarlo.
+
+    El emparejamiento es el MISMO que usa `pulso()` para saber si hay una llamada
+    colgando: el `id` de un `tool_use` en un mensaje `assistant` y el `tool_use_id` de
+    un `tool_result` en el `user` siguiente, con los `isSidechain` fuera porque son
+    subagentes. Alli basta un conjunto y por eso alli sigue siendo un conjunto; aqui
+    hace falta la duracion, asi que se guarda el par.
+    """
+    abiertos, orden = {}, []
+    for j in lineas:
+        if not isinstance(j, dict) or j.get("isSidechain"):
+            continue
+        cont = (j.get("message") or {}).get("content")
+        if not isinstance(cont, list):
+            continue
+        t = _iso(j.get("timestamp") or "")
+        for b in cont:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and j.get("type") == "assistant":
+                bid = b.get("id") or ""
+                if bid and bid not in abiertos:
+                    abiertos[bid] = _evento(b, t)
+                    orden.append(bid)
+            elif b.get("type") == "tool_result":
+                e = abiertos.get(b.get("tool_use_id") or "")
+                if e is None:
+                    continue          # su tool_use se quedo fuera de la cola leida
+                cuerpo, cod = _texto_resultado(b)
+                e["pend"] = False
+                e["dur"] = (t - e["t0"]) if (t and e["t0"]) else None
+                e["err"] = bool(b.get("is_error"))
+                e["cod"] = cod
+                e["bytes"] = len(cuerpo)
+                if e["busca"]:
+                    e["vacio"] = e["bytes"] == 0 or cuerpo.lower() in _SIN_NADA
+    return [abiertos[k] for k in orden[-tope:]]
+
+
+def sintomas(eventos):
+    """Cuentas sobre una tanda de eventos. Enteros, ni una frase.
+
+    El veredicto lo compone `alertas()` a partir de esto, asi que no hay forma de que
+    un numero de aqui tape al de al lado: se ven los cuatro o no se ve ninguno.
+    """
+    if not eventos:
+        return {"eventos": 0, "repeticiones_consecutivas": 0, "fallos_seguidos": 0,
+                "busquedas_sin_resultado": 0, "segundos_en_curso": 0}
+    ult = eventos[-1]
+    repes = 0
+    for e in reversed(eventos):
+        if e["res"] != ult["res"]:
+            break
+        repes += 1
+    # Una llamada aun en curso no ha fallado, pero tampoco rompe la racha: al cuarto
+    # intento del mismo comando la racha es justo lo que hay que ver, y contar el que
+    # esta en vuelo la borraria en el momento en que estas mirandola.
+    cerrados = eventos[:-1] if ult["pend"] else eventos
+    fallos = 0
+    for e in reversed(cerrados):
+        if not e["err"]:
+            break
+        fallos += 1
+    vacias = 0
+    for e in reversed(cerrados):
+        # Cualquier otra cosa por medio corta la racha: dos greps vacios con un Edit
+        # en medio no son un barrido, son trabajo.
+        if not e["busca"] or not e["vacio"]:
+            break
+        vacias += 1
+    return {"eventos": len(eventos),
+            "repeticiones_consecutivas": repes,
+            "fallos_seguidos": fallos,
+            "busquedas_sin_resultado": vacias,
+            "segundos_en_curso": (round(max(0.0, time.time() - ult["t0"]))
+                                  if ult["pend"] and ult["t0"] else 0)}
+
+
+def alertas(s):
+    """Los veredictos, compuestos con los numeros de `sintomas()` y con nada mas.
+
+    Devuelve claves de un enum cerrado, no frases: la frase depende del idioma y del
+    ancho de la ventana, y quien decide no tiene por que enterarse de ninguna de las
+    dos. Lo que lleva veinte minutos corriendo NO sale por aqui: ya lo dice el campo
+    `status`, y un dato repetido no es una segunda opinion.
+    """
+    fuera = []
+    if (s["fallos_seguidos"] >= UMBRAL_BUCLE
+            and s["repeticiones_consecutivas"] >= UMBRAL_BUCLE):
+        fuera.append("bucle")
+    if s["busquedas_sin_resultado"] >= UMBRAL_BARRIDO:
+        fuera.append("barrido")
+    return fuera
+
+
+# La frase de cada alerta, con su cifra dentro. El enum viaja; la frase se traduce y se
+# puede reescribir sin tocar a quien decide.
+_TEXTO_ALERTA = {
+    "bucle": lambda s: _("the same command has failed {n} times",
+                         n=s["fallos_seguidos"]),
+    "barrido": lambda s: _("{n} searches in a row with no result",
+                           n=s["busquedas_sin_resultado"]),
+}
+
+
+def _seg(secs):
+    """'3s' / '12m' / '2h'. `_lapso()` no vale aqui: empieza en minutos y la mitad de
+    las llamadas a una herramienta duran menos de uno — la columna saldria de ceros."""
+    secs = int(secs or 0)
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    return f"{secs // 3600}h"
+
+
+# El glifo dice el desenlace y no repite el nombre de la herramienta, que va al lado:
+# corriendo, error, busqueda sin nada, y hecho sin mas. Los cuatro son de UNA columna
+# segun `ancho()` y tambien en pantalla — por eso no hay un simbolo de aviso aqui:
+# U+26A0 es de ancho ambiguo, `ancho()` cuenta 1 y muchos terminales pintan 2, y una
+# columna de mas en curses no da error: envuelve el sobrante al principio de la fila
+# siguiente.
+_GLIFO_RUTA = {"pend": ("\u25d0", 7), "err": ("\u2717", 5),
+               "vacio": ("\u2205", 2), "ok": ("\u00b7", 4)}
+
+
+def linea_ruta(e, cols):
+    """(glifo, par_de_color, duracion, resumen) de un evento, acotado a `cols` columnas.
+
+    Vive aparte del pintado a proposito: asi el ancho se puede probar sin curses, que es
+    donde el caracter huerfano aparece dos filas por debajo del fallo que lo causo. La
+    duracion de la llamada en vuelo se calcula AQUI y no en `recorrido()`: `_det` se
+    cachea por fila, y una duracion guardada se quedaria congelada.
+    """
+    clave = ("pend" if e["pend"] else "err" if e["err"]
+             else "vacio" if e["vacio"] else "ok")
+    glifo, par = _GLIFO_RUTA[clave]
+    secs = e["dur"]
+    if secs is None and e["pend"] and e["t0"]:
+        secs = max(0.0, time.time() - e["t0"])
+    return (glifo, par, f"{_seg(secs) if secs is not None else '':>4}",
+            recorta(e["res"], max(1, cols - RUTA_FIJO)))
 
 
 def detalles(r):
@@ -1423,11 +2383,17 @@ def detalles(r):
             d["peso"] = t.stat().st_size
         except OSError:
             pass
-        for raw in ultimas_lineas(t, 60):
+        # 100 y no 60: medido sobre los 8 transcripts mas recientes, 60 lineas dan
+        # entre 4 y 9 llamadas a herramienta y el recorrido saldria corto; 100 dan
+        # entre 6 y 13. `ultimas_lineas` lee en bloques de 256 KB, esto corre para UNA
+        # fila —la del cursor— y el coste medido no llega al milisegundo.
+        crudos = []
+        for raw in ultimas_lineas(t, 100):
             try:
                 j = json.loads(raw)
             except Exception:
                 continue
+            crudos.append(j)
             for k in ("aiTitle", "lastPrompt", "gitBranch", "cwd"):
                 if j.get(k):
                     d[k] = j[k]
@@ -1445,6 +2411,11 @@ def detalles(r):
                         d["resp"] = txt
                 elif b.get("type") == "tool_use":
                     d["tool"] = _resume_tool(b)
+        # El recorrido sale de la MISMA cola: ni una lectura mas. Lo que se guarda son
+        # los doce eventos ya resumidos, NUNCA las lineas crudas — una sola de ellas
+        # puede pasar de 96 KB y `_det` se queda pegado a la fila hasta el proximo
+        # refresco.
+        d["ruta"] = recorrido(crudos)
     d["fase"] = _fase(r)
     r["_det"] = d
     return d
@@ -1460,13 +2431,22 @@ def _mb(x):
 # deduce por una cascada de hechos, en este orden, y el ultimo corrige a los demas:
 #
 #   1. `SERENO_CTX_MAX`, si el usuario lo fija a mano. Manda sobre todo lo demas.
-#   2. El sufijo `[1m]` en el modelo del propio transcript, por si algun dia llega.
-#   3. El `model` de `~/.claude/settings.json`, que es donde vive hoy (`"opus[1m]"`).
-#   4. El contexto YA observado: si la sesion lleva 560k, el tope no es 200k. Esto es
-#      lo que impide pintar un 207%, que es lo que salia con la regla 2 sola.
+#   2. El `model` de `~/.claude/settings.json`, que es donde vive hoy (`"opus[1m]"`).
+#   3. El sufijo `[1m]` en el modelo del propio transcript, por si algun dia llega.
+#   4. La linea `cost-state` que el CLI escribe al cerrar: su `modelUsage` va indexado
+#      por `claude-opus-5[1m]`, CON el sufijo. Es lo unico de aqui que habla de ESTA
+#      sesion y no de la maquina entera. Aparece poco —15 de 517 transcripts— pero
+#      cuando aparece no se discute, y cae dentro de las 80 lineas que `pulso()` ya lee.
+#   5. El contexto YA observado: si la sesion lleva 560k, el tope no es 200k. Esto es
+#      lo que impide pintar un 207%, que es lo que salia con la regla 3 sola.
 #
-# La 3 es la floja: es config global y una sesion lanzada con otro `--model` no la
-# cumple. Por eso existe la 1, y por eso la 4 va detras y no delante.
+# La 2 es la floja: es config global y una sesion lanzada con otro `--model` no la
+# cumple. Por eso existe la 1, y por eso la 5 va detras y no delante.
+#
+# Lo que la 4 NO hace: bajar de un millon a 200k. Una `cost-state` sin sufijo es
+# evidencia de que la sesion no corre en la ventana grande, pero llegaria DESPUES de la
+# 2, que ya habra respondido con la config global. Corregir eso exige reordenar la
+# cascada entera y es otra decision, no un efecto secundario de esta.
 CTX_1M = 1_000_000
 CTX_STD = 200_000
 
@@ -1489,11 +2469,15 @@ def _ctx_max_config():
     return _ctx_max_config._v
 
 
-def tope_contexto(modelo, ctx=0):
+def tope_contexto(modelo, ctx=0, ventana_1m=None):
     forzado = _ctx_max_config()
     if forzado:
         return forzado
     if "[1m]" in (modelo or "").lower():
+        return CTX_1M
+    # `None` es "no lo escribio", que no es lo mismo que `False`, y por eso se compara
+    # con `is True`: un dato ausente no decide nada y cae a la regla de abajo.
+    if ventana_1m is True:
         return CTX_1M
     return CTX_1M if (ctx or 0) > CTX_STD else CTX_STD
 
@@ -1527,7 +2511,7 @@ def barra(valor, tope, celdas=5):
     return "\u25b0" * llenas + "\u25b1" * (celdas - llenas)
 
 
-COL_BASE = 3 + 2 + 9 + 1   # margen+canal+margen, estado, tiempo, marca adjunta
+COL_BASE = 3 + 3 + 9 + 1   # margen+canal+margen, estado+choque, tiempo, marca adjunta
 COL_CTX = 10              # barra de 5 celdas + " 88%"
 COL_RAM = 8               # "  1.6 GB" + el blanco que la separa de la marca
 COL_SEP = 3               # los dos blancos del titulo + el relleno del proyecto
@@ -1614,6 +2598,139 @@ def color_tiempo(idle):
     if idle < INACTIVA:
         return 6
     return 7 if idle < 6 * INACTIVA else 4
+
+
+# ──────────────────── orden y filtro de la lista ───────────────────
+# Los dos viven FUERA de `pick_ui` y sin tocar curses a proposito: son las dos reglas
+# que deciden que fila ve el usuario y en que sitio, y dentro del bucle de pintado no
+# habia forma de comprobarlas sin arrancar un pty. Mismo motivo que `reparto()`.
+
+MODOS_ORDEN = ("activity", "context", "project", "memory")
+
+
+def modo_orden_inicial():
+    """`SERENO_SORT=context` o `-context` (invertido). Devuelve (modo, invertido).
+
+    Es una variable de entorno y no un fichero de preferencias a proposito: sereno no
+    tiene fichero de configuracion y esa es una propiedad que se anuncia en el README y
+    en SECURITY.md. Un orden guardado en el perfil del shell lo ha escrito el usuario y
+    lo puede leer; uno guardado por el programa, ni una cosa ni la otra.
+    """
+    v = _env("SORT").strip().lower()
+    inv = v.startswith("-")
+    v = v.lstrip("-")
+    return (v if v in MODOS_ORDEN else MODOS_ORDEN[0]), (inv and v in MODOS_ORDEN)
+
+
+def etiqueta_orden(modo):
+    """El nombre traducido de un modo. Existe porque `_(modo)` seria una clave DINAMICA:
+    `tests/test_i18n.py` recorre el AST buscando `_("literal")`, no la veria pasar y
+    daria las cuatro traducciones por huerfanas. Con literales el test las sigue
+    vigilando, que es justo lo que se quiere de una tabla de idiomas."""
+    return {"activity": _("activity"), "context": _("context"),
+            "project": _("project"), "memory": _("memory")}.get(modo, modo)
+
+
+def _plano(s):
+    """Minusculas y sin tildes, para comparar. `sesion` tiene que encontrar `sesi\u00f3n`:
+    los titulos que escribe Claude llevan acentos y el usuario que filtra, no."""
+    return "".join(c for c in unicodedata.normalize("NFD", str(s or "").lower())
+                   if not unicodedata.combining(c))
+
+
+def casa(r, filtro):
+    """Que campos mira el filtro de `/`.
+
+    Hasta ahora solo el titulo, y eso hacia que teclear el nombre de un proyecto que SI
+    esta en pantalla —y en dos filas— devolviera "(nada coincide)". Se miran los cuatro
+    datos que identifican una sesion y que ademas se ven: titulo, proyecto, rama e id.
+
+    El ESTADO se queda fuera, y no por olvido: `_fase()` devuelve una frase traducida,
+    asi que filtrar por ella daria resultados distintos en ingles y en castellano.
+    """
+    if not filtro:
+        return True
+    a = _plano(filtro)
+    return any(a in _plano(c) for c in (r.get("title_full"), r.get("proyecto"),
+                                        r.get("rama"), r.get("name")))
+
+
+def _ausente(r, modo):
+    """1 si esta fila no tiene el dato por el que se ordena.
+
+    Va aparte de la clave y se aplica en su propia pasada porque un dato que no consta
+    tiene que caer al final SIEMPRE, tambien al invertir. Tratarlo como 0 pondria las
+    sesiones sin contexto las primeras en cuanto pulsas `S`, que es la lectura al reves:
+    un hueco no es un cero.
+    """
+    if modo == "context":
+        return 0 if (r.get("pulso") or {}).get("ctx") else 1
+    if modo == "project":
+        return 0 if (r.get("proyecto") or "") else 1
+    if modo == "memory":
+        return 0 if r.get("mem_mb") else 1
+    return 1 if r.get("idle") is None else 0
+
+
+def _clave_orden(r, modo):
+    """La clave principal. Cada modo apunta por defecto al extremo ACCIONABLE, que no es
+    el mismo para todos: de la actividad interesa lo que se movio hace un momento, y del
+    contexto y de la RAM lo que esta arriba del todo."""
+    if modo == "context":
+        # Por FRACCION del tope, no por tokens: 402k en una ventana de un millon esta
+        # mas vacia que 93k en una de 200k, y lo que decide si toca compactar es la
+        # fraccion. Ordenar por tokens crudos pondria la holgada delante de la llena.
+        pu = r.get("pulso") or {}
+        ctx = pu.get("ctx") or 0
+        return -(ctx / tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m")))
+    if modo == "project":
+        return ((r.get("proyecto") or "").lower(), (r.get("rama") or "").lower(),
+                r.get("idle") or 0)
+    if modo == "memory":
+        return -(r.get("mem_mb") or 0)
+    return r.get("idle") or 0
+
+
+def ordena(rows, modo="activity", invertido=False):
+    """Ordena la lista. Pura: ni pinta, ni lee el reloj, ni toca disco.
+
+    Tres pasadas y no una clave compuesta, aprovechando que `sort` es estable:
+
+      1. el NOMBRE, que es el desempate. Va primero y aparte porque el orden principal
+         se invierte y el desempate no debe invertirse con el: la lista se repinta sola
+         cada 2,5 s y dos filas empatadas que se intercambian en cada refresco se leen
+         como parpadeo.
+      2. el orden principal del modo, que si respeta `invertido`.
+      3. los huecos al fondo, en las dos direcciones.
+    """
+    if modo not in MODOS_ORDEN:
+        modo = MODOS_ORDEN[0]
+    out = sorted(rows, key=lambda r: r.get("name") or "")
+    out.sort(key=lambda r: _clave_orden(r, modo), reverse=invertido)
+    out.sort(key=lambda r: _ausente(r, modo))
+    return out
+
+
+def copia_al_portapapeles(texto):
+    """Pide al TERMINAL que copie, con OSC 52. No lanza ningun programa.
+
+    La alternativa era `pbcopy` en macOS y `xclip`/`wl-copy` en Linux: tres binarios
+    nuevos en `PERMITIDOS` de `tests/test_sin_red.py` y tres lineas mas en el "Runs" de
+    SECURITY.md, a cambio de un atajo de comodidad. OSC 52 es una secuencia de escape
+    —la escribe el proceso y la atiende el emulador— asi que no anade ni un binario, y
+    ademas funciona por SSH, que `pbcopy` no.
+
+    Devuelve si se pudo ESCRIBIR, que no es lo mismo que "el portapapeles tiene el
+    texto": Terminal.app ignora OSC 52 y tmux solo la reenvia con `set-clipboard on`.
+    Por eso quien llama ensena ademas el id en el aviso.
+    """
+    try:
+        b64 = base64.b64encode(texto.encode("utf-8")).decode("ascii")
+        sys.stdout.write("\033]52;c;" + b64 + "\a")
+        sys.stdout.flush()
+        return True
+    except Exception:
+        return False
 
 
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
@@ -1766,6 +2883,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
 
         marcadas, cur, top, aviso = set(), 0, 0, ""
         filtro, buscando, extra, ancla, ayuda = "", False, [], None, False
+        modo, orden_inv = modo_orden_inicial()
         todas, foco = list(rows), None
         sobre, ultimo_click = None, (None, 0.0)
         if recargar:
@@ -1775,9 +2893,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             fuentes = ([f for f in ORDEN_FUENTES if f in hay]
                        + sorted(f for f in hay if f not in ORDEN_FUENTES))
             base = todas + extra
-            rows = [r for r in base
-                    if (not filtro or filtro.lower() in r["title_full"].lower())
-                    and (vista == "todas" or r.get("fuente", "claude") == vista)]
+            rows = ordena([r for r in base if casa(r, filtro)
+                           and (vista == "todas"
+                                or r.get("fuente", "claude") == vista)],
+                          modo, orden_inv)
             if not rows:
                 rows = [{"name": "", "title": "", "title_full": _("(nothing matches)"),
                          "idle": None, "working": None, "attached": False,
@@ -1823,6 +2942,15 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cab_put("   ")
             if filtro or buscando:
                 cab_put(_("filter: ") + filtro + "\u2588", 2, curses.A_BOLD)
+                cab_put("   ")
+            # Solo cuando NO es el de por defecto, igual que el chip del filtro. La
+            # cabecera ya se recorta a 80 columnas: un "orden: actividad" permanente se
+            # comeria los contadores para decir lo que se ve mirando la lista.
+            if modo != MODOS_ORDEN[0] or orden_inv:
+                x0 = hx
+                cab_put(_("sort: ") + etiqueta_orden(modo)
+                        + ("\u2191" if orden_inv else "\u2193"), 7, curses.A_BOLD)
+                zonas.append((0, x0, hx - 1, "orden", None))
                 cab_put("   ")
             cab_put(str(len(rows)), 6, curses.A_BOLD)
             # En "todas" conviven abiertas y reanudables: llamarlas "abiertas" a todas
@@ -1964,12 +3092,22 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # La herramienta gana sobre "escribe": el tool_use acaba de escribirse
                 # en el transcript, asi que las dos son ciertas a la vez y la que
                 # informa es la segunda ("esta corriendo algo"), no la primera.
+                # El choque va en SU columna, entre el estado y el titulo. Meterlo en
+                # el blanco que ya habia detras del estado salia gratis pero dejaba el
+                # simbolo pegado a la primera letra —`\u25d0\u29c9Refactor`— y eso se lee como un
+                # fallo de pintado, no como un aviso. La columna se paga en COL_BASE y
+                # el titulo solo la nota por debajo de ~50 columnas, porque `reparto` ya
+                # lo topa en T_COMODO. `\u29c9` mide UNA columna (east_asian_width 'N').
+                col = r.get("colision") or {}
                 if pu.get("herramienta"):
-                    put("\u25d0 ", 7, curses.A_BOLD)       # esperando a su comando
+                    put("\u25d0", 7, curses.A_BOLD)       # esperando a su comando
                 elif pu.get("escribe"):
-                    put("\u25cf ", 9, curses.A_BOLD)       # escribiendo la respuesta
+                    put("\u25cf", 9, curses.A_BOLD)        # escribiendo la respuesta
                 else:
-                    put("  ")
+                    put(" ")
+                put("\u29c9" if col else " ",
+                    5 if (col.get("nivel") or 0) >= 3 else 7, curses.A_BOLD)
+                put(" ")
                 titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
                                  anchura_t)
                 put(titulo, 2 if marcada else (5 if sin_rastro else 0),
@@ -1985,7 +3123,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # no lo publica, y cero seria mentira.
                 if an_ctx:
                     ctx = pu.get("ctx")
-                    tope_ctx = tope_contexto(pu.get("modelo"), ctx)
+                    tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"))
                     lleno = (ctx or 0) / tope_ctx
                     put(barra(ctx, tope_ctx), color_contexto(lleno))
                     put(f" {round(lleno * 100):>3}%" if ctx else "     ",
@@ -2045,7 +3183,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # cosa. Cuesta 10 columnas y las hay de sobra.
                 pu_cur = rows[cur].get("pulso") or {}
                 ctx_cur = pu_cur.get("ctx")
-                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur)
+                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
+                                         pu_cur.get("ventana_1m"))
+                uso_cur = uso_de(rows[cur])
                 campos = [
                     (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")
                      else 7 if (d.get("fase") or "").startswith(("esperando", "escribiendo", "lleva")) else 4),
@@ -2057,10 +3197,19 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     # El porcentaje va con las cifras al lado: la barra de la lista
                     # dice "va justa", pero para decidir si compactar hace falta saber
                     # si el tope son 200k o un millon.
+                    # Las compactaciones van PEGADAS al porcentaje porque son lo que lo
+                    # explica: una sesion de doce horas marcando 20% no es una sesion
+                    # fresca, es una que ha tirado el contexto tres veces. Leer el numero
+                    # sin el dato de al lado lleva a la conclusion contraria.
                     (_("context"), (f"{_tok(ctx_cur)} / {_tok(tope_cur)}  "
-                                    f"{round(100 * ctx_cur / tope_cur)}%")
+                                    f"{round(100 * ctx_cur / tope_cur)}%"
+                                    + ("  \u00b7 " + _("{n} compaction(s)",
+                                                      n=uso_cur["compacta"])
+                                       if uso_cur and uso_cur["compacta"] else ""))
                      if ctx_cur else "", color_contexto(ctx_cur / tope_cur if ctx_cur else 0)),
                     (_("model"), _modelo_corto(pu_cur.get("modelo")), 4),
+                    (_("spent"), _uso_texto(uso_cur) if uso_cur else "", 8),
+                    (_("rhythm"), _uso_ritmo(uso_cur) if uso_cur else "", 4),
                     (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
                      if d.get("peso") else
                      ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
@@ -2075,35 +3224,98 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # Los metadatos se anclan ABAJO y el texto fluye desde arriba: asi las
                 # etiquetas caen siempre en la misma linea y el ojo no las persigue
                 # cuando el prompt de la sesion de al lado ocupa el doble.
+                # El choque va ARRIBA del todo, por delante de lo que la sesion esta
+                # haciendo: si dos escriben en el mismo fichero, eso es lo primero que hay
+                # que leer del panel, no el ultimo prompt.
+                # El recorrido ensena la llamada en curso con su duracion en vivo, asi
+                # que "ahora mismo" pasaria a decir lo mismo una linea mas arriba. De
+                # los dos dibujos del mismo hecho se queda el que ademas trae el camino,
+                # y "ahora mismo" solo vuelve cuando el recorrido no cabe.
+                ruta = d.get("ruta") or []
+                sn = sintomas(ruta)
+                alertas_ruta = alertas(sn)
+                hay_ruta = bool(ruta) and ancho_det >= RUTA_FIJO + 26
+                cl = rows[cur].get("colision")
                 bloques = [b for b in (
+                    ((_("\u25b8 another session is writing here too"),
+                      _texto_colision(cl), 5, 3) if cl else None),
                     ((_("\u25b8 right now"), d.get("tool"), 7, 2)
-                     if (rows[cur].get("pulso") or {}).get("herramienta") else None),
+                     if (not hay_ruta
+                         and (rows[cur].get("pulso") or {}).get("herramienta"))
+                     else None),
                     (_("\u25b8 what you last said"), ult, 6, 4),
                     (_("\u25b8 what it last replied"), d.get("resp"), 9, 5),
                 ) if b and b[1]]
                 # Sin texto arriba (las sesiones de otros CLI no traen prompt) anclar
                 # abajo dejaria veinte lineas en blanco y tres etiquetas al fondo.
-                base_campos = (max(fila0 + 2, fondo - len(campos) + 1) if bloques
-                               else fila0)
+                base_campos = (max(fila0 + 2, fondo - len(campos) + 1)
+                               if (bloques or hay_ruta) else fila0)
+                # El recorrido se reserva su sitio ANTES de repartir el texto: cuando
+                # falta altura lo que cede es la respuesta —que sigue entera dentro de
+                # la sesion— y no la unica vista que dice donde se atasco. Y si la
+                # ventana es baja encoge por el extremo VIEJO antes de desaparecer: dos
+                # filas del camino informan mas que ninguna, y la que importa se queda.
+                n_ruta = 0
+                if hay_ruta:
+                    margen = 2 if bloques else 0
+                    sitio = base_campos - fila0 - 2 - len(alertas_ruta) - margen
+                    n_ruta = max(0, min(RUTA_VISIBLE, len(ruta), sitio))
+                    hay_ruta = n_ruta > 0
+                alto_ruta = (2 + len(alertas_ruta) + n_ruta) if hay_ruta else 0
+                base_ruta = base_campos - alto_ruta
                 # Tope por bloque, y reparto proporcional solo si no caben: sin tope,
                 # una respuesta con tabla se comia veinte lineas y tapaba el prompt.
-                libre = max(0, base_campos - fila0 - 1 - 2 * len(bloques))
+                libre = max(0, base_ruta - fila0 - 1 - 2 * len(bloques))
                 pide = [min(tope, max(1, -(-ancho(t) // max(1, ancho_det))))
                         for _e, t, _p, tope in bloques]
                 fila = fila0
                 for (etiq, txt, par, _t), q in zip(bloques, pide):
-                    if fila >= base_campos - 2:
+                    if fila >= base_ruta - 2:
                         break          # cabecera sin ni una linea debajo no informa
                     cuota = q if sum(pide) <= libre else max(
                         1, min(q, round(libre * q / max(1, sum(pide)))))
                     stdscr.addnstr(fila, x0, etiq, ancho_det, C(par) | curses.A_BOLD)
                     fila += 1
                     for trozo in _troceado(txt, ancho_det, cuota):
-                        if fila >= base_campos - 1:
+                        if fila >= base_ruta - 1:
                             break
                         stdscr.addnstr(fila, x0, trozo, ancho_det)
                         fila += 1
                     fila += 1
+
+                if hay_ruta:
+                    fila = base_ruta
+                    # Los nombres llevan sufijo `_ev`/`_ruta` a proposito: `run()` es
+                    # una funcion larga y ya tiene un `res` (el dict que devuelve), un
+                    # `par` y un `cab`. Reusar cualquiera de los tres aqui los pisa, y
+                    # el fallo no sale en esta linea sino donde se leen despues.
+                    cab_ruta = _("\u25b8 what it has been doing")
+                    stdscr.addnstr(fila, x0, cab_ruta, ancho_det, C(6) | curses.A_BOLD)
+                    # Los que no caben se cuentan pero no se dibujan: "hay mas arriba"
+                    # es informacion; media fila de un evento cortado, no.
+                    ocultos = len(ruta) - n_ruta
+                    if ocultos and ancho(cab_ruta) + 16 <= ancho_det:
+                        stdscr.addnstr(fila, x0 + ancho(cab_ruta) + 2,
+                                       _("(+{n} earlier)", n=ocultos),
+                                       ancho_det - ancho(cab_ruta) - 2, C(4))
+                    fila += 1
+                    for clave in alertas_ruta:
+                        # `!` y no un simbolo de aviso: U+26A0 es de ancho ambiguo y
+                        # descuadraria la columna en la mitad de los terminales.
+                        stdscr.addnstr(fila, x0 + 2, "!", 1, C(5) | curses.A_BOLD)
+                        stdscr.addnstr(fila, x0 + 4,
+                                       recorta(_TEXTO_ALERTA[clave](sn), ancho_det - 4),
+                                       ancho_det - 4, C(5))
+                        fila += 1
+                    for e in ruta[-n_ruta:]:
+                        glifo, par_ev, dur, res_ev = linea_ruta(e, ancho_det)
+                        stdscr.addnstr(fila, x0 + 2, glifo, 1,
+                                       C(par_ev) | curses.A_BOLD)
+                        stdscr.addnstr(fila, x0 + 4, dur, 4, C(4))
+                        stdscr.addnstr(fila, x0 + RUTA_FIJO, res_ev,
+                                       ancho_det - RUTA_FIJO,
+                                       C(par_ev) if (e["pend"] or e["err"]) else 0)
+                        fila += 1
 
                 fila = base_campos
                 for etiq, valor, par in campos:
@@ -2140,12 +3352,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # Pastillas con fondo en vez de texto suelto: se leen como botones, que es
             # lo que ya son — se pinchan y hacen lo mismo que su tecla.
             hx2 = 2
+            # El orden NO es decorativo: va de mas esencial a menos, porque el bucle
+            # para en la primera que no cabe y a 80 columnas —que es media flota— solo
+            # entran cinco. Antes `? ayuda` era la sexta: la puerta al resto de teclas
+            # no se veia justo en la ventana donde mas falta hace. Y `TAB` baja porque
+            # las pestanas ya salen pintadas arriba, con sus nombres.
             for tecla, txt, cod in ((_("ENTER"), _("open"), 10),
                                     (_("SPACE"), _("mark"), 32),
                                     ("x", _("close"), ord("x")),
-                                    ("/", _("filter"), ord("/")),
-                                    ("TAB", _("other CLI"), 9),
                                     ("?", _("help"), ord("?")),
+                                    ("/", _("filter"), ord("/")),
+                                    ("s", _("sort"), ord("s")),
+                                    ("TAB", "CLI", 9),
                                     ("q", _("quit"), ord("q"))):
                 pastilla = f" {tecla} {txt} "
                 if hx2 + ancho(pastilla) >= w - 2:
@@ -2161,11 +3379,13 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 teclas = [
                     (_("ENTER"), _("open it (a NEW window when Warp is there)")),
                     (_("arrows"), _("move (j / k too)")),
-                    (_("home/end"), _("first / last")),
+                    (_("home/end"), _("first / last (g / G too)")),
+                    ("s / S", _("sort: activity, context, project, memory / invert")),
+                    ("y", _("copy the session id")),
                     (_("SPACE"), _("mark / unmark")),
                     ("v", _("range mode: drop an anchor, SPACE marks to the cursor")),
                     ("x", _("close the marked ones (asks first)")),
-                    ("/", _("filter by title as you type")),
+                    ("/", _("filter by title, project, branch or id")),
                     ("TAB", _("switch CLI: claude, history, codex, gemini, all")),
                     ("a / i", _("mark all / invert")),
                     ("d", _("mark the ones idle for over an hour")),
@@ -2181,6 +3401,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     (_("outside"), _("--watch: tells you when one stops and waits")),
                     ("", _("--find \"text\": searches what was said")),
                     ("", _("--json: for statuslines and scripts")),
+                    ("", _("\u29c9 in a row: another session is writing in the same place")),
                 ]
                 alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
                 teclas = teclas[:max(0, alto_v - 4)]
@@ -2255,6 +3476,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     continue
                 _y, _x0, _x1, que, dato = golpe
                 buscando = False
+                if que == "orden":
+                    foco = rows[cur]["name"]
+                    modo = MODOS_ORDEN[(MODOS_ORDEN.index(modo) + 1) % len(MODOS_ORDEN)]
+                    continue
                 if que == "vista":
                     if dato != "claude" and not extra:
                         extra = sesiones_externas(_ids(todas))
@@ -2308,9 +3533,27 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             if c == ord("/"):
                 buscando, filtro, cur = True, "", 0
                 continue
+            # `s` y `S` viven aqui, con `/` y TAB, porque son lo mismo: mandan sobre QUE
+            # se ve y en que sitio, no sobre la fila. Y el cursor sigue a SU sesion en
+            # vez de quedarse en el indice: reordenar no puede cambiarte de sesion
+            # seleccionada debajo de la mano.
+            if c == ord("s"):
+                foco = rows[cur]["name"]
+                modo = MODOS_ORDEN[(MODOS_ORDEN.index(modo) + 1) % len(MODOS_ORDEN)]
+                continue
+            if c == ord("S"):
+                foco = rows[cur]["name"]
+                orden_inv = not orden_inv
+                continue
             if c == 9:                      # Tab: claude -> historial -> ... -> todas
                 if not extra:
                     extra = sesiones_externas(_ids(todas))
+                # `fuentes` se calculo arriba del bucle, cuando `extra` aun estaba vacio:
+                # usarlo aqui dejaba el ciclo en ["claude", "todas"] y el PRIMER Tab
+                # saltaba al final. Se recalcula con lo que se acaba de cargar.
+                hay = {r.get("fuente", "claude") for r in todas + extra}
+                fuentes = ([f for f in ORDEN_FUENTES if f in hay]
+                           + sorted(f for f in hay if f not in ORDEN_FUENTES))
                 orden = ["claude"] + [f for f in fuentes if f != "claude"] + ["todas"]
                 vista = orden[(orden.index(vista) + 1) % len(orden)] if vista in orden else "claude"
                 cur = 0
@@ -2326,10 +3569,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cur = (cur - 1) % len(rows)
             elif c in (curses.KEY_DOWN, ord("j")):
                 cur = (cur + 1) % len(rows)
-            elif c == curses.KEY_HOME:
+            elif c in (curses.KEY_HOME, ord("g")):
                 cur = 0
-            elif c == curses.KEY_END:
+            elif c in (curses.KEY_END, ord("G")):
+                # `g`/`G` ademas de home/end: `j`/`k` ya estan, y en un teclado de
+                # portatil de Apple no hay teclas Inicio/Fin —son fn+flecha, que no
+                # todos los terminales traducen a KEY_HOME/KEY_END.
                 cur = len(rows) - 1
+            elif c == ord("y"):
+                copia_al_portapapeles(rows[cur]["name"])
+                # El id se ensena ADEMAS de copiarlo: hay terminales que ignoran OSC 52
+                # y el fallo seria mudo. Asi, como poco, se puede seleccionar a mano.
+                aviso = _("copied: {s}", s=rows[cur]["name"])
             elif c == ord(" "):
                 if ancla is not None:          # modo rango: marca de ancla a cursor
                     for i in range(min(ancla, cur), max(ancla, cur) + 1):
@@ -2659,7 +3910,19 @@ def _T():
         " resumable": " reanudables",
         " total": " en total",
         " writing": " escribiendo",
+        "(+{n} earlier)": "(+{n} antes)",
         "(id not resolved)": "(id sin resolver)",
+        "the same command has failed {n} times":
+            "el mismo comando ha fallado {n} veces",
+        "{n} searches in a row with no result":
+            "{n} b\u00fasquedas seguidas sin ning\u00fan resultado",
+        "\u25b8 what it has been doing": "\u25b8 lo que ha estado haciendo",
+        "spent": "gastado",
+        "rhythm": "ritmo",
+        "{i} in \u00b7 {o} out \u00b7 {c} cache":
+            "{i} entrada \u00b7 {o} salida \u00b7 {c} cach\u00e9",
+        "{r}/min \u00b7 {t} working": "{r}/min \u00b7 {t} trabajando",
+        "{n} compaction(s)": "{n} compactaci\u00f3n(es)",
         "(nothing matches)": "(nada coincide)",
         "All sessions": "Todas las sesiones",
         "Cancelled, nothing was closed.": "Cancelado, no se ha cerrado nada.",
@@ -2670,6 +3933,27 @@ def _T():
         "Don't know how to open that one.": "No sé cómo abrir esa.",
         "Don't know how to open {s}.": "No sé cómo abrir {s}.",
         "ENTER": "ENTER",
+        "▸ another session is writing here too": "▸ otra sesión escribe aquí también",
+        "⧉ in a row: another session is writing in the same place":
+            "⧉ en una fila: otra sesión escribe en el mismo sitio",
+        "clashes with another session": "choca con otra sesión",
+        "same folder": "misma carpeta",
+        "same repo": "mismo repo",
+        "two sessions in the same place": "dos sesiones en el mismo sitio",
+        "you are about to run {v} here": "vas a lanzar {v} aquí",
+        "{hora}  ⧉ {a} and {b} are writing in the same place":
+            "{hora}  ⧉ {a} y {b} escriben en el mismo sitio",
+        "{n} writes, the last one {t} ago": "{n} escrituras, la última hace {t}",
+        "{v} in a repo another session is editing":
+            "{v} en un repo que otra sesión está editando",
+        "activity": "actividad",
+        "copied: {s}": "copiado: {s}",
+        "copy the session id": "copiar el id de la sesión",
+        "first / last (g / G too)": "primera / última (g / G también)",
+        "sort": "orden",
+        "sort: ": "orden: ",
+        "sort: activity, context, project, memory / invert":
+            "ordenar: actividad, contexto, proyecto, memoria / invertir",
         "HEADS UP: {n} are working right now": "OJO: {n} están trabajando ahora mismo",
         "I don't understand that selection: {e}": "No entiendo la selección: {e}",
         "Keys": "Teclas",
@@ -2704,9 +3988,9 @@ def _T():
         "close": "cerrar",
         "close the marked ones (asks first)": "cerrar las marcadas (pide confirmación)",
         "filter": "filtrar",
-        "filter by title as you type": "filtrar por título mientras escribes",
+        "filter by title, project, branch or id":
+            "filtrar por título, proyecto, rama o id",
         "filter: ": "filtro: ",
-        "first / last": "primera / última",
         "help": "ayuda",
         "history": "historial",
         "home/end": "inicio/fin",
@@ -2783,7 +4067,6 @@ def _T():
         "open for {t}": "abierta hace {t}",
         "open it (a NEW window when Warp is there)": "abrir (en una VENTANA NUEVA si hay Warp)",
         "opened {t}": "abierta {t}",
-        "other CLI": "otro CLI",
         "project": "proyecto",
         "quit": "salir",
         "quit without touching anything": "salir sin tocar nada",
@@ -2827,7 +4110,7 @@ def _T():
 _T()
 
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -2835,6 +4118,7 @@ VERSION = "1.2.1"
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
+    "--usage": 0,
     "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
@@ -2912,6 +4196,12 @@ def main():
         DEMO = True
         os.environ["SERENO_DEMO"] = "1"
         argv = [a for a in argv if a != "--demo"]
+    if "--usage" in argv:
+        # Igual que `--demo`: se toca la global en vez de encadenar el flag por seis
+        # sitios distintos. El acumulado cuesta el transcript entero y por eso se pide.
+        global USO
+        USO = True
+        argv = [a for a in argv if a != "--usage"]
     for malo in flags_desconocidos(argv):
         cerca = _parecido(malo)
         print(_("unknown option: {f}", f=malo)

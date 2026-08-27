@@ -145,6 +145,41 @@ The panel on the right shows that session's **last prompt and last reply**, so y
 whether to go back to it without opening it — plus the exact context figures (`176k / 200k`)
 and the model.
 
+### What it has been doing
+
+The panel says what a session did last. What it does not say is the **path**, which is where
+you see whether it is getting anywhere or going in circles. Under the prompt and the reply
+there is a short trail of the last tool calls, each with how long it took and how it ended:
+
+```
+▸ what it has been doing  (+4 earlier)
+  ! the same command has failed 3 times
+  ·    2s  Read · tests/webhooks/test_retry.py
+  ·    1s  Edit · src/webhooks/handler.py
+  ✗   34s  Bash · pytest tests/webhooks -x -q
+  ✗   31s  Bash · pytest tests/webhooks -x -q
+  ✗   33s  Bash · pytest tests/webhooks -x -q
+  ◐   12m  Bash · pytest tests/webhooks -x -q
+```
+
+`·` done · `✗` came back an error · `∅` a search that found nothing · `◐` still running, with
+the clock ticking.
+
+The two lines that start with `!` are the only judgements on the page, and neither is a guess:
+they are counted, not sensed. **The same command failing three times in a row** is where a
+person stops and looks; three is also the retry budget this project already uses everywhere
+else. **Two searches in a row that find nothing** is the other one, and it is two and not three
+on purpose — one failed retry can be a flake, but a second search that comes back empty already
+says the question is wrong. Anything else in between resets the count: two empty greps with an
+edit between them are work, not a sweep.
+
+It costs no extra reading. The trail comes out of the same tail of the transcript the panel
+already opens, and only for the row under the cursor.
+
+Twenty minutes stuck on one call does **not** get a line of its own — `status` already says
+that, and the same fact twice is not a second opinion. The trail shows it as what it is: a
+glyph and a clock.
+
 ### About that context bar
 
 It answers the question you currently answer by opening the session: *can this one take
@@ -156,12 +191,20 @@ one-million window still records itself as `claude-opus-5`, exactly like a 200k 
 works it out in this order, and stops at the first that answers:
 
 1. `SERENO_CTX_MAX`, if you set it.
-2. A `[1m]` suffix on the model in the transcript.
-3. The `model` in your `~/.claude/settings.json` — where the suffix actually lives today.
-4. The context already seen. A session holding 560k is not on a 200k ceiling.
+2. The `model` in your `~/.claude/settings.json` — where the suffix actually lives today.
+3. A `[1m]` suffix on the model in the transcript.
+4. The `cost-state` line the CLI writes when it closes. Its `modelUsage` is keyed by
+   `claude-opus-5[1m]`, **with** the suffix — the only thing here that speaks about *this*
+   session rather than the whole machine. It is rare (15 of 517 transcripts here) but not
+   arguable, and it lands inside the tail sereno already reads.
+5. The context already seen. A session holding 560k is not on a 200k ceiling.
 
-Rule 4 is what keeps the bar honest: the percentage can never read above 100%, and there is a
+Rule 5 is what keeps the bar honest: the percentage can never read above 100%, and there is a
 test that fails if it ever does.
+
+Rule 4 only ever raises the ceiling. A `cost-state` without the suffix is evidence the session
+is *not* on the big window, but it would arrive after rule 2 has already answered with your
+global config — fixing that means reordering the whole cascade, which is a separate decision.
 
 ---
 
@@ -235,6 +278,7 @@ sereno --list     # plain list, touches nothing
 sereno --json     # the same facts, for your statusline or your scripts
 sereno --watch    # sit there and tell you the moment one stops and waits on you
 sereno --find "the thing you half remember"
+sereno --usage    # add what each session has burned
 sereno --help
 ```
 
@@ -342,6 +386,41 @@ real buttons.
 
 Nothing drops you out of the picker. Closing four sessions and opening a fifth is one visit,
 not five.
+
+### `--usage`
+
+The context bar says how full the window is **right now**. It does not say how much a session
+has burned: one that has compacted three times reads 20% with twelve hours inside it. `--usage`
+adds that — tokens in and out, cache read, how many replies, how many compactions, and the
+minutes actually spent working.
+
+```bash
+sereno --list --usage
+sereno --json --usage | jq -r '.sessions[] | "\(.title)  \(.output_tokens) out"'
+```
+
+It is off by default because the figure lives all over the transcript: the tail is no use, the
+whole file has to be read. Measured here, that is 0.11 ms for the median transcript and 223 ms
+for the largest on disk (89 MB) — fine when you ask for it, wrong for a statusline that runs
+every few seconds. In the picker it costs nothing extra: it is read for the row under the
+cursor, like the rest of the panel, and cached.
+
+Four figures, and **no total**. Cache read is not new material — it is what was already sent
+being read again — and it runs a hundred times larger than everything else put together (300M
+against 3M in an eight-hour session). Adding it to the input gives a huge number that means
+nothing, so the four parts stay apart and whoever wants a total composes it knowing what they
+are adding.
+
+**What it does not count**, and this matters if you delegate: subagent turns and the Haiku calls
+the CLI makes on its own (titles, summaries) leave no line in the transcript. Cross-checked
+against the `cost-state` the CLI itself writes, the scan matches within 0.1% on five transcripts
+of eight and falls up to 21% short on two. The fields are called `input_tokens` / `output_tokens`
+— what the transcript recorded — not "what you were charged", which is a different thing.
+
+That other thing travels apart, as `api_cost_usd` in `--json --usage` only: the `totalCostUSD`
+the CLI wrote with its own prices, relayed as-is. `sereno` carries no price table — one in a
+public repo goes stale without telling anyone — and it never puts a dollar figure in the TUI,
+where on a subscription plan it would be money you did not pay.
 
 ### 🎭 Try it without touching your data
 
@@ -621,6 +700,14 @@ Most guard against something that fails **silently**, which is why they exist at
 - **`test_sin_red.py`** — no sockets, and no external binary beyond the declared list.
 - **`test_contexto.py`** — the context bar can never read above 100%.
 - **`test_json_sin_conversacion.py`** — `--json` carries no prompt and no reply.
+- **`test_uso.py`** — three lines of the same reply count once, cache read never joins the
+  input, and reading only what is new gives exactly what reading the whole file gives.
+- **`test_recorrido.py`** — a loop is three failures of the *same* command, a sweep is two
+  empty searches in a row, and nothing unobserved ever counts as success.
+- **`test_panel_geometria.py`** — the terminal is replaced by a stand-in that records every
+  write, so no cell gets painted twice and nothing spills out of the frame.
+- **`test_suelo_38.py`** — nothing uses syntax newer than 3.8. The CI already runs on 3.8,
+  but it tells you late: whoever wrote the line has 3.12 and it compiles fine there.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
   unknown flags being reported, and a resumed session being followed to its live transcript.
 

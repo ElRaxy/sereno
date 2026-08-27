@@ -144,6 +144,41 @@ El panel de la derecha enseña **el último prompt y la última respuesta** de e
 que puedas decidir si volver a ella sin abrirla — y además las cifras exactas de contexto
 (`176k / 200k`) y el modelo.
 
+### Lo que ha estado haciendo
+
+El panel dice lo último que hizo una sesión. Lo que no dice es el **camino**, que es donde se
+ve si avanza o da vueltas. Debajo del prompt y de la respuesta va un rastro corto de las
+últimas llamadas a herramienta, cada una con lo que tardó y cómo acabó:
+
+```
+▸ lo que ha estado haciendo  (+4 antes)
+  ! el mismo comando ha fallado 3 veces
+  ·    2s  Read · tests/webhooks/test_retry.py
+  ·    1s  Edit · src/webhooks/handler.py
+  ✗   34s  Bash · pytest tests/webhooks -x -q
+  ✗   31s  Bash · pytest tests/webhooks -x -q
+  ✗   33s  Bash · pytest tests/webhooks -x -q
+  ◐   12m  Bash · pytest tests/webhooks -x -q
+```
+
+`·` hecha · `✗` volvió con error · `∅` una búsqueda que no encontró nada · `◐` todavía
+corriendo, con el reloj andando.
+
+Las dos líneas que empiezan por `!` son los únicos juicios de la pantalla, y ninguno es una
+corazonada: se cuentan, no se intuyen. **El mismo comando fallando tres veces seguidas** es
+donde para una persona, y tres es además el presupuesto de reintentos que este proyecto ya usa
+en todo lo demás. **Dos búsquedas seguidas que no encuentran nada** es el otro, y es dos y no
+tres a propósito: un reintento fallido puede ser un flake, pero una segunda búsqueda que vuelve
+vacía ya dice que la pregunta está mal hecha. Cualquier otra cosa por medio corta la cuenta:
+dos greps vacíos con una edición en medio son trabajo, no un barrido.
+
+No cuesta ni una lectura más. El rastro sale de la misma cola del transcript que el panel ya
+abre, y solo para la fila bajo el cursor.
+
+Veinte minutos colgada de una llamada **no** se lleva una línea propia — eso ya lo dice
+`estado`, y el mismo hecho dos veces no es una segunda opinión. El rastro lo enseña como lo que
+es: un glifo y un reloj.
+
 ### Sobre la barra de contexto
 
 Contesta lo que hoy contestas abriendo la sesión: *¿le cabe otra tarea, o toca compactar?* El
@@ -155,12 +190,21 @@ millón se registra como `claude-opus-5`, igual que una de 200k. Así que sereno
 este orden, y para en el primero que responde:
 
 1. `SERENO_CTX_MAX`, si lo pones tú.
-2. Un sufijo `[1m]` en el modelo del transcript.
-3. El `model` de tu `~/.claude/settings.json`, que es donde vive hoy ese sufijo.
-4. El contexto que ya se ha visto. Una sesión con 560k dentro no tiene un tope de 200k.
+2. El `model` de tu `~/.claude/settings.json`, que es donde vive hoy ese sufijo.
+3. Un sufijo `[1m]` en el modelo del transcript.
+4. La línea `cost-state` que el CLI escribe al cerrar. Su `modelUsage` va indexado por
+   `claude-opus-5[1m]`, **con** el sufijo — lo único de aquí que habla de *esta* sesión y no
+   de la máquina entera. Aparece poco (15 de 517 transcripts en esta máquina) pero cuando
+   aparece no se discute, y cae dentro de la cola que sereno ya lee.
+5. El contexto que ya se ha visto. Una sesión con 560k dentro no tiene un tope de 200k.
 
-La regla 4 es la que mantiene honesta la barra: el porcentaje no puede pasar del 100%, y hay
+La regla 5 es la que mantiene honesta la barra: el porcentaje no puede pasar del 100%, y hay
 un test que falla si algún día lo hace.
+
+La regla 4 solo sube el tope, nunca lo baja. Un `cost-state` sin sufijo es evidencia de que la
+sesión **no** corre en la ventana grande, pero llegaría después de que la regla 2 haya
+contestado con tu configuración global — arreglar eso obliga a reordenar la cascada entera, que
+es otra decisión.
 
 ---
 
@@ -235,6 +279,7 @@ sereno --list     # lista y ya, no toca nada
 sereno --json     # los mismos hechos, para tu statusline o tus scripts
 sereno --watch    # se queda ahí y te avisa en cuanto una para y te espera
 sereno --find "eso que recuerdas a medias"
+sereno --usage    # añade lo que lleva quemado cada sesión
 sereno --help
 ```
 
@@ -342,6 +387,40 @@ botones de abajo son botones de verdad.
 
 Ninguna acción te echa del selector. Cerrar cuatro sesiones y abrir una quinta es una visita,
 no cinco.
+
+### `--usage`
+
+La barra de contexto dice lo llena que está la ventana **ahora mismo**. No dice cuánto lleva
+quemado la sesión: una que ha compactado tres veces marca 20% con doce horas dentro. `--usage`
+añade eso — entrada y salida, caché leída, cuántas respuestas, cuántas compactaciones y los
+minutos que de verdad estuvo trabajando.
+
+```bash
+sereno --list --usage
+sereno --json --usage | jq -r '.sessions[] | "\(.title)  \(.output_tokens) salida"'
+```
+
+Va apagado por defecto porque la cifra está repartida por todo el transcript: la cola no sirve,
+hay que leer el fichero entero. Medido aquí, son 0,11 ms el transcript mediano y 223 ms el mayor
+del disco (89 MB) — bien cuando lo pides, mal para una statusline que corre cada pocos segundos.
+En el selector no cuesta nada extra: se lee para la fila bajo el cursor, como el resto del panel,
+y se cachea.
+
+Cuatro cifras y **ningún total**. La caché leída no es material nuevo —es lo ya enviado que se
+vuelve a leer— y es cien veces mayor que todo lo demás junto (300M frente a 3M en una sesión de
+ocho horas). Sumarla con la entrada da un número enorme que no significa nada, así que las cuatro
+partes van sueltas y quien quiera un total lo compone sabiendo qué está sumando.
+
+**Lo que no cuenta**, y esto importa si delegas: los turnos de subagente y las llamadas a Haiku
+que el CLI hace por su cuenta (títulos, resúmenes) no dejan línea en el transcript. Cruzado
+contra el `cost-state` que escribe el propio CLI, el escaneo cuadra al 0,1% en cinco transcripts
+de ocho y se queda hasta un 21% corto en dos. Los campos se llaman `input_tokens` /
+`output_tokens` —lo que el transcript registró— y no "lo que te han cobrado", que es otra cosa.
+
+Esa otra cosa viaja aparte, como `api_cost_usd` y solo en `--json --usage`: el `totalCostUSD` que
+escribió el CLI con sus propios precios, relatado tal cual. `sereno` no lleva tabla de tarifas
+—una en un repo público caduca sin avisar a nadie— y nunca pinta un dólar en el TUI, donde en un
+plan de suscripción sería dinero que no has pagado.
 
 ### 🎭 Probarlo sin tocar tus datos
 
@@ -620,6 +699,14 @@ algo que falla **en silencio**, que es justo por lo que existen:
 - **`test_sin_red.py`** — ni sockets, ni un binario externo fuera de la lista declarada.
 - **`test_contexto.py`** — la barra de contexto no puede pasar del 100%.
 - **`test_json_sin_conversacion.py`** — `--json` no lleva dentro ni prompt ni respuesta.
+- **`test_uso.py`** — tres líneas de la misma respuesta cuentan una vez, la caché leída no se
+  suma nunca con la entrada, y leer solo lo nuevo da exactamente lo que leerlo entero.
+- **`test_recorrido.py`** — un bucle son tres fallos del *mismo* comando, un barrido son dos
+  búsquedas vacías seguidas, y lo que no se pudo observar nunca cuenta como éxito.
+- **`test_panel_geometria.py`** — el terminal se sustituye por un doble que apunta cada
+  escritura, así ninguna celda se pinta dos veces ni nada se sale del marco.
+- **`test_suelo_38.py`** — nada usa sintaxis posterior a 3.8. El CI ya corre en 3.8, pero
+  avisa tarde: quien escribió la línea tiene 3.12 y ahí compila sin rechistar.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,
   los flags desconocidos diciéndose, y una sesión reanudada seguida hasta el fichero que escribe.
 

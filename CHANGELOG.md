@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.3.0
+
+**The panel shows the path, not just the last step.** Under the prompt and the reply there is
+now a trail of the last tool calls — what each one was, how long it took, and how it ended:
+done, error, a search that found nothing, or still running with the clock ticking. It comes out
+of the same tail of the transcript the panel already reads, only for the row under the cursor.
+
+Two things in that trail are called out, and both are counted rather than sensed: the same
+command failing three times in a row, and two searches in a row that come back empty. Anything
+else in between resets the count — two empty greps with an edit between them are work, not a
+sweep. "Twenty minutes on one call" gets no line of its own: `status` already says that, and
+the same fact twice is not a second opinion.
+
+**The context ceiling now has one fact about the session itself.** It used to be worked out
+from your global `settings.json` and from how much context had already been seen — nothing that
+knew whether *this* session was launched on the one-million window. The `cost-state` line the
+CLI writes when it closes keys its `modelUsage` by `claude-opus-5[1m]`, suffix included. It is
+rare (15 of 517 transcripts here) and it only ever raises the ceiling, but when it is there it
+settles the question, and it costs no extra reading.
+
+**What a session has burned, with `--usage`.** The context bar says how full the window is right
+now; it says nothing about the twelve hours already spent, because a session that compacted three
+times reads 20%. The new flag adds tokens in and out, cache read, replies, compactions and the
+minutes actually worked — to `--list`, to `--json`, and to the detail panel, which now also shows
+the compaction count pinned to the context percentage that it explains.
+
+Four figures and no total. Cache read is the same material being read again, and it runs a
+hundred times larger than everything else put together; adding it to the input gives a number
+that means nothing. The four parts stay apart.
+
+It is off by default: the figure is spread across the whole transcript, so the file has to be
+read end to end — 0.11 ms for the median one here, 223 ms for the largest on disk. Inside the
+picker it is read for the row under the cursor and cached, so a refresh costs 2.6 ms.
+
+**No price table.** `sereno` does not work out money. When the CLI leaves its own `cost-state`
+line, that `totalCostUSD` is relayed as-is in `api_cost_usd`, and only in `--json --usage` — never
+in the TUI, where on a subscription plan it would be money you did not pay.
+
+Said plainly in the README because it changes how you read the number: subagent turns and the
+CLI's own Haiku calls leave no line in the transcript, so a session that delegated a lot
+under-reports.
+
 ## 1.2.1
 
 **`--list` shows the four states, like the picker does.** It used to say only "running" or
