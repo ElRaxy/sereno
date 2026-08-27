@@ -22,7 +22,7 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ns = {"__name__": "sereno_test"}
 exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
 ordena, casa, MODOS = ns["ordena"], ns["casa"], ns["MODOS_ORDEN"]
-carga_uso = ns["carga_uso"]
+avanza_uso = ns["avanza_uso"]
 sesiones_demo, tope_contexto = ns["sesiones_demo"], ns["tope_contexto"]
 
 
@@ -61,7 +61,8 @@ def main():
 
     # 3. Un hueco no es un cero: las filas sin el dato van al final en LAS DOS
     #    direcciones. Tratarlas como 0 las pondria las primeras al invertir.
-    gasto = {"in": 10, "cw": 90, "out": 50, "turnos": 7, "compacta": 0}
+    gasto = {"in": 10, "cw": 90, "out": 50, "turnos": 7, "compacta": 0,
+             "completo": True}
     huecos = [fila("a", ctx=180_000, mem=500, proy="api", uso=gasto),
               fila("b", ctx=None, mem=None, proy=""),
               fila("c", ctx=20_000, mem=100, proy="web", uso=gasto),
@@ -108,10 +109,10 @@ def main():
     #       actividad piden ["a-llena", "z-gastona"], y solo el gasto pide lo contrario.
     gs = [fila("z-gastona", idle=800, ctx=24_000,
                uso={"in": 400, "cw": 1_070_000, "out": 196_000,
-                    "turnos": 229, "compacta": 1}),
+                    "turnos": 229, "compacta": 1, "completo": True}),
           fila("a-llena", idle=5, ctx=176_000,
                uso={"in": 1_200, "cw": 300_000, "out": 40_000,
-                    "turnos": 60, "compacta": 0})]
+                    "turnos": 60, "compacta": 0, "completo": True})]
     if [r["name"] for r in ordena(gs, "spend")] != ["z-gastona", "a-llena"]:
         fallos.append("spend: no pone delante la que mas ha consumido")
     for otro in ("context", "activity", "project", "memory"):
@@ -119,25 +120,49 @@ def main():
             fallos.append(f"spend: el escenario no lo distingue de {otro}")
 
     # 6ter. `ordena` no toca disco. `spend` ordena por un dato que hay que ir a buscar,
-    #       asi que si nadie paso por `carga_uso` las filas son huecos y se quedan donde
+    #       asi que si nadie paso por `avanza_uso` las filas son huecos y se quedan donde
     #       estaban: la lista se repinta cuatro veces por segundo y no puede ser el sitio
     #       donde se abren cuarenta transcripts.
     crudas = [fila("a", idle=5), fila("b", idle=900)]
     if [r["name"] for r in ordena(crudas, "spend")] != ["a", "b"]:
-        fallos.append("spend sin carga_uso: no deja la lista como estaba")
+        fallos.append("spend sin avanza_uso: no deja la lista como estaba")
 
-    # 6quater. Y `carga_uso` solo lee en el modo que lo necesita. Un contador delata
-    #          cualquier lectura de mas: son 389 ms las 40 filas la primera vez.
+    # 6quater. Un acumulado a medias tampoco ordena. Mientras se lee por trozos, la cifra
+    #          que hay dice cuanto se ha LEIDO, no cuanto se ha gastado: ordenar por ella
+    #          pondria delante al transcript mas avanzado. Va al fondo y sube una sola
+    #          vez, al terminar, que es lo que evita que la lista tiemble cargando.
+    medias = [fila("z-mucho", idle=800,
+                   uso={"in": 10, "cw": 900_000, "out": 90_000, "turnos": 200,
+                        "compacta": 0, "completo": False}),
+              fila("a-poco", idle=5,
+                   uso={"in": 10, "cw": 90, "out": 50, "turnos": 7,
+                        "compacta": 0, "completo": True})]
+    if [r["name"] for r in ordena(medias, "spend")] != ["a-poco", "z-mucho"]:
+        fallos.append("spend: un acumulado a medias no puede encabezar el orden")
+
+    # 6quinquies. `avanza_uso` no relee lo que ya esta completo — sin eso, cada vuelta
+    #             del selector volveria a abrir los cuarenta transcritos— y respeta su
+    #             presupuesto: con 0 ms atiende a una fila y para.
     leidos = []
-    demo_uso = [dict(r, _uso=None) for r in demo]
     guardado = ns["uso_de"]
-    ns["uso_de"] = lambda r: leidos.append(r.get("name"))
+    ns["uso_de"] = lambda r, tope=None: leidos.append(r.get("name"))
     try:
-        for modo in MODOS:
-            del leidos[:]
-            carga_uso(list(demo_uso), modo)
-            if bool(leidos) != (modo == "spend"):
-                fallos.append(f"carga_uso lee {len(leidos)} filas en modo {modo}")
+        hechas = [fila("a", uso={"turnos": 1, "completo": True}),
+                  fila("b", uso={"turnos": 1, "completo": True})]
+        avanza_uso(hechas)
+        if leidos:
+            fallos.append(f"avanza_uso relee filas ya completas: {leidos}")
+        del leidos[:]
+        avanza_uso([fila("sin", uso=None), fila("otra", uso=None)])
+        if leidos:
+            fallos.append(f"avanza_uso reintenta filas sin transcript: {leidos}")
+        del leidos[:]
+        pend = [fila(f"p{i}") for i in range(5)]
+        for r in pend:
+            del r["_uso"]                       # ni leida ni descartada
+        avanza_uso(pend, ms=0)
+        if len(leidos) != 1:
+            fallos.append(f"avanza_uso con 0 ms atiende {len(leidos)} filas, no 1")
     finally:
         ns["uso_de"] = guardado
 

@@ -1062,19 +1062,19 @@ _DEMO_CTX = (
 # en 180k, que cabe de sobra y no cambia nada.
 _DEMO_USO = (
     {"in": 1_200, "out": 194_378, "cw": 1_646_733, "cr": 77_218_269,
-     "turnos": 259, "compacta": 0, "pico": 176_000, "activo": 6_960.0, "usd": None},
+     "turnos": 259, "compacta": 0, "pico": 176_000, "activo": 6_960.0, "usd": None, "completo": True},
     {"in": 1_042, "out": 414_831, "cw": 2_125_425, "cr": 128_435_885,
-     "turnos": 521, "compacta": 2, "pico": 540_000, "activo": 17_940.0, "usd": None},
+     "turnos": 521, "compacta": 2, "pico": 540_000, "activo": 17_940.0, "usd": None, "completo": True},
     {"in": 882, "out": 140_559, "cw": 436_049, "cr": 26_413_017,
-     "turnos": 129, "compacta": 0, "pico": 128_000, "activo": 4_260.0, "usd": None},
+     "turnos": 129, "compacta": 0, "pico": 128_000, "activo": 4_260.0, "usd": None, "completo": True},
     {"in": 458, "out": 196_362, "cw": 1_071_413, "cr": 61_614_069,
-     "turnos": 229, "compacta": 1, "pico": 180_000, "activo": 6_960.0, "usd": None},
+     "turnos": 229, "compacta": 1, "pico": 180_000, "activo": 6_960.0, "usd": None, "completo": True},
     {"in": 1_984, "out": 765_291, "cw": 2_993_300, "cr": 299_643_093,
-     "turnos": 992, "compacta": 3, "pico": 890_000, "activo": 22_020.0, "usd": None},
+     "turnos": 992, "compacta": 3, "pico": 890_000, "activo": 22_020.0, "usd": None, "completo": True},
     {"in": 334, "out": 138_544, "cw": 512_961, "cr": 37_574_214,
-     "turnos": 167, "compacta": 0, "pico": 93_000, "activo": 5_220.0, "usd": None},
+     "turnos": 167, "compacta": 0, "pico": 93_000, "activo": 5_220.0, "usd": None, "completo": True},
     {"in": 86, "out": 29_035, "cw": 253_649, "cr": 5_693_619,
-     "turnos": 43, "compacta": 0, "pico": 12_000, "activo": 900.0, "usd": None},
+     "turnos": 43, "compacta": 0, "pico": 12_000, "activo": 900.0, "usd": None, "completo": True},
 )
 
 
@@ -1859,13 +1859,20 @@ def _epoch(ts):
         return 0.0
 
 
-def _uso(path):
-    """Hechos acumulados del transcript entero, o None si no se pudo leer.
+def _uso(path, tope=None):
+    """Hechos acumulados del transcript, o None si no se pudo leer.
 
     Devuelve tipos cerrados y NUNCA un total agregado: quien pinte decide que suma con
     que, porque juntar la cache leida con la entrada nueva da un numero que no significa
     nada. Los campos con guion bajo son estado para la lectura incremental y no salen
     de aqui: `filas_json` los nombra uno a uno.
+
+    `tope` es un maximo de BYTES a leer en esta llamada. Con el, la lectura se puede
+    partir en trozos entre refrescos en vez de bloquear: el mayor transcript de esta
+    maquina son 89 MB y 120 ms de tiron, y ese tiron se paga entero cada vez que el
+    cursor llega a una fila nueva. Lo que vuelve entonces es un PARCIAL, y se distingue:
+    `completo` dice si se llego al final de lo que hay escrito. Un parcial no se pinta
+    como si fuera un total —seria mentir— salvo `pico`, que solo puede crecer.
 
     Coste medido en esta maquina: 0,11 ms la mediana de los transcripts, 223 ms el mayor
     (89,3 MB, sin cache de pagina), 0,08 ms las 40 filas con la cache caliente y 2,6 ms
@@ -1876,7 +1883,8 @@ def _uso(path):
     except OSError:
         return None
     guardado = _CACHE_USO.get(str(path))
-    if guardado and guardado[0] == st.st_size and guardado[1] == st.st_mtime:
+    if (guardado and guardado[0] == st.st_size and guardado[1] == st.st_mtime
+            and guardado[2]["completo"]):
         return guardado[2]
     if guardado and st.st_size >= guardado[0]:
         d = dict(guardado[2])          # sigue creciendo: se lee solo lo nuevo
@@ -1886,14 +1894,22 @@ def _uso(path):
         if st.st_size > TOPE_USO:
             return None
         d = {"in": 0, "out": 0, "cw": 0, "cr": 0, "turnos": 0, "compacta": 0,
-             "pico": 0, "activo": 0.0, "usd": None,
+             "pico": 0, "activo": 0.0, "usd": None, "completo": False,
              "_pos": 0, "_ult": None, "_ts": 0.0}
+    d["completo"] = True               # salvo que el tope corte la lectura
+    fin = None if tope is None else d["_pos"] + max(0, tope)
     try:
         with path.open("rb") as f:
             f.seek(d["_pos"])
             for raw in f:
                 if not raw.endswith(b"\n"):
                     break              # la esta escribiendo ahora: se lee la proxima vez
+                if fin is not None and d["_pos"] >= fin:
+                    # Se corta ANTES de consumir la linea: el offset no avanza, asi que
+                    # la proxima llamada la vuelve a leer. Cortar despues de mover el
+                    # offset y antes de contarla perderia una linea en silencio.
+                    d["completo"] = False
+                    break
                 d["_pos"] += len(raw)
                 # Criba por bytes antes de parsear. Sobre el transcript de 89 MB baja de
                 # 136 ms a 79 ms y no pierde nada: los falsos positivos (un `tool_result`
@@ -1961,16 +1977,59 @@ def _uso(path):
     return d
 
 
-def uso_de(r):
+def uso_de(r, tope=None):
     """El acumulado de la fila, o None. Mismo trato que `detalles()`: se lee SOLO para
     quien lo mira. La lista no lo pinta y `--json` solo con `--usage`, porque cuesta el
     transcript entero y un `--json` que alimenta una statusline se llama cada pocos
-    segundos. Una fila de otro CLI no tiene transcript y devuelve None, que no es cero."""
-    if "_uso" in r:
-        return r["_uso"]
+    segundos. Una fila de otro CLI no tiene transcript y devuelve None, que no es cero.
+
+    Sin `tope` lee hasta el final, que es lo que quieren `--list` y `--json`: son una
+    pasada y no tienen a nadie esperando delante. Con `tope`, deja el trabajo a medias y
+    lo dice en `completo` — es lo que usa el selector para no bloquearse.
+    """
+    if "_uso" in r and (r["_uso"] is None or r["_uso"].get("completo") or tope is None):
+        if r["_uso"] is None or r["_uso"].get("completo"):
+            return r["_uso"]
     t = (r.get("meta") or {}).get("_transcript")
-    r["_uso"] = _uso(t) if t else None
+    r["_uso"] = _uso(t, tope) if t else None
     return r["_uso"]
+
+
+# Cuanto se lee de cada transcript por vuelta, y cuanto se deja gastar en total. El
+# trozo es mayor que el 99% de los transcripts de esta maquina, asi que en la practica
+# casi todos se leen de una: lo que parte en trozos son los gigantes, que son los que
+# se notan. Y el presupuesto acota el peor caso de una vuelta a menos de lo que tarda
+# una pulsacion en verse.
+TROZO_USO = 8 * 1024 * 1024
+PRESUPUESTO_USO_MS = 25
+
+
+def avanza_uso(rows, ms=PRESUPUESTO_USO_MS, trozo=TROZO_USO):
+    """Adelanta la lectura de los transcripts que falten, sin pasar de `ms`.
+
+    El bucle del selector la llama en cada vuelta —cada tecla y cada 2,5 s—, asi que un
+    transcript grande se termina en unas pocas y ninguna se lleva mas del presupuesto.
+    Sin esto, llegar con el cursor a una fila de 89 MB cuesta 120 ms de tiron, y el modo
+    `spend` cuesta 389 ms de golpe al entrar.
+
+    El orden de `rows` es la prioridad: quien llama pone delante lo que se esta mirando.
+    """
+    limite = time.monotonic() + ms / 1000.0
+    for r in rows:
+        u = r.get("_uso", 0)
+        if u is None or (isinstance(u, dict) and u.get("completo")):
+            continue                   # ya esta, o no hay transcript que leer
+        # Se insiste con la MISMA fila mientras quede presupuesto, en vez de repartir un
+        # trozo a cada una: la primera es la que se esta mirando, y terminarla es lo que
+        # hace aparecer sus cifras en el panel. Repartiendo, un transcript de 89 MB
+        # tardaba once vueltas en dar un numero.
+        while True:
+            u = uso_de(r, trozo)
+            if u is None or u.get("completo") or time.monotonic() >= limite:
+                break
+        if time.monotonic() >= limite:
+            break
+    return rows
 
 
 def pico_de(r):
@@ -2823,8 +2882,12 @@ def _ausente(r, modo):
         return 0 if r.get("mem_mb") else 1
     if modo == "spend":
         # `_uso` es None en las filas de otro CLI, que no tienen transcript, y en el
-        # transcript que no se pudo leer entero. Las dos son huecos, no ceros.
-        return 0 if (r.get("_uso") or {}).get("turnos") else 1
+        # transcript que no se pudo leer entero. Las dos son huecos, no ceros. Y un
+        # PARCIAL tambien: ordenar por una cifra a medias pondria delante a la que mas
+        # se ha leido, no a la que mas ha gastado. Sube al fondo mientras carga y se
+        # coloca cuando termina — una sola vez, asi que la lista no tiembla.
+        u = r.get("_uso") or {}
+        return 0 if (u.get("turnos") and u.get("completo")) else 1
     return 1 if r.get("idle") is None else 0
 
 
@@ -2856,27 +2919,11 @@ def _clave_orden(r, modo):
     return r.get("idle") or 0
 
 
-def carga_uso(rows, modo):
-    """Abre los transcripts que `ordena()` va a necesitar, y solo si hace falta.
-
-    Existe para que `ordena()` siga sin tocar disco. El modo `spend` es el unico que
-    ordena por un dato que no esta ya en la fila: los otros cuatro los compone
-    `live_sessions()` de balde, y este cuesta leer el transcript entero de CADA fila.
-    Medido aqui: 94 ms las 8 vivas y 389 ms las 40 del historial la primera vez, 0,1 ms
-    despues —`_uso` cachea por (tamano, mtime) y de una sesion viva relee solo lo nuevo.
-    Se paga al entrar en el modo, no en cada refresco, y no se paga nunca si no entras.
-    """
-    if modo == "spend":
-        for r in rows:
-            uso_de(r)
-    return rows
-
-
 def ordena(rows, modo="activity", invertido=False):
     """Ordena la lista. Pura: ni pinta, ni lee el reloj, ni toca disco.
 
     Por eso el modo `spend` lee el campo `_uso` que ya este en la fila y no lo va a
-    buscar: quien llama pasa antes por `carga_uso()`. Sin esa llamada, `spend` no
+    buscar: quien llama pasa antes por `avanza_uso()`. Sin esa llamada, `spend` no
     revienta —trata las filas como huecos y las deja donde estaban—, que es la forma
     correcta de fallar en una funcion que se llama cuatro veces por segundo.
 
@@ -3079,11 +3126,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             fuentes = ([f for f in ORDEN_FUENTES if f in hay]
                        + sorted(f for f in hay if f not in ORDEN_FUENTES))
             base = todas + extra
-            rows = ordena(carga_uso([r for r in base if casa(r, filtro)
-                                     and (vista == "todas"
-                                          or r.get("fuente", "claude") == vista)],
-                                    modo),
-                          modo, orden_inv)
+            candidatas = [r for r in base if casa(r, filtro)
+                          and (vista == "todas"
+                               or r.get("fuente", "claude") == vista)]
+            # Un trozo de transcript por vuelta, empezando por la fila que se esta
+            # mirando —`rows` y `cur` son los de la vuelta anterior, que para elegir a
+            # quien adelantar sobra—. De aqui salen tres cosas: el panel deja de dar un
+            # tiron de 120 ms al llegar a una sesion grande, la barra de contexto de
+            # TODA la lista gana el pico (que compactar borra), y el orden por gasto
+            # deja de costar 389 ms de golpe al entrar.
+            mirando = [rows[cur]] if 0 <= cur < len(rows) else []
+            avanza_uso(mirando + candidatas)
+            rows = ordena(candidatas, modo, orden_inv)
             if not rows:
                 rows = [{"name": "", "title": "", "title_full": _("(nothing matches)"),
                          "idle": None, "working": None, "attached": False,
@@ -3376,10 +3430,13 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # cosa. Cuesta 10 columnas y las hay de sobra.
                 pu_cur = rows[cur].get("pulso") or {}
                 ctx_cur = pu_cur.get("ctx")
-                # El consumo se lee ANTES del tope y no despues: es de donde sale el
-                # pico, y sin el una sesion que ya compacto se dibuja contra la ventana
-                # estandar aunque haya tenido 700k dentro.
-                uso_cur = uso_de(rows[cur])
+                # Lo que `avanza_uso()` haya leido ya, sin ir a buscar mas: aqui no se
+                # abre ningun fichero, que es lo que quitaba 120 ms cada vez que el
+                # cursor llegaba a una sesion grande. Lo que falte llega en la vuelta
+                # siguiente. El pico si se usa aunque el acumulado este a medias: solo
+                # puede crecer, asi que un parcial se queda corto pero nunca miente.
+                uso_cur = rows[cur].get("_uso")
+                listo_cur = bool(uso_cur and uso_cur.get("completo"))
                 tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
                                          pu_cur.get("ventana_1m"), pico_de(rows[cur]))
                 campos = [
@@ -3401,11 +3458,15 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                                     f"{round(100 * ctx_cur / tope_cur)}%"
                                     + ("  \u00b7 " + _("{n} compaction(s)",
                                                       n=uso_cur["compacta"])
-                                       if uso_cur and uso_cur["compacta"] else ""))
+                                       if listo_cur and uso_cur["compacta"] else ""))
                      if ctx_cur else "", color_contexto(ctx_cur / tope_cur if ctx_cur else 0)),
                     (_("model"), _modelo_corto(pu_cur.get("modelo")), 4),
-                    (_("spent"), _uso_texto(uso_cur) if uso_cur else "", 8),
-                    (_("rhythm"), _uso_ritmo(uso_cur) if uso_cur else "", 4),
+                    # Mientras se lee, un guion y no una cifra: media lectura da media
+                    # cifra, y una cifra a medias en una columna que dice "gastado" se
+                    # lee como el total. Dura una vuelta o dos.
+                    (_("spent"), _uso_texto(uso_cur) if listo_cur
+                     else (_("reading\u2026") if uso_cur else ""), 8),
+                    (_("rhythm"), _uso_ritmo(uso_cur) if listo_cur else "", 4),
                     (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
                      if d.get("peso") else
                      ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
@@ -4153,6 +4214,7 @@ def _T():
         "{v} in a repo another session is editing":
             "{v} en un repo que otra sesión está editando",
         "activity": "actividad",
+        "reading\u2026": "leyendo\u2026",
         "copied: {s}": "copiado: {s}",
         "copy the session id": "copiar el id de la sesión",
         "first / last (g / G too)": "primera / última (g / G también)",
@@ -4317,7 +4379,7 @@ def _T():
 _T()
 
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

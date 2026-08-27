@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.9.0
+
+**The picker stopped reading transcripts in one bite.** Each turn of the loop spends a 25 ms budget
+on whatever is missing, starting with the row you are looking at and staying on it until it is done.
+
+That read is what pays for `--usage`, for the peak behind the context bar, and for sorting by spend.
+Before, arriving at a large session cost a 120 ms stall, and entering the spend sort cost 389 ms in
+one go. Across the 40 sessions here it is now 12 turns of at most 38 ms instead of 345 ms at once,
+and 0.002 ms once everything is read.
+
+What comes back half-read says so, and is not painted as a total: the panel shows "reading…" where
+the figures go. The **peak** is the one exception and is used mid-read — it can only grow, so a
+partial falls short but never overshoots. On the 89 MB transcript it crosses 200k on the very first
+turn, so the context bar corrects itself right away rather than after the whole file.
+
+Because of that, the context bar of **every row in the list** now benefits from the peak, not just
+the row under the cursor. Sorting by spend takes no partials — that would sort by how much has been
+read — so a half-read row waits at the bottom and moves up once, when it finishes.
+
 ## 1.8.0
 
 **The context guard now has memory.** It already refused to put the ceiling below the context a

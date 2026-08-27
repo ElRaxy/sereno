@@ -226,8 +226,8 @@ los 30 hacia el mismo lado: uno marcaba 171k sobre 200k —un **86%**, "compacta
 171k de un millón, un **17%**. Como cobertura, `preTokens` aparece en 107 de 524 transcripts
 frente a los 13 del `cost-state`.
 
-El pico sale de leer el transcript entero, así que **hoy solo lo tienen el panel y `--usage`**;
-la lista sin `--usage` sigue con el dato de ahora. Y el sentido contrario —probar que una sesión
+El pico sale de leer el transcript entero, y **eso lo hace ahora también la lista**, un trozo por
+refresco: ver [Leer sin bloquear](#leer-sin-bloquear). Y el sentido contrario —probar que una sesión
 *no* es de un millón— no tiene más evidencia que el `cost-state`: en esos 524 transcripts no hay
 ni una auto-compactación (que delataría el umbral) ni un solo `message.model` con sufijo.
 
@@ -446,8 +446,25 @@ sereno --json --usage | jq -r '.sessions[] | "\(.title)  \(.output_tokens) salid
 Va apagado por defecto porque la cifra está repartida por todo el transcript: la cola no sirve,
 hay que leer el fichero entero. Medido aquí, son 0,11 ms el transcript mediano y 223 ms el mayor
 del disco (89 MB) — bien cuando lo pides, mal para una statusline que corre cada pocos segundos.
-En el selector no cuesta nada extra: se lee para la fila bajo el cursor, como el resto del panel,
-y se cachea.
+
+#### Leer sin bloquear
+
+En el selector esa lectura no se hace de una vez. Cada vuelta del bucle —cada tecla y cada 2,5 s—
+se gasta un presupuesto de **25 ms** leyendo lo que falte, empezando por la fila que estás mirando
+e insistiendo con ella hasta terminarla. Lo que vuelve a medias se distingue: mientras falta algo,
+el panel pone «leyendo…» en vez de una cifra, porque media lectura da media cifra y en una columna
+que dice «gastado» eso se lee como el total.
+
+Medido sobre las 40 sesiones de esta máquina: **345 ms en una sola vuelta** antes, y ahora 12
+vueltas de **38 ms como mucho** (el presupuesto se mira después de cada fila, así que una vuelta
+puede pasarse lo que cueste una). Con todo leído, la vuelta cuesta 0,002 ms. El mayor transcript
+del disco pasó de un tirón de 120 ms a cuatro vueltas.
+
+El **pico** es la excepción y se usa aunque la lectura vaya a medias: solo puede crecer, así que
+un parcial se queda corto pero nunca se pasa. En el transcript de 89 MB ya cruza los 200k en la
+primera vuelta, así que la barra se corrige enseguida. El **orden por gasto**, en cambio, no
+admite parciales —ordenaría por lo leído y no por lo gastado—, así que una fila a medias espera
+al fondo y sube una sola vez, al terminar.
 
 Cuatro cifras y **ningún total**. La caché leída no es material nuevo —es lo ya enviado que se
 vuelve a leer— y es cien veces mayor que todo lo demás junto (300M frente a 3M en una sesión de
@@ -768,9 +785,10 @@ algo que falla **en silencio**, que es justo por lo que existen:
   búsquedas vacías seguidas, y lo que no se pudo observar nunca cuenta como éxito.
 - **`test_panel_geometria.py`** — el terminal se sustituye por un doble que apunta cada
   escritura, así ninguna celda se pinta dos veces ni nada se sale del marco.
-- **`test_orden_en_pantalla.py`** — la tecla del orden llega hasta `gasto` y la lista se pinta en
-  ese orden. Con las filas VACIADAS de consumo: la demo lo trae precocinado, y con él puesto el
-  test pasaba igual sin el cableado que dice probar.
+- **`test_orden_en_pantalla.py`** — la tecla del orden llega hasta `gasto`, la lista se pinta en
+  ese orden, y una lectura a medias sale como «leyendo…» y no como una cifra. Con las filas
+  VACIADAS de consumo: la demo lo trae precocinado, y con él puesto el test pasaba igual sin el
+  cableado que dice probar.
 - **`test_suelo_38.py`** — nada usa sintaxis posterior a 3.8. El CI ya corre en 3.8, pero
   avisa tarde: quien escribió la línea tiene 3.12 y ahí compila sin rechistar.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,

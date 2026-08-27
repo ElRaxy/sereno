@@ -3,7 +3,7 @@
 
 `tests/test_orden.py` prueba `ordena()` en aislado, que es donde vive la regla. Lo que
 no prueba —y es la mitad que se rompe— es el CABLEADO: que la tecla recorra los cinco
-modos, que el modo llegue a `ordena()` y que alguien haya pasado antes por `carga_uso()`.
+modos, que el modo llegue a `ordena()` y que alguien haya pasado antes por `avanza_uso()`.
 Sin esa ultima llamada `spend` no revienta: deja la lista tal cual, que desde fuera se
 lee como "la tecla no hace nada" y ningun test en aislado lo ve.
 
@@ -42,15 +42,18 @@ def pinta(teclas, h=32, w=170):
     """Pinta una vez, con el consumo VACIADO de las filas y detras de `uso_de`.
 
     La demo trae `_uso` precocinado, asi que pasarla tal cual dejaria el cableado sin
-    probar: comprobado, quitar `carga_uso()` del bucle no rompia nada. Aqui las filas
-    entran sin el dato y solo lo reciben si alguien pasa por `uso_de`, que es lo que
-    `carga_uso()` hace y solo en el modo que lo necesita.
+    probar: comprobado, quitar del bucle la llamada que lo lee no rompia nada. Aqui las
+    filas entran sin el dato y solo lo reciben si alguien pasa por `uso_de`, que es lo
+    que `avanza_uso()` hace, un trozo por vuelta.
     """
     import curses as real
     tabla = {r["name"]: r.get("_uso") for r in ns["sesiones_demo"]()}
-    filas = [dict(r, _uso=None) for r in ns["sesiones_demo"]()]
+    # Se BORRA la clave, no se pone a None: `None` significa "no hay transcript que
+    # leer" y `avanza_uso` la salta a proposito para no reintentarla en cada vuelta.
+    filas = [{k: v for k, v in r.items() if k != "_uso"}
+             for r in ns["sesiones_demo"]()]
 
-    def uso_falso(r):
+    def uso_falso(r, tope=None):
         if r.get("_uso") is None:
             r["_uso"] = tabla.get(r.get("name"))
         return r["_uso"]
@@ -113,9 +116,40 @@ def main():
     if len(pos) == len(esperado) and sorted(esperado, key=lambda t: pos[t]) == esperado:
         fallos.append("el orden por defecto ya es el de gasto: el test no prueba nada")
 
+    # 4. Una lectura a medias no se pinta como un total. El panel tiene que decir que
+    #    esta leyendo, no ensenar la mitad de la cifra en una columna que dice "gasto".
+    import curses as real
+    cajon = []
+    filas = [{k: v for k, v in r.items() if k != "_uso"}
+             for r in ns["sesiones_demo"]()]
+    tabla = {r["name"]: r.get("_uso") for r in ns["sesiones_demo"]()}
+
+    def a_medias(r, tope=None):
+        u = tabla.get(r.get("name"))
+        # La mitad de la salida y `completo` en False: es lo que devuelve `_uso()`
+        # cuando el tope de bytes corta la lectura.
+        r["_uso"] = dict(u, out=u["out"] // 2, completo=False) if u else None
+        return r["_uso"]
+
+    guardado = ns["uso_de"]
+    ns["uso_de"] = a_medias
+    sys.modules["curses"] = espia(real, 32, 170, [Q], cajon, ns["ancho"])
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ns["pick_ui"](filas)
+    finally:
+        sys.modules["curses"] = real
+        ns["uso_de"] = guardado
+    pant = "\n".join(lineas(cajon[0].celdas, 32, 170))
+    if "leyendo" not in pant:
+        fallos.append("con la lectura a medias el panel no dice que esta leyendo")
+    if "/min" in pant:
+        fallos.append("el panel pinta el ritmo con la lectura a medias")
+
     for f in fallos:
         print("FALLO:", f)
-    print("ok: `s` llega a gasto y la lista se pinta ordenada por lo consumido"
+    print("ok: `s` llega a gasto, la lista se ordena por lo consumido y una lectura a "
+          "medias no se pinta como un total"
           if not fallos else f"{len(fallos)} fallo(s)")
     return 1 if fallos else 0
 

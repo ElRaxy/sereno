@@ -227,8 +227,8 @@ all of them the same way: one read 171k against 200k — an **86%**, "compact no
 171k of a million, a **17%**. As coverage, `preTokens` shows up in 107 of 524 transcripts against
 13 for `cost-state`.
 
-The peak comes from reading the whole transcript, so **today only the panel and `--usage` have
-it**; the list without `--usage` still goes on the current figure. And the opposite direction —
+The peak comes from reading the whole transcript, and **the list now does that too**, a chunk per
+refresh: see [Reading without blocking](#reading-without-blocking). And the opposite direction —
 proving a session is *not* on the big window — has no evidence beyond `cost-state`: across those
 524 transcripts there is not one auto-compaction (which would give away the threshold) and not a
 single `message.model` carrying the suffix.
@@ -772,9 +772,10 @@ Most guard against something that fails **silently**, which is why they exist at
   empty searches in a row, and nothing unobserved ever counts as success.
 - **`test_panel_geometria.py`** — the terminal is replaced by a stand-in that records every
   write, so no cell gets painted twice and nothing spills out of the frame.
-- **`test_orden_en_pantalla.py`** — the sort key reaches `spend` and the list is painted in that
-  order. With the rows EMPTIED of usage: the demo ships it precooked, and with it in place the
-  test passed even without the wiring it claims to cover.
+- **`test_orden_en_pantalla.py`** — the sort key reaches `spend`, the list is painted in that
+  order, and a half-read row shows "reading…" rather than a figure. With the rows EMPTIED of
+  usage: the demo ships it precooked, and with it in place the test passed even without the
+  wiring it claims to cover.
 - **`test_suelo_38.py`** — nothing uses syntax newer than 3.8. The CI already runs on 3.8,
   but it tells you late: whoever wrote the line has 3.12 and it compiles fine there.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
