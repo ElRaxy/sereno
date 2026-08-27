@@ -26,7 +26,12 @@ Sleep 2500ms
 # bajar por la lista: el panel de la derecha cambia con cada sesion
 Down  Sleep 1800ms
 Down  Sleep 1800ms
-Down  Sleep 1800ms
+
+# esta fila trae el bloque de la respuesta, y con el se ven los cuatro subrayados a la
+# vez: `project`, `session` y las dos cabeceras. El subrayado es lo que dice que ese
+# valor se copia al pincharlo, asi que la pausa es larga a proposito — es la unica
+# forma de ensenarlo, porque vhs no sabe mandar clicks.
+Down  Sleep 3200ms
 
 # marcar dos
 Up    Sleep 500ms
@@ -52,8 +57,9 @@ Type "cli" Sleep 1800ms
 Escape Sleep 400ms
 Backspace Backspace Backspace Sleep 800ms
 
-# copiar el id de la sesion — el de Claude, el que come `--resume`
-Type "y" Sleep 1800ms
+# copiar el id de la sesion — el de Claude, el que come `--resume`. Pinchar el valor
+# subrayado hace lo mismo; el rotulo de abajo dice siempre que ha llegado al portapapeles.
+Type "y" Sleep 2600ms
 
 # volver y abrir la ayuda
 Tab Sleep 400ms
