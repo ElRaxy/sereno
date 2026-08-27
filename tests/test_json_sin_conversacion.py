@@ -22,6 +22,7 @@ CAMPOS = {
     # El acumulado. `null` sin `--usage`, que es como corre este test.
     "input_tokens": int, "output_tokens": int, "cache_write_tokens": int,
     "cache_read_tokens": int, "assistant_turns": int, "compactions": int,
+    "peak_context_tokens": int,
     "working_seconds": int, "api_cost_usd": float,
     # Con quien choca y cuanto, en cifras. Nunca la RUTA: un path de cliente
     # dice tanto como una frase de la conversacion, y esto se canaliza.

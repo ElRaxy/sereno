@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.8.0
+
+**The context guard now has memory.** It already refused to put the ceiling below the context a
+session was holding; it now also looks at the **peak** that session ever reached.
+
+Compacting destroys the evidence: the window drops to 16k and a one-million session starts being
+drawn against the standard one. Across the 524 transcripts on this machine that misreads **30**
+of them (5.7%), always the same way — one read 171k against 200k, an 86% that says "compact now",
+when it was 171k of a million, a 17%.
+
+The peak is rebuilt from the transcript `sereno` already reads end to end for `--usage`: the
+`usage` of every reply, and the `preTokens` of every compaction. That field is context and not a
+running total — checked against the reply just before each boundary, median +0.4% and 165 of 169
+within ±5%. As coverage it beats the alternative by a lot: `preTokens` appears in 107 of 524
+transcripts, `cost-state` in 13.
+
+It costs nothing extra — those two lines were already being parsed — and it is exposed as
+`peak_context_tokens` in `--json --usage`. Reading the whole file is what it needs, so today the
+panel and `--usage` have it and the plain list does not.
+
+**What is still not possible: proving a session is *not* on the big window.** Beyond `cost-state`
+there is no evidence in the transcript — across those 524 there is not one auto-compaction, which
+would give away the threshold, and not a single `message.model` carrying the `[1m]` suffix.
+
 ## 1.7.0
 
 **`s` has a fifth sort: by what each session has burned.** New input plus output, heaviest first,

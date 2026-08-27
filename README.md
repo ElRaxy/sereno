@@ -216,6 +216,23 @@ works it out in this order, and stops at the first that answers:
 Rule 5 is what keeps the bar honest: the percentage can never read above 100%, and there is a
 test that fails if it ever does.
 
+**And that guard has memory: it looks at the peak too**, not just the context right now.
+Compacting destroys the evidence — the window drops to 16k and a one-million session starts
+being drawn against the standard one — so the peak is rebuilt from the transcript: the `usage`
+of every reply and the `preTokens` of every compaction, which is context and not a running
+total (checked against the preceding reply: median +0.4%, 165 of 169 within ±5%).
+
+Across the 524 transcripts on the machine this was written on, the peak corrects **30** (5.7%),
+all of them the same way: one read 171k against 200k — an **86%**, "compact now" — when it was
+171k of a million, a **17%**. As coverage, `preTokens` shows up in 107 of 524 transcripts against
+13 for `cost-state`.
+
+The peak comes from reading the whole transcript, so **today only the panel and `--usage` have
+it**; the list without `--usage` still goes on the current figure. And the opposite direction —
+proving a session is *not* on the big window — has no evidence beyond `cost-state`: across those
+524 transcripts there is not one auto-compaction (which would give away the threshold) and not a
+single `message.model` carrying the suffix.
+
 **2 comes before 3, and it goes both ways.** Your global config is the weak one — a session
 launched with a different `--model` does not obey it — so the one fact that describes *this*
 session overrules it, raising the ceiling **and** lowering it. Before this order, a 200k session
@@ -418,7 +435,8 @@ not five.
 
 The context bar says how full the window is **right now**. It does not say how much a session
 has burned: one that has compacted three times reads 20% with twelve hours inside it. `--usage`
-adds that — tokens in and out, cache read, how many replies, how many compactions, and the
+adds that — tokens in and out, cache read, how many replies, how many compactions, the peak
+context it reached, and the
 minutes actually spent working.
 
 ```bash

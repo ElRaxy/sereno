@@ -87,6 +87,27 @@ def main():
                     json.dumps({"type": "system", "subtype": "compact_boundary",
                                 "compactMetadata": {"preTokens": 380_000}})])
         igual("compactaciones contadas", _uso(p)["compacta"], 2)
+        # Y el PICO: lo que la sesion tenia dentro justo antes de compactar. Es el unico
+        # rastro que sobrevive —las respuestas de despues ya cuentan la ventana nueva— y
+        # es de donde sale el tope de una sesion que ya compacto. Sin leerlo, esa sesion
+        # se dibuja contra la ventana estandar aunque haya tenido 400k dentro.
+        igual("el pico sale del preTokens mayor", _uso(p)["pico"], 400_000)
+        # El `usage` de una respuesta tambien cuenta, y ahi el pico es entrada + cache:
+        # la salida no viaja de vuelta al modelo y no ocupa ventana.
+        p = d / "pico.jsonl"
+        escribe(p, [resp("m1", T(0), out=90_000, cr=120_000, cw=5_000, ent=300)])
+        igual("el pico de una respuesta no cuenta la salida", _uso(p)["pico"],
+              120_000 + 5_000 + 300)
+        # Un `compactMetadata` sin `preTokens`, o con basura dentro, no puede tumbar la
+        # lectura ni inventarse un pico: es un fichero que escribe otro programa.
+        p = d / "pico_roto.jsonl"
+        escribe(p, [json.dumps({"type": "system", "subtype": "compact_boundary"}),
+                    json.dumps({"type": "system", "subtype": "compact_boundary",
+                                "compactMetadata": {"preTokens": "muchos"}}),
+                    json.dumps({"type": "system", "subtype": "compact_boundary",
+                                "compactMetadata": None})])
+        igual("un preTokens que no es un numero no cuenta", _uso(p)["pico"], 0)
+        igual("y las compactaciones se cuentan igual", _uso(p)["compacta"], 3)
 
         # 5. El dinero no se calcula: se relata el que escribio el propio CLI. Y si no
         #    hay linea `cost-state`, es None y no cero.
@@ -109,7 +130,7 @@ def main():
         incremental = dict(_uso(p))
         _CACHE_USO.clear()
         de_una_vez = dict(_uso(p))
-        for k in ("in", "out", "cw", "cr", "turnos", "compacta", "activo"):
+        for k in ("in", "out", "cw", "cr", "turnos", "compacta", "pico", "activo"):
             igual(f"incremental vs completo: {k}", incremental[k], de_una_vez[k])
 
         # 7. La ultima linea a medias NO se consume. Una sesion viva escribe mientras la
@@ -149,13 +170,14 @@ def main():
         fila = {"meta": {}}
         igual("fila sin transcript", ns["uso_de"](fila), None)
 
-        # 10. `--json` sin `--usage` deja los ocho campos a null, no a cero.
+        # 10. `--json` sin `--usage` deja los nueve campos a null, no a cero.
         fila = {"name": "s", "title_full": "t", "proyecto": "p", "rama": "b",
                 "fuente": "claude", "idle": 1.0, "attached": False, "mem_mb": None,
                 "pid": "", "meta": {}, "pulso": {"escribe": False, "herramienta": False}}
         (salida,) = ns["filas_json"]([fila])
         for k in ("input_tokens", "output_tokens", "cache_write_tokens",
                   "cache_read_tokens", "assistant_turns", "compactions",
+                  "peak_context_tokens",
                   "working_seconds", "api_cost_usd"):
             if k not in salida:
                 fallos.append(f"falta el campo {k!r} en --json")

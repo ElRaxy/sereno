@@ -66,11 +66,33 @@ def main():
     finally:
         ns["_ctx_max_config"].__dict__["_v"] = None
 
+    # ── el pico: la guarda con memoria ─────────────────────────────────────────
+    # Compactar borra la prueba. El contexto cae a 16k y una sesion de un millon pasa a
+    # dibujarse contra la ventana estandar: 171k marcaban 86% —"compacta ya"— cuando
+    # eran 171k de un millon, un 17%. Medido sobre los 524 transcripts de esta maquina,
+    # el pico corrige 30 y los 30 hacia ese lado.
+    igual("pico por encima del estandar", tope("claude-opus-5", 16_000, None, 767_648),
+          CTX_1M)
+    igual("pico que cabe en la estandar no cambia nada",
+          tope("claude-opus-5", 16_000, None, 180_000), CTX_STD)
+    igual("pico justo en el borde", tope("claude-opus-5", 10, None, CTX_STD), CTX_STD)
+    igual("un token por encima", tope("claude-opus-5", 10, None, CTX_STD + 1), CTX_1M)
+    # `0` es "no consta" y no decide nada: es lo que vale mientras nadie haya leido el
+    # transcript entero, que es el caso normal de la lista.
+    igual("sin pico se comporta como antes", tope("claude-opus-5", 50_000, None, 0),
+          CTX_STD)
+    # Y gana a un `cost-state` que dice que no: 767k dentro no caben en 200k, lo diga
+    # quien lo diga. Es la misma guarda de siempre, solo que con memoria.
+    igual("el pico corrige al cost-state",
+          tope("claude-opus-5", 16_000, False, 767_648), CTX_1M)
+
     # Y `SERENO_CTX_MAX` sigue mandando sobre las dos, tambien hacia abajo.
     ns["_ctx_max_env"].__dict__["_v"] = 300_000
     try:
         igual("lo que fija el usuario no se discute",
               tope("claude-opus-5[1m]", 60_000, True), 300_000)
+        igual("y tampoco lo discute el pico",
+              tope("claude-opus-5", 60_000, None, 900_000), 300_000)
     finally:
         ns["_ctx_max_env"].__dict__["_v"] = None
 
@@ -80,17 +102,29 @@ def main():
     for modelo in ("claude-opus-5", "claude-opus-5[1m]", "claude-sonnet-5", ""):
         for ctx in (1, 1_000, 199_999, 200_001, 560_080, 999_999):
             for v1m in (None, True, False):
-                pct = 100 * ctx / tope(modelo, ctx, v1m)
-                if pct > 100:
-                    fallos.append(f"{modelo or 'sin modelo'} con {ctx:,} y "
-                                  f"ventana_1m={v1m} pinta {pct:.0f}%")
+                for pico in (0, 1, 180_000, 767_648, 999_999):
+                    pct = 100 * ctx / tope(modelo, ctx, v1m, pico)
+                    if pct > 100:
+                        fallos.append(f"{modelo or 'sin modelo'} con {ctx:,}, "
+                                      f"ventana_1m={v1m} y pico {pico:,} "
+                                      f"pinta {pct:.0f}%")
 
     # Y en la lista, las filas de la demo tampoco.
+    pico_de = ns["pico_de"]
     for r in ns["sesiones_demo"]():
         pu = r["pulso"]
         ctx = pu.get("ctx")
-        if ctx and 100 * ctx / tope(pu.get("modelo"), ctx) > 100:
+        if ctx and 100 * ctx / tope(pu.get("modelo"), ctx, None, pico_de(r)) > 100:
             fallos.append(f"demo {r['name']} pinta mas del 100%")
+    # Y la demo tiene que ENSENAR el caso: una fila que compacto, marca poco contexto y
+    # aun asi se dibuja contra el millon porque llego a tener mas de lo que cabe en la
+    # estandar. Sin ella, ni las capturas ni el GIF del README lo muestran nunca.
+    ensena = [r for r in ns["sesiones_demo"]()
+              if (r.get("_uso") or {}).get("compacta")
+              and pico_de(r) > CTX_STD
+              and (r["pulso"].get("ctx") or 0) < CTX_STD]
+    if not ensena:
+        fallos.append("la demo no ensena ninguna sesion compactada con pico de 1M")
 
     if fallos:
         print("FALLA:")
