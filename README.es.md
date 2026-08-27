@@ -818,6 +818,13 @@ El GIF se regenera con `vhs demo.tape` ([vhs](https://github.com/charmbracelet/v
 los fotogramas antes de commitearlos. Con `SERENO_DEMO=1` delante, siempre: el panel enseña
 prompts de verdad.
 
+La tarjeta social es `docs/social-preview.png`, y los cuatro pasos que la rehacen están en la
+cabecera de `docs/social-preview.html`. Su tira es una captura de verdad del programa en modo
+demo, no una maqueta, así que se queda desfasada cuando cambia la interfaz. Es el único artefacto
+que no se puede subir desde aquí: GitHub no tiene API para él, así que se sube a mano en
+**Settings › General › Social preview** y se comprueba leyendo el `og:image` de la página pública
+del repo.
+
 Cualquier cosa explotable va a [`SECURITY.md`](SECURITY.md), no a un issue público.
 
 ---

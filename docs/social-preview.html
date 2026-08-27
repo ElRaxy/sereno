@@ -1,0 +1,57 @@
+<!doctype html>
+<!--
+  Genera docs/social-preview.png. Cuatro pasos, desde la raiz del repo:
+
+    1. vhs docs/social-preview.tape                       # graba la tira, en modo demo
+    2. ffmpeg -sseof -0.5 -i /tmp/sereno-tira.gif -frames:v 1 -y /tmp/sereno-tira.png
+    3. ffmpeg -i /tmp/sereno-tira.png -vf "crop=1092:134:0:0" -y docs/social-lista.png
+    4. agent-browser open "file://$PWD/docs/social-preview.html" \
+       && agent-browser screenshot docs/social-preview.png --full
+
+  Sale 1280x640 exactos, que es lo que GitHub pide, y unos 170 KB — el tope son 1 MB.
+  El .png NO lo usa el README: se sube a mano en Settings > General > Social preview,
+  que es la unica via (la API de GitHub no expone ese campo). Se comprueba mirando el
+  `og:image` de la pagina publica del repo.
+
+  La tira es una captura DE VERDAD del programa en modo demo, no una maqueta: si la
+  interfaz cambia y esto no se regenera, se nota. Paso 1 obligatorio en modo demo — el
+  tape ya lo fija— porque la lista real lleva titulos de sesiones de clientes.
+-->
+<meta charset="utf-8">
+<style>
+  html, body { margin:0; padding:0; }
+  body {
+    width:1280px; height:640px; overflow:hidden;
+    background:#1c1c2c;
+    font-family:-apple-system,"SF Pro Display","Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .marco { position:relative; width:1280px; height:640px; }
+  h1 {
+    position:absolute; left:64px; top:56px; margin:0;
+    font-size:98px; font-weight:800; letter-spacing:-3px; color:#f2f2f7;
+  }
+  .tag {
+    position:absolute; left:66px; top:192px;
+    font-size:29px; font-weight:400; color:#c8c8d4;
+  }
+  .tag b { color:#ffaf00; font-weight:700; }
+  .meta {
+    position:absolute; left:66px; top:254px;
+    font-family:"SF Mono",Menlo,monospace; font-size:19px; color:#8a8a9e;
+    letter-spacing:0.5px;
+  }
+  .tira {
+    position:absolute; left:24px; top:446px;
+    width:1232px; border-radius:10px; overflow:hidden;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+    border:1px solid #2c2c40;
+  }
+  .tira img { display:block; width:1232px; }
+</style>
+<div class="marco">
+  <h1>sereno</h1>
+  <div class="tag">what your agent sessions are <b>actually</b> doing</div>
+  <div class="meta">one python file &middot; zero deps &middot; claude &middot; codex &middot; gemini</div>
+  <div class="tira"><img src="social-lista.png"></div>
+</div>
