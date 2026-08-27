@@ -235,6 +235,7 @@ sereno --list     # plain list, touches nothing
 sereno --json     # the same facts, for your statusline or your scripts
 sereno --watch    # sit there and tell you the moment one stops and waits on you
 sereno --find "the thing you half remember"
+sereno --usage    # add what each session has burned
 sereno --help
 ```
 
@@ -342,6 +343,41 @@ real buttons.
 
 Nothing drops you out of the picker. Closing four sessions and opening a fifth is one visit,
 not five.
+
+### `--usage`
+
+The context bar says how full the window is **right now**. It does not say how much a session
+has burned: one that has compacted three times reads 20% with twelve hours inside it. `--usage`
+adds that — tokens in and out, cache read, how many replies, how many compactions, and the
+minutes actually spent working.
+
+```bash
+sereno --list --usage
+sereno --json --usage | jq -r '.sessions[] | "\(.title)  \(.output_tokens) out"'
+```
+
+It is off by default because the figure lives all over the transcript: the tail is no use, the
+whole file has to be read. Measured here, that is 0.11 ms for the median transcript and 223 ms
+for the largest on disk (89 MB) — fine when you ask for it, wrong for a statusline that runs
+every few seconds. In the picker it costs nothing extra: it is read for the row under the
+cursor, like the rest of the panel, and cached.
+
+Four figures, and **no total**. Cache read is not new material — it is what was already sent
+being read again — and it runs a hundred times larger than everything else put together (300M
+against 3M in an eight-hour session). Adding it to the input gives a huge number that means
+nothing, so the four parts stay apart and whoever wants a total composes it knowing what they
+are adding.
+
+**What it does not count**, and this matters if you delegate: subagent turns and the Haiku calls
+the CLI makes on its own (titles, summaries) leave no line in the transcript. Cross-checked
+against the `cost-state` the CLI itself writes, the scan matches within 0.1% on five transcripts
+of eight and falls up to 21% short on two. The fields are called `input_tokens` / `output_tokens`
+— what the transcript recorded — not "what you were charged", which is a different thing.
+
+That other thing travels apart, as `api_cost_usd` in `--json --usage` only: the `totalCostUSD`
+the CLI wrote with its own prices, relayed as-is. `sereno` carries no price table — one in a
+public repo goes stale without telling anyone — and it never puts a dollar figure in the TUI,
+where on a subscription plan it would be money you did not pay.
 
 ### 🎭 Try it without touching your data
 
@@ -621,6 +657,8 @@ Most guard against something that fails **silently**, which is why they exist at
 - **`test_sin_red.py`** — no sockets, and no external binary beyond the declared list.
 - **`test_contexto.py`** — the context bar can never read above 100%.
 - **`test_json_sin_conversacion.py`** — `--json` carries no prompt and no reply.
+- **`test_uso.py`** — three lines of the same reply count once, cache read never joins the
+  input, and reading only what is new gives exactly what reading the whole file gives.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
   unknown flags being reported, and a resumed session being followed to its live transcript.
 

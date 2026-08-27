@@ -62,3 +62,5 @@ jobs:
         run: python tests/test_orden.py
       - name: dos sesiones en el mismo sitio se ven, y una sola no inventa nada
         run: python tests/test_colisiones.py
+      - name: el consumo no cuenta dos veces la misma respuesta
+        run: python tests/test_uso.py

@@ -235,6 +235,7 @@ sereno --list     # lista y ya, no toca nada
 sereno --json     # los mismos hechos, para tu statusline o tus scripts
 sereno --watch    # se queda ahí y te avisa en cuanto una para y te espera
 sereno --find "eso que recuerdas a medias"
+sereno --usage    # añade lo que lleva quemado cada sesión
 sereno --help
 ```
 
@@ -342,6 +343,40 @@ botones de abajo son botones de verdad.
 
 Ninguna acción te echa del selector. Cerrar cuatro sesiones y abrir una quinta es una visita,
 no cinco.
+
+### `--usage`
+
+La barra de contexto dice lo llena que está la ventana **ahora mismo**. No dice cuánto lleva
+quemado la sesión: una que ha compactado tres veces marca 20% con doce horas dentro. `--usage`
+añade eso — entrada y salida, caché leída, cuántas respuestas, cuántas compactaciones y los
+minutos que de verdad estuvo trabajando.
+
+```bash
+sereno --list --usage
+sereno --json --usage | jq -r '.sessions[] | "\(.title)  \(.output_tokens) salida"'
+```
+
+Va apagado por defecto porque la cifra está repartida por todo el transcript: la cola no sirve,
+hay que leer el fichero entero. Medido aquí, son 0,11 ms el transcript mediano y 223 ms el mayor
+del disco (89 MB) — bien cuando lo pides, mal para una statusline que corre cada pocos segundos.
+En el selector no cuesta nada extra: se lee para la fila bajo el cursor, como el resto del panel,
+y se cachea.
+
+Cuatro cifras y **ningún total**. La caché leída no es material nuevo —es lo ya enviado que se
+vuelve a leer— y es cien veces mayor que todo lo demás junto (300M frente a 3M en una sesión de
+ocho horas). Sumarla con la entrada da un número enorme que no significa nada, así que las cuatro
+partes van sueltas y quien quiera un total lo compone sabiendo qué está sumando.
+
+**Lo que no cuenta**, y esto importa si delegas: los turnos de subagente y las llamadas a Haiku
+que el CLI hace por su cuenta (títulos, resúmenes) no dejan línea en el transcript. Cruzado
+contra el `cost-state` que escribe el propio CLI, el escaneo cuadra al 0,1% en cinco transcripts
+de ocho y se queda hasta un 21% corto en dos. Los campos se llaman `input_tokens` /
+`output_tokens` —lo que el transcript registró— y no "lo que te han cobrado", que es otra cosa.
+
+Esa otra cosa viaja aparte, como `api_cost_usd` y solo en `--json --usage`: el `totalCostUSD` que
+escribió el CLI con sus propios precios, relatado tal cual. `sereno` no lleva tabla de tarifas
+—una en un repo público caduca sin avisar a nadie— y nunca pinta un dólar en el TUI, donde en un
+plan de suscripción sería dinero que no has pagado.
 
 ### 🎭 Probarlo sin tocar tus datos
 
@@ -620,6 +655,8 @@ algo que falla **en silencio**, que es justo por lo que existen:
 - **`test_sin_red.py`** — ni sockets, ni un binario externo fuera de la lista declarada.
 - **`test_contexto.py`** — la barra de contexto no puede pasar del 100%.
 - **`test_json_sin_conversacion.py`** — `--json` no lleva dentro ni prompt ni respuesta.
+- **`test_uso.py`** — tres líneas de la misma respuesta cuentan una vez, la caché leída no se
+  suma nunca con la entrada, y leer solo lo nuevo da exactamente lo que leerlo entero.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,
   los flags desconocidos diciéndose, y una sesión reanudada seguida hasta el fichero que escribe.
 

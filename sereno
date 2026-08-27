@@ -15,6 +15,7 @@ optional and only add live process control; without them everything is read from
   sereno --demo          fake sessions, safe for screenshots and for a first look
   sereno --list          plain list, touches nothing
   sereno --json [--all]  the same facts as JSON, without any conversation in it
+  sereno --usage         add what each session has burned (reads whole transcripts)
   sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
@@ -944,6 +945,11 @@ def fila_de_transcript(p, mt=None, fino=True):
 # del README sale de datos que no existen, y ademas se puede probar el layout sin
 # tener cinco sesiones abiertas.
 DEMO = _env("DEMO", "0") not in ("", "0")
+# `--usage`: el acumulado obliga a leer el transcript entero, y un `--json` que
+# alimenta una statusline se llama cada pocos segundos. Apagado por defecto, y cuando
+# esta apagado los campos salen a `null` y NO a cero: un dato que no se ha medido no
+# es un cero.
+USO = False
 
 _DEMO = [
     # titulo, proyecto, rama, idle, MB, escribe, herramienta, prompt, respuesta, tool,
@@ -1015,6 +1021,27 @@ _DEMO_CTX = (
     {"ctx": 12_000, "modelo": "claude-haiku-4-5"},
 )
 
+# Consumo de mentira, en paralelo a `_DEMO_CTX`. Las cifras son del orden de las reales
+# medidas en esta maquina: la cache leida cien veces la entrada, y el ritmo entre 1,4k y
+# 2,1k por minuto. La quinta fila lleva tres compactaciones a proposito: es el caso que
+# este dato existe para explicar, un contexto bajo en una sesion que lleva horas.
+_DEMO_USO = (
+    {"in": 1_200, "out": 194_378, "cw": 1_646_733, "cr": 77_218_269,
+     "turnos": 259, "compacta": 0, "activo": 6_960.0, "usd": None},
+    {"in": 1_042, "out": 414_831, "cw": 2_125_425, "cr": 128_435_885,
+     "turnos": 521, "compacta": 2, "activo": 17_940.0, "usd": None},
+    {"in": 882, "out": 140_559, "cw": 436_049, "cr": 26_413_017,
+     "turnos": 129, "compacta": 0, "activo": 4_260.0, "usd": None},
+    {"in": 458, "out": 196_362, "cw": 1_071_413, "cr": 61_614_069,
+     "turnos": 229, "compacta": 1, "activo": 6_960.0, "usd": None},
+    {"in": 1_984, "out": 765_291, "cw": 2_993_300, "cr": 299_643_093,
+     "turnos": 992, "compacta": 3, "activo": 22_020.0, "usd": None},
+    {"in": 334, "out": 138_544, "cw": 512_961, "cr": 37_574_214,
+     "turnos": 167, "compacta": 0, "activo": 5_220.0, "usd": None},
+    {"in": 86, "out": 29_035, "cw": 253_649, "cr": 5_693_619,
+     "turnos": 43, "compacta": 0, "activo": 900.0, "usd": None},
+)
+
 
 def sesiones_demo():
     rows = []
@@ -1030,6 +1057,8 @@ def sesiones_demo():
             "proyecto": proy, "rama": rama,
             "working": bool(esc or tool),
             "fuente": fu,
+            # `_uso` precocinado: `uso_de()` lo respeta y no abre ningun transcript.
+            "_uso": dict(_DEMO_USO[i]) if i < len(_DEMO_USO) else None,
             # `_det` precocinado: `detalles()` lo respeta y no abre ningun transcript.
             "_det": {"fase": None, "peso": (3 + i * 7) * 1024 * 1024,
                      "lastPrompt": pr, "resp": resp, "tool": cmd or None,
@@ -1077,6 +1106,10 @@ def filas_json(rows):
     for r in rows:
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx")
+        # Solo con `--usage`: leer el acumulado obliga a recorrer el transcript entero.
+        # Sin el flag los ocho campos van a `null` y NO a cero, que es lo que permite a
+        # quien lo consuma distinguir "no se midio" de "no gasto nada".
+        u = uso_de(r) if USO else None
         fuera.append({
             "id": r.get("name") or "",
             "title": r.get("title_full") or r.get("title") or "",
@@ -1095,6 +1128,20 @@ def filas_json(rows):
             "context_max": tope_contexto(pu.get("modelo"), ctx) if ctx else None,
             "model": pu.get("modelo"),
             "pid": r.get("pid") or None,
+            # Los cuatro crudos y ninguna suma: juntar la cache leida con la entrada da
+            # una cifra cien veces mayor que el material real. Quien quiera un total lo
+            # compone, sabiendo lo que esta sumando.
+            "input_tokens": u["in"] if u else None,
+            "output_tokens": u["out"] if u else None,
+            "cache_write_tokens": u["cw"] if u else None,
+            "cache_read_tokens": u["cr"] if u else None,
+            "assistant_turns": u["turnos"] if u else None,
+            "compactions": u["compacta"] if u else None,
+            "working_seconds": round(u["activo"]) if u else None,
+            # Lo escribio el propio CLI con sus precios; `sereno` no calcula dinero ni
+            # lleva tabla de tarifas. En un plan de suscripcion es lo que HABRIA costado
+            # por API, no lo que has pagado. Fuera del TUI a proposito.
+            "api_cost_usd": u["usd"] if u else None,
             # Con quien choca y cuanto. Van las CIFRAS, nunca las rutas: `--json` se
             # canaliza a barras de estado y a scripts de terceros, y un path de cliente
             # dice tanto como una frase de la conversacion. El panel si las ensena,
@@ -1364,6 +1411,14 @@ def print_live(rows):
               f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}  "
               + _("open for {t}", t=edad) + att + choque)
         print(f"         {r['name']}")
+        if USO:
+            u = uso_de(r)
+            if u:
+                ritmo = _uso_ritmo(u)
+                extra = _uso_texto(u) + (("  \u00b7 " + ritmo) if ritmo else "")
+                if u["compacta"]:
+                    extra += "  \u00b7 " + _("{n} compaction(s)", n=u["compacta"])
+                print("         " + extra)
 
 
 def ESTADO_LARGO(est):
@@ -1610,6 +1665,191 @@ def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
     if pos > 0 and lineas:
         lineas = lineas[1:]                 # la primera puede venir partida
     return [l.decode("utf-8", "replace") for l in lineas[-cuantas:] if l.strip()]
+
+
+# ─────────────────── lo que lleva gastado, no lo que ocupa ─────────────────
+# La barra de contexto dice cuanto OCUPA la ventana ahora mismo. No dice cuanto se ha
+# quemado: una sesion que ha compactado tres veces marca 20% con doce horas dentro.
+# Lo acumulado sale del `usage` de cada respuesta, y eso obliga a leer el transcript
+# ENTERO: las cifras estan repartidas por todo el fichero y la cola no sirve. Por eso
+# esto NO se calcula para la lista, sino para la fila bajo el cursor —igual que
+# `detalles()`— y se cachea por (fichero, tamano, mtime).
+#
+# Tres trampas medidas sobre los 739 transcripts de esta maquina, y las tres cambian el
+# numero que sale:
+#
+#   1. Una respuesta ocupa VARIAS lineas —un `thinking` y dos `tool_use` van en tres— y
+#      las tres repiten el MISMO `usage`. Sumarlas todas infla la salida entre un +49% y
+#      un +123% segun la sesion. Se deduplica por `message.id`, y basta compararlo con el
+#      anterior: en 14.507 lineas con `usage` de 60 transcripts, un id repetido nunca
+#      aparecio separado de sus hermanos. Eso ahorra guardar el conjunto entero de ids.
+#   2. `cache_read_input_tokens` NO es material nuevo: es lo ya enviado que se vuelve a
+#      leer, y es cien veces mayor que el resto (300M frente a 3M en una sesion de ocho
+#      horas). Sumarlo con la entrada da una cifra enorme que no significa nada, asi que
+#      va aparte y no se junta nunca con `in`/`cw`.
+#   3. La ultima linea de una sesion viva se esta escribiendo mientras la lees. Si se
+#      consume a medias, el `_pos` avanza sobre ella y esos tokens se pierden para siempre.
+#
+# Y una cuarta que no se puede arreglar desde aqui, pero hay que saberla: los turnos de
+# subagente y las llamadas a Haiku que el CLI hace por su cuenta (titulos, resumenes) NO
+# dejan linea en el transcript. Cruzado contra el `cost-state` que escribe el propio CLI,
+# esto cuadra al 0,1% en cinco transcripts de ocho y se queda hasta un 21% corto en dos.
+# Se llama `input_tokens`/`output_tokens` —lo que el transcript registro— y no "lo que te
+# han cobrado", que es otra cosa y viaja aparte en `usd`.
+TOPE_USO = 256 * 1024 * 1024      # por encima, `None`: mejor sin dato que a medias
+_CACHE_USO = {}
+_USO_CAMPOS = (("in", "input_tokens"), ("out", "output_tokens"),
+               ("cw", "cache_creation_input_tokens"),
+               ("cr", "cache_read_input_tokens"))
+
+
+def _epoch(ts):
+    """Segundos de un `2026-08-26T06:24:23.762Z`, troceando la cadena a mano.
+
+    No se usa `datetime.fromisoformat`: en 3.8 exige exactamente 3 o 6 decimales, y un
+    transcript escrito por otra version del CLI reventaria en silencio devolviendo 0 —
+    que aqui se confundiria con "esta sesion no ha trabajado nada". Solo se necesitan
+    segundos: lo que se mide son huecos entre respuestas, no instantes.
+    """
+    try:
+        return datetime.datetime(int(ts[0:4]), int(ts[5:7]), int(ts[8:10]),
+                                 int(ts[11:13]), int(ts[14:16]), int(ts[17:19]),
+                                 tzinfo=datetime.timezone.utc).timestamp()
+    except (TypeError, ValueError, IndexError):
+        return 0.0
+
+
+def _uso(path):
+    """Hechos acumulados del transcript entero, o None si no se pudo leer.
+
+    Devuelve tipos cerrados y NUNCA un total agregado: quien pinte decide que suma con
+    que, porque juntar la cache leida con la entrada nueva da un numero que no significa
+    nada. Los campos con guion bajo son estado para la lectura incremental y no salen
+    de aqui: `filas_json` los nombra uno a uno.
+
+    Coste medido en esta maquina: 0,11 ms la mediana de los transcripts, 223 ms el mayor
+    (89,3 MB, sin cache de pagina), 0,08 ms las 40 filas con la cache caliente y 2,6 ms
+    el refresco de una sesion viva (17 KB nuevos en 20 s).
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    guardado = _CACHE_USO.get(str(path))
+    if guardado and guardado[0] == st.st_size and guardado[1] == st.st_mtime:
+        return guardado[2]
+    if guardado and st.st_size >= guardado[0]:
+        d = dict(guardado[2])          # sigue creciendo: se lee solo lo nuevo
+    else:
+        # Encogio (o no habia nada): lo han reescrito y el offset ya no vale. Releer
+        # 89 MB una vez es mas barato que publicar una cifra que se quedo a medias.
+        if st.st_size > TOPE_USO:
+            return None
+        d = {"in": 0, "out": 0, "cw": 0, "cr": 0, "turnos": 0, "compacta": 0,
+             "activo": 0.0, "usd": None, "_pos": 0, "_ult": None, "_ts": 0.0}
+    try:
+        with path.open("rb") as f:
+            f.seek(d["_pos"])
+            for raw in f:
+                if not raw.endswith(b"\n"):
+                    break              # la esta escribiendo ahora: se lee la proxima vez
+                d["_pos"] += len(raw)
+                # Criba por bytes antes de parsear. Sobre el transcript de 89 MB baja de
+                # 136 ms a 79 ms y no pierde nada: los falsos positivos (un `tool_result`
+                # que menciona la palabra) los descarta el parseo de abajo.
+                if (b'"usage"' not in raw and b'cost-state' not in raw
+                        and b'compact_boundary' not in raw):
+                    continue
+                try:
+                    j = json.loads(raw)
+                except Exception:
+                    continue
+                tipo = j.get("type")
+                if tipo == "system" and j.get("subtype") == "compact_boundary":
+                    # Lo que explica una barra de contexto baja en una sesion larga.
+                    d["compacta"] += 1
+                    continue
+                if tipo == "cost-state":
+                    # Lo escribe el CLI al cerrar, con SUS precios. `sereno` no calcula
+                    # dinero: lo relata. Vale el ultimo, que es el vigente.
+                    v = j.get("totalCostUSD")
+                    if isinstance(v, (int, float)):
+                        d["usd"] = float(v)
+                    continue
+                if tipo != "assistant":
+                    continue
+                m = j.get("message") or {}
+                u = m.get("usage")
+                if not isinstance(u, dict):
+                    continue
+                mid = m.get("id")
+                if mid is not None and mid == d["_ult"]:
+                    continue           # otra linea de la MISMA respuesta: ya contada
+                d["_ult"] = mid
+                d["turnos"] += 1
+                for clave, campo in _USO_CAMPOS:
+                    d[clave] += u.get(campo) or 0
+                t = _epoch(j.get("timestamp") or "")
+                if t:
+                    # Trabajo = huecos entre respuestas que no pasan de `VIVA`. Se reusa
+                    # esa constante y no un numero nuevo porque el programa YA llama "no
+                    # esta escribiendo" a un transcript quieto 90 s: dos umbrales harian
+                    # que el panel y la lista se contradijeran. El `max(0, …)` es por los
+                    # transcripts reanudados, que traen lineas copiadas fuera de orden.
+                    if d["_ts"]:
+                        d["activo"] += max(0.0, min(t - d["_ts"], VIVA))
+                    d["_ts"] = t
+    except OSError:
+        return None
+    if len(_CACHE_USO) > 200:
+        _CACHE_USO.clear()             # la clave no lleva mtime: crece sin tope
+    _CACHE_USO[str(path)] = (st.st_size, st.st_mtime, d)
+    return d
+
+
+def uso_de(r):
+    """El acumulado de la fila, o None. Mismo trato que `detalles()`: se lee SOLO para
+    quien lo mira. La lista no lo pinta y `--json` solo con `--usage`, porque cuesta el
+    transcript entero y un `--json` que alimenta una statusline se llama cada pocos
+    segundos. Una fila de otro CLI no tiene transcript y devuelve None, que no es cero."""
+    if "_uso" in r:
+        return r["_uso"]
+    t = (r.get("meta") or {}).get("_transcript")
+    r["_uso"] = _uso(t) if t else None
+    return r["_uso"]
+
+
+def _uso_texto(u):
+    """`1.4M in · 403k out · 300M cache`. Tres cifras y ninguna sumada con otra.
+
+    La entrada nueva si junta `in` y `cw`: las dos son material que entra al modelo por
+    primera vez y la diferencia entre ellas es de facturacion, no de contenido. La cache
+    LEIDA no se junta con nada: es lo mismo releido, y en una sesion de ocho horas es cien
+    veces mayor que todo lo demas junto. Las cuatro partes siguen enteras en `--json`.
+    """
+    return _("{i} in · {o} out · {c} cache",
+             i=_tok(u["in"] + u["cw"]) or "0", o=_tok(u["out"]) or "0",
+             c=_tok(u["cr"]) or "0")
+
+
+def _uso_ritmo(u):
+    """`1.6k/min · 4h working`, o "" si no hay ni un minuto de trabajo medido.
+
+    Lo que separa una sesion que lleva tres horas quemando de una abierta hace tres horas
+    y parada hace dos NO es el ritmo —medido sobre diez transcripts, va siempre entre
+    1.383 y 2.084 tokens por minuto— sino los minutos activos. Por eso van los dos y los
+    minutos mandan.
+    """
+    if u["activo"] < 60:
+        return ""
+    # `_tok()` no vale aqui, y es el unico sitio del fichero donde no vale: redondea a
+    # miles enteros, y el ritmo medido cae SIEMPRE entre 1.383 y 2.084 tokens por minuto
+    # sobre diez transcripts. Con `_tok()` las diez filas dirian "1k/min" — un dato que
+    # no distingue nada ocupa sitio y no informa. Un decimal ya las separa.
+    r = int(u["out"] / (u["activo"] / 60))
+    return _("{r}/min · {t} working",
+             r=(f"{r / 1000:.1f}k" if r >= 1000 else str(r)),
+             t=_lapso(u["activo"]))
 
 
 def first_user_text(path, minlen=25):
@@ -2640,6 +2880,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 pu_cur = rows[cur].get("pulso") or {}
                 ctx_cur = pu_cur.get("ctx")
                 tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur)
+                uso_cur = uso_de(rows[cur])
                 campos = [
                     (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")
                      else 7 if (d.get("fase") or "").startswith(("esperando", "escribiendo", "lleva")) else 4),
@@ -2651,10 +2892,19 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     # El porcentaje va con las cifras al lado: la barra de la lista
                     # dice "va justa", pero para decidir si compactar hace falta saber
                     # si el tope son 200k o un millon.
+                    # Las compactaciones van PEGADAS al porcentaje porque son lo que lo
+                    # explica: una sesion de doce horas marcando 20% no es una sesion
+                    # fresca, es una que ha tirado el contexto tres veces. Leer el numero
+                    # sin el dato de al lado lleva a la conclusion contraria.
                     (_("context"), (f"{_tok(ctx_cur)} / {_tok(tope_cur)}  "
-                                    f"{round(100 * ctx_cur / tope_cur)}%")
+                                    f"{round(100 * ctx_cur / tope_cur)}%"
+                                    + ("  \u00b7 " + _("{n} compaction(s)",
+                                                      n=uso_cur["compacta"])
+                                       if uso_cur and uso_cur["compacta"] else ""))
                      if ctx_cur else "", color_contexto(ctx_cur / tope_cur if ctx_cur else 0)),
                     (_("model"), _modelo_corto(pu_cur.get("modelo")), 4),
+                    (_("spent"), _uso_texto(uso_cur) if uso_cur else "", 8),
+                    (_("rhythm"), _uso_ritmo(uso_cur) if uso_cur else "", 4),
                     (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
                      if d.get("peso") else
                      ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
@@ -3299,6 +3549,12 @@ def _T():
         " total": " en total",
         " writing": " escribiendo",
         "(id not resolved)": "(id sin resolver)",
+        "spent": "gastado",
+        "rhythm": "ritmo",
+        "{i} in \u00b7 {o} out \u00b7 {c} cache":
+            "{i} entrada \u00b7 {o} salida \u00b7 {c} cach\u00e9",
+        "{r}/min \u00b7 {t} working": "{r}/min \u00b7 {t} trabajando",
+        "{n} compaction(s)": "{n} compactaci\u00f3n(es)",
         "(nothing matches)": "(nada coincide)",
         "All sessions": "Todas las sesiones",
         "Cancelled, nothing was closed.": "Cancelado, no se ha cerrado nada.",
@@ -3486,7 +3742,7 @@ def _T():
 _T()
 
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -3494,6 +3750,7 @@ VERSION = "1.2.1"
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
+    "--usage": 0,
     "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
@@ -3571,6 +3828,12 @@ def main():
         DEMO = True
         os.environ["SERENO_DEMO"] = "1"
         argv = [a for a in argv if a != "--demo"]
+    if "--usage" in argv:
+        # Igual que `--demo`: se toca la global en vez de encadenar el flag por seis
+        # sitios distintos. El acumulado cuesta el transcript entero y por eso se pide.
+        global USO
+        USO = True
+        argv = [a for a in argv if a != "--usage"]
     for malo in flags_desconocidos(argv):
         cerca = _parecido(malo)
         print(_("unknown option: {f}", f=malo)

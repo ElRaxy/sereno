@@ -19,6 +19,10 @@ CAMPOS = {
     "state": str, "writing": bool, "tool_pending": bool, "idle_seconds": int,
     "attached": bool, "memory_mb": int, "context_tokens": int, "context_max": int,
     "model": str, "pid": str,
+    # El acumulado. `null` sin `--usage`, que es como corre este test.
+    "input_tokens": int, "output_tokens": int, "cache_write_tokens": int,
+    "cache_read_tokens": int, "assistant_turns": int, "compactions": int,
+    "working_seconds": int, "api_cost_usd": float,
     # Con quien choca y cuanto, en cifras. Nunca la RUTA: un path de cliente
     # dice tanto como una frase de la conversacion, y esto se canaliza.
     "clash_level": int, "clash_with": str, "clash_files": int,
