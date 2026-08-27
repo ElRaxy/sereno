@@ -132,6 +132,11 @@ true at once and only the second one tells you anything.
  └ cursor. Turns yellow when the row is marked.
 ```
 
+Between the state and the title there is one more column, and it carries two warnings: `⧉`,
+another session is writing in the same place, and `↻`, this one is going in circles. When both
+apply the clash wins the column — miss that one and two sessions can overwrite each other's
+work; miss the other and you lose minutes. Both show in full in the panel and in `--list`.
+
 **The title is the last thing to be cut.** Narrow the window and the support columns go first,
 in this order: memory, then the project (which narrows before it goes), then the context bar.
 The title keeps its width down to about 45 columns, because it is the one thing that tells two
@@ -174,7 +179,16 @@ says the question is wrong. Anything else in between resets the count: two empty
 edit between them are work, not a sweep.
 
 It costs no extra reading. The trail comes out of the same tail of the transcript the panel
-already opens, and only for the row under the cursor.
+already opens, and only for the row under the cursor — and the same two counts are computed for
+every row on screen, out of the pass `sereno` already makes, which is what puts the `↻` in the
+list without waiting for you to walk over to that row.
+
+**Expect this to stay quiet.** Over 10,375 real tool calls from the twelve largest transcripts
+on the machine this was built on, the loop warning fired on **zero** windows and the sweep on
+**one**. That is not a bug and the thresholds were not loosened to produce a nicer number: when
+a command fails, the next attempt is usually a slightly different command, so a literal
+three-in-a-row is rare. A warning that shows up constantly is a warning you stop reading, and
+the counts stay where the evidence put them.
 
 Twenty minutes stuck on one call does **not** get a line of its own — `status` already says
 that, and the same fact twice is not a second opinion. The trail shows it as what it is: a

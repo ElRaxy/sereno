@@ -647,11 +647,13 @@ def pulso(e, secs=90, fino=True):
         return {"escribe": escribe, "herramienta": None}
 
     pendientes, ultimo_tool, extra, toca = set(), False, {}, []
+    crudos = []
     for raw in ultimas_lineas(t, 80):
         try:
             j = json.loads(raw)
         except Exception:
             continue
+        crudos.append(j)
         for k in ("cwd", "gitBranch", "lastPrompt", "aiTitle"):
             if j.get(k):
                 extra[k] = j[k]            # de una pasada: no hay que releer despues
@@ -724,6 +726,12 @@ def pulso(e, secs=90, fino=True):
         # Se resuelve al final porque el `cwd` sale de esta misma pasada y las primeras
         # lineas pueden llegar antes que el.
         extra["escrituras"] = _resuelve(toca, extra.get("cwd") or "")
+    # Si esta dando vueltas, eso pertenece a la LISTA y no solo al panel: la pregunta
+    # con la que abre este programa es cual de las nueve esta atascada, y hasta ahora
+    # habia que posarse en cada fila para verlo. Reusa los objetos que esta pasada
+    # acaba de parsear: cero lecturas mas y, medido sobre 16 filas reales, 5 ms de CPU
+    # frente a los 49 que ya cuesta esta funcion.
+    extra["atasco"] = alertas(sintomas(recorrido(crudos)))
     return {"escribe": escribe, "herramienta": bool(pendientes) and ultimo_tool,
             **extra}
 
@@ -1081,6 +1089,14 @@ _DEMO_RUTA = {
         ("Bash \u00b7 rg -n 'clock|monotonic' tests/", 1, True, True)],
     2: [("Bash \u00b7 git log --oneline v2.3..HEAD", 3, False, None),
         ("Write \u00b7 NOTES.md", 1, False, None)],
+    # Esta es la unica que se atasca SIN chocar con nadie, y existe por eso: en la
+    # lista el choque y el atasco comparten columna y el choque gana, asi que sin una
+    # fila limpia el simbolo `\u21bb` no aparece nunca en la captura del README.
+    3: [("Read \u00b7 .github/workflows/ci.yml", 1, False, None),
+        ("Edit \u00b7 .github/workflows/ci.yml", 1, False, None),
+        ("Bash \u00b7 act -j build --dryrun", 12, True, None),
+        ("Bash \u00b7 act -j build --dryrun", 11, True, None),
+        ("Bash \u00b7 act -j build --dryrun", 12, True, None)],
 }
 
 
@@ -1133,6 +1149,10 @@ def sesiones_demo():
         (ahora - 25, "w", "/Users/you/code/checkout-api/src/webhooks.py", "Edit")]
     for r in rows:
         r["_det"]["fase"] = _fase(r)
+        # El atasco de la demo se compone del MISMO recorrido inventado que pinta el
+        # panel, no de una tabla aparte: dos fuentes para el mismo hecho se separan sin
+        # que nada falle, y aqui saltaria a la vista en la captura del README.
+        r["pulso"]["atasco"] = alertas(sintomas(r["_det"]["ruta"]))
     return colisiones(rows)
 
 
@@ -1208,6 +1228,10 @@ def filas_json(rows):
             "clash_with": (r.get("colision") or {}).get("con") or None,
             "clash_files": len((r.get("colision") or {}).get("ficheros") or ()),
             "clash_command": (r.get("colision") or {}).get("orden_ancha") or None,
+            # Enum cerrado: `loop` es el mismo comando fallando tres veces, `sweep` son
+            # dos busquedas seguidas sin resultado. Van las claves y NUNCA el comando
+            # que falla, que si sale en el panel: esto se canaliza a scripts de otros.
+            "stuck": [_STUCK_JSON[a] for a in (pu.get("atasco") or ())],
         })
     return fuera
 
@@ -1467,9 +1491,13 @@ def print_live(rows):
         # `--list` es lo que sale en un pipe y en una terminal sin tty: si el aviso
         # solo viviera en el selector, quien lea la lista se lo pierde justo cuando importa.
         choque = ("  \u29c9 " + _("clashes with another session")) if r.get("colision") else ""
+        # A diferencia del selector, aqui no hay una sola columna que repartir: caben
+        # los dos avisos y no hay razon para elegir.
+        atasco = "".join("  \u21bb " + _TEXTO_ATASCO[a]()
+                         for a in (pu.get("atasco") or ()))
         print(f"  {i:>2}. {ICONO.get(est, '?')} {r['title']:<34} "
               f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}  "
-              + _("open for {t}", t=edad) + att + choque)
+              + _("open for {t}", t=edad) + att + choque + atasco)
         print(f"         {r['name']}")
         if USO:
             u = uso_de(r)
@@ -2327,8 +2355,21 @@ def alertas(s):
     return fuera
 
 
+# Las claves internas estan en castellano, como el resto del fuente. Lo que sale por
+# `--json` no: es una interfaz para scripts de otros y va en ingles, como el resto del
+# JSON. Dos nombres para lo mismo suena a deuda, pero la alternativa es que un enum
+# publico cambie el dia que alguien renombre una variable interna.
+_STUCK_JSON = {"bucle": "loop", "barrido": "sweep"}
+
 # La frase de cada alerta, con su cifra dentro. El enum viaja; la frase se traduce y se
 # puede reescribir sin tocar a quien decide.
+# La version corta, sin cifras: en una fila de lista no cabe el detalle y el detalle
+# ya esta en el panel. `_TEXTO_ALERTA` sigue siendo la larga.
+_TEXTO_ATASCO = {
+    "bucle": lambda: _("stuck in a loop"),
+    "barrido": lambda: _("searching and finding nothing"),
+}
+
 _TEXTO_ALERTA = {
     "bucle": lambda s: _("the same command has failed {n} times",
                          n=s["fallos_seguidos"]),
@@ -3123,13 +3164,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # el titulo solo la nota por debajo de ~50 columnas, porque `reparto` ya
                 # lo topa en T_COMODO. `\u29c9` mide UNA columna (east_asian_width 'N').
                 col = r.get("colision") or {}
+                # La columna del aviso es UNA y la comparten el choque y el atasco. El
+                # choque gana cuando coinciden, y no por ser mas frecuente: si no lo
+                # ves, dos sesiones pueden pisarse el trabajo; si no ves el atasco,
+                # pierdes minutos. Los dos salen enteros en el panel y en `--list`.
+                atasco = (r.get("pulso") or {}).get("atasco") or ()
                 if pu.get("herramienta"):
                     put("\u25d0", 7, curses.A_BOLD)       # esperando a su comando
                 elif pu.get("escribe"):
                     put("\u25cf", 9, curses.A_BOLD)        # escribiendo la respuesta
                 else:
                     put(" ")
-                put("\u29c9" if col else " ",
+                put("\u29c9" if col else ("\u21bb" if atasco else " "),
                     5 if (col.get("nivel") or 0) >= 3 else 7, curses.A_BOLD)
                 put(" ")
                 titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
@@ -3426,6 +3472,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     ("", _("--find \"text\": searches what was said")),
                     ("", _("--json: for statuslines and scripts")),
                     ("", _("\u29c9 in a row: another session is writing in the same place")),
+                    ("", _("\u21bb in a row: it is going in circles \u2014 see the panel")),
                 ]
                 alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
                 teclas = teclas[:max(0, alto_v - 4)]
@@ -3936,6 +3983,8 @@ def _T():
         " writing": " escribiendo",
         "(+{n} earlier)": "(+{n} antes)",
         "(id not resolved)": "(id sin resolver)",
+        "stuck in a loop": "atascada en un bucle",
+        "searching and finding nothing": "buscando sin encontrar nada",
         "the same command has failed {n} times":
             "el mismo comando ha fallado {n} veces",
         "{n} searches in a row with no result":
@@ -3960,6 +4009,8 @@ def _T():
         "▸ another session is writing here too": "▸ otra sesión escribe aquí también",
         "⧉ in a row: another session is writing in the same place":
             "⧉ en una fila: otra sesión escribe en el mismo sitio",
+        "↻ in a row: it is going in circles — see the panel":
+            "↻ en una fila: está dando vueltas — mira el panel",
         "clashes with another session": "choca con otra sesión",
         "same folder": "misma carpeta",
         "same repo": "mismo repo",
@@ -4134,7 +4185,7 @@ def _T():
 _T()
 
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

@@ -27,6 +27,8 @@ CAMPOS = {
     # dice tanto como una frase de la conversacion, y esto se canaliza.
     "clash_level": int, "clash_with": str, "clash_files": int,
     "clash_command": str,
+    # Enum cerrado y en ingles. Nunca el comando que se atasca, que si sale en el panel.
+    "stuck": list,
 }
 ESTADOS = {"writing", "in_command", "waiting", "stopped", "unknown"}
 

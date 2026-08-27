@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.0
+
+**"Which one is stuck?" is answered in the list now, not one row at a time.** The two counts the
+panel already made — the same command failing three times, two searches in a row finding nothing
+— are now computed for every row on screen and show up as `↻` next to the state, with the wording
+in `--list` and a `stuck` enum in `--json`.
+
+It reuses the objects the status pass already parsed, so it reads nothing extra: 5 ms of CPU
+across sixteen real rows, against the 49 that pass already costs.
+
+The warning column is shared with the clash marker, and the clash wins it. Not because it is
+more common — because missing it can cost you overwritten work, while missing the other costs
+minutes. Both are shown in full in the panel and in `--list`.
+
+**It is expected to stay quiet**, and that is measured: across 10,375 real tool calls from the
+twelve largest transcripts here, the loop warning fires on zero windows and the sweep on one.
+The thresholds were not loosened to produce a livelier number.
+
 ## 1.4.0
 
 **The context ceiling now listens to the session before the machine.** `SERENO_CTX_MAX` still

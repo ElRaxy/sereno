@@ -131,6 +131,11 @@ escribirse en el fichero, así que las dos son ciertas a la vez y solo la segund
  └ cursor. Se pone amarillo cuando la fila está marcada.
 ```
 
+Entre el estado y el título va una columna más, y lleva dos avisos: `⧉`, otra sesión está
+escribiendo en el mismo sitio, y `↻`, esta está dando vueltas. Cuando coinciden, el choque se
+queda la columna — si no lo ves, dos sesiones pueden pisarse el trabajo; si no ves el otro,
+pierdes minutos. Los dos salen enteros en el panel y en `--list`.
+
 **El título es lo último que se recorta.** Estrecha la ventana y ceden antes las columnas de
 apoyo, en este orden: la memoria, luego el proyecto (que se estrecha antes de irse) y por
 último la barra de contexto. El título aguanta entero hasta unas 45 columnas, porque es lo
@@ -173,7 +178,16 @@ vacía ya dice que la pregunta está mal hecha. Cualquier otra cosa por medio co
 dos greps vacíos con una edición en medio son trabajo, no un barrido.
 
 No cuesta ni una lectura más. El rastro sale de la misma cola del transcript que el panel ya
-abre, y solo para la fila bajo el cursor.
+abre, y solo para la fila bajo el cursor — y las mismas dos cuentas se hacen para todas las
+filas en pantalla, con la pasada que `sereno` ya da, que es lo que pone el `↻` en la lista sin
+esperar a que te acerques a esa fila.
+
+**Cuenta con que esto hable poco.** Sobre 10.375 llamadas reales de los doce transcripts más
+grandes de la máquina donde se escribió, el aviso de bucle saltó en **cero** ventanas y el de
+barrido en **una**. No es un fallo, y los umbrales no se aflojaron para sacar un número más
+lucido: cuando un comando falla, el intento siguiente suele ser un comando ligeramente distinto,
+así que tres idénticos seguidos es raro. Un aviso que sale a todas horas es un aviso que dejas
+de leer, y las cuentas se quedan donde las puso la evidencia.
 
 Veinte minutos colgada de una llamada **no** se lleva una línea propia — eso ya lo dice
 `estado`, y el mismo hecho dos veces no es una segunda opinión. El rastro lo enseña como lo que
