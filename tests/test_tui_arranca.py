@@ -15,7 +15,10 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ESPERADO = ("claude", "open", "writing")              # trozos de la interfaz en ingles
 # Ancha (con panel de detalle) y estrecha (sin el). La estrecha es la que importa: es
 # donde `ancho_lista` se salia de la pantalla y curses abortaba el programa entero.
-TAMANOS = ((30, 150), (18, 62), (12, 40))
+# La de 112 columnas no es decorativa: es donde el panel lateral existe pero es
+# estrecho, y el recorrido se pinta con el resumen recortado. Ni la ancha ni las dos
+# estrechas pasan por esa rama.
+TAMANOS = ((30, 150), (24, 112), (18, 62), (12, 40))
 
 
 def main():

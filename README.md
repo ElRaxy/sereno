@@ -190,21 +190,28 @@ The **ceiling** is the one thing Claude Code does not write down. A session runn
 one-million window still records itself as `claude-opus-5`, exactly like a 200k one. So sereno
 works it out in this order, and stops at the first that answers:
 
-1. `SERENO_CTX_MAX`, if you set it.
-2. The `model` in your `~/.claude/settings.json` — where the suffix actually lives today.
-3. A `[1m]` suffix on the model in the transcript.
-4. The `cost-state` line the CLI writes when it closes. Its `modelUsage` is keyed by
-   `claude-opus-5[1m]`, **with** the suffix — the only thing here that speaks about *this*
-   session rather than the whole machine. It is rare (15 of 517 transcripts here) but not
-   arguable, and it lands inside the tail sereno already reads.
-5. The context already seen. A session holding 560k is not on a 200k ceiling.
+1. `SERENO_CTX_MAX`, if you set it. You said it, it stands.
+2. **What this session says.** First the `cost-state` line the CLI writes when it closes — its
+   `modelUsage` is keyed by `claude-opus-5[1m]`, suffix included — and failing that, a `[1m]`
+   suffix on the model in the transcript.
+3. The `model` in your `~/.claude/settings.json`. That is the *machine*, not the session.
+4. Otherwise, the standard window.
+5. On top of all of 2–4, a guard: the ceiling can never end up below the context already seen.
+   A session holding 560k is not on a 200k ceiling whoever says otherwise.
 
 Rule 5 is what keeps the bar honest: the percentage can never read above 100%, and there is a
 test that fails if it ever does.
 
-Rule 4 only ever raises the ceiling. A `cost-state` without the suffix is evidence the session
-is *not* on the big window, but it would arrive after rule 2 has already answered with your
-global config — fixing that means reordering the whole cascade, which is a separate decision.
+**2 comes before 3, and it goes both ways.** Your global config is the weak one — a session
+launched with a different `--model` does not obey it — so the one fact that describes *this*
+session overrules it, raising the ceiling **and** lowering it. Before this order, a 200k session
+on a machine configured for the big window was drawn against a million: 6% where 30% was due.
+
+The lowering direction rests on a case not seen on the machine this was written on: of the 15
+transcripts carrying `cost-state`, the 11 that name a main model name it with the suffix, and
+the other four carry an empty `modelUsage`. Rule 5 bounds what can go wrong — dropping below
+what has already been spent is impossible. The Haiku the CLI uses for titles is ignored when
+reading that line, or a throwaway conversation would talk the ceiling down on its own.
 
 ---
 

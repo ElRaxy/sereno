@@ -675,9 +675,17 @@ def pulso(e, secs=90, fino=True):
         # `tope_contexto()`.
         if j.get("type") == "cost-state":
             uso_modelo = j.get("modelUsage")
-            if isinstance(uso_modelo, dict) and uso_modelo:
-                extra["ventana_1m"] = any("[1m]" in str(k).lower()
-                                          for k in uso_modelo)
+            if isinstance(uso_modelo, dict):
+                # El Haiku de los titulos y los resumenes internos aparece aqui aunque
+                # la sesion corra en Opus: en 8 de los 11 transcripts de esta maquina
+                # que traen la linea, va de acompanante. Contarlo como modelo de la
+                # sesion haria que una conversacion trivial —solo Haiku— bajase el tope
+                # a 200k por su cuenta. Si al quitarlo no queda ninguna clave, el hecho
+                # no se publica: `None` es "no se midio", que no es "no es de un millon".
+                # Y `modelUsage` vacio existe de verdad: 4 de los 15.
+                reales = [k for k in uso_modelo if "haiku" not in str(k).lower()]
+                if reales:
+                    extra["ventana_1m"] = any("[1m]" in str(k).lower() for k in reales)
             continue
         if j.get("isSidechain"):
             continue
@@ -2431,34 +2439,45 @@ def _mb(x):
 # deduce por una cascada de hechos, en este orden, y el ultimo corrige a los demas:
 #
 #   1. `SERENO_CTX_MAX`, si el usuario lo fija a mano. Manda sobre todo lo demas.
-#   2. El `model` de `~/.claude/settings.json`, que es donde vive hoy (`"opus[1m]"`).
-#   3. El sufijo `[1m]` en el modelo del propio transcript, por si algun dia llega.
-#   4. La linea `cost-state` que el CLI escribe al cerrar: su `modelUsage` va indexado
-#      por `claude-opus-5[1m]`, CON el sufijo. Es lo unico de aqui que habla de ESTA
-#      sesion y no de la maquina entera. Aparece poco —15 de 517 transcripts— pero
-#      cuando aparece no se discute, y cae dentro de las 80 lineas que `pulso()` ya lee.
-#   5. El contexto YA observado: si la sesion lleva 560k, el tope no es 200k. Esto es
-#      lo que impide pintar un 207%, que es lo que salia con la regla 3 sola.
+#   2. Lo que dice ESTA sesion, y en este orden: la linea `cost-state` que el CLI
+#      escribe al cerrar —su `modelUsage` va indexado por `claude-opus-5[1m]`, CON el
+#      sufijo— y, si no la hay, el sufijo en el `message.model` del propio transcript.
+#   3. El `model` de `~/.claude/settings.json`. Es de la MAQUINA, no de la sesion.
+#   4. Nada de lo anterior: la ventana estandar.
+#   5. Y por encima de todo lo de 2-4, una guarda: el tope nunca puede quedar por
+#      debajo del contexto YA observado. Si la sesion lleva 560k dentro, su tope no es
+#      200k lo diga quien lo diga. Es lo que impide pintar un 207%.
 #
-# La 2 es la floja: es config global y una sesion lanzada con otro `--model` no la
-# cumple. Por eso existe la 1, y por eso la 5 va detras y no delante.
+# El orden 2 antes que 3 es el que importa y cambio el 2026-08-27: la config global es
+# la floja —una sesion lanzada con otro `--model` no la cumple— y mientras iba delante,
+# un `cost-state` sin sufijo no podia corregirla. Ahora si: el unico hecho que habla de
+# la sesion manda sobre el que habla de la maquina, en los DOS sentidos.
 #
-# Lo que la 4 NO hace: bajar de un millon a 200k. Una `cost-state` sin sufijo es
-# evidencia de que la sesion no corre en la ventana grande, pero llegaria DESPUES de la
-# 2, que ya habra respondido con la config global. Corregir eso exige reordenar la
-# cascada entera y es otra decision, no un efecto secundario de esta.
+# El sentido que baja se apoya en un caso que NO se ha observado en esta maquina: de los
+# 15 transcripts con `cost-state`, los 11 que nombran un modelo principal lo nombran con
+# sufijo, y los otros 4 traen `modelUsage` vacio. La guarda 5 acota lo que puede salir
+# mal: bajar por debajo de lo ya gastado es imposible.
 CTX_1M = 1_000_000
 CTX_STD = 200_000
 
 
-def _ctx_max_config():
-    """El tope que dicta la configuracion, o None. Se lee una vez por proceso."""
-    if "_v" not in _ctx_max_config.__dict__:
-        v = None
+def _ctx_max_env():
+    """El tope que el usuario fija a mano en `SERENO_CTX_MAX`, o None."""
+    if "_v" not in _ctx_max_env.__dict__:
         forzado = _env("CTX_MAX")
-        if forzado.isdigit():
-            v = int(forzado)
-        elif not DEMO:
+        _ctx_max_env._v = int(forzado) if forzado.isdigit() else None
+    return _ctx_max_env._v
+
+
+def _ctx_max_config():
+    """El tope que dicta la configuracion de la MAQUINA, o None. Una vez por proceso.
+
+    Sigue existiendo como funcion aparte porque su sitio en la cascada es lo que se
+    discute: es config global, y una sesion lanzada con otro `--model` no la cumple.
+    """
+    if "_v" not in _ctx_max_config.__dict__:
+        v = _ctx_max_env()
+        if v is None and not DEMO:
             try:
                 cfg = json.loads((HOME / ".claude/settings.json").read_text("utf-8"))
                 if "[1m]" in str(cfg.get("model", "")).lower():
@@ -2470,16 +2489,21 @@ def _ctx_max_config():
 
 
 def tope_contexto(modelo, ctx=0, ventana_1m=None):
-    forzado = _ctx_max_config()
+    forzado = _ctx_max_env()
     if forzado:
-        return forzado
-    if "[1m]" in (modelo or "").lower():
-        return CTX_1M
-    # `None` es "no lo escribio", que no es lo mismo que `False`, y por eso se compara
-    # con `is True`: un dato ausente no decide nada y cae a la regla de abajo.
-    if ventana_1m is True:
-        return CTX_1M
-    return CTX_1M if (ctx or 0) > CTX_STD else CTX_STD
+        return forzado                    # lo pusiste tu: no se discute
+    # Lo que dice ESTA sesion, en los dos sentidos. `None` es "no se midio" y no decide
+    # nada; `False` si decide, y es lo que permite bajar de un millon a la estandar.
+    if ventana_1m is not None:
+        tope = CTX_1M if ventana_1m else CTX_STD
+    elif "[1m]" in (modelo or "").lower():
+        tope = CTX_1M
+    else:
+        tope = _ctx_max_config() or CTX_STD        # la maquina, que es la floja
+    # Y la guarda, que corrige a todas: una sesion con 560k dentro no tiene un tope de
+    # 200k lo diga quien lo diga. Sin esto, dejar que `cost-state` baje el tope podria
+    # pintar un 280%.
+    return CTX_1M if (ctx or 0) > tope else tope
 
 
 def _tok(n):
@@ -4110,7 +4134,7 @@ def _T():
 _T()
 
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

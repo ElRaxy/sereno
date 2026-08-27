@@ -45,6 +45,35 @@ def main():
     igual("cost-state sin sufijo no baja lo observado",
           tope("claude-opus-5", 560_080, False), CTX_1M)
 
+    # ── el orden entre la sesion y la maquina (reordenado el 2026-08-27) ────────
+    # Con la config global diciendo un millon, una sesion que el CLI apunto SIN sufijo
+    # tiene que poder bajar a la estandar: la config es de la maquina, el `cost-state`
+    # es de esta sesion. Mientras la config iba delante, esto era imposible y la barra
+    # de una sesion de 200k se pintaba sobre un millon — un 6% donde tocaba un 30%.
+    ns["_ctx_max_config"].__dict__["_v"] = CTX_1M       # como un settings.json con [1m]
+    try:
+        igual("la sesion baja lo que dice la maquina",
+              tope("claude-opus-5", 60_000, False), CTX_STD)
+        igual("y lo sube igual", tope("claude-opus-5", 60_000, True), CTX_1M)
+        igual("sin dato de la sesion, manda la maquina",
+              tope("claude-opus-5", 60_000, None), CTX_1M)
+        igual("el sufijo del transcript tambien es de la sesion",
+              tope("claude-opus-5[1m]", 60_000, None), CTX_1M)
+        # Pero la guarda gana a todo lo que no sea el usuario: 400k dentro no caben en
+        # 200k, diga lo que diga el `cost-state`.
+        igual("la guarda corrige a la sesion",
+              tope("claude-opus-5", 400_000, False), CTX_1M)
+    finally:
+        ns["_ctx_max_config"].__dict__["_v"] = None
+
+    # Y `SERENO_CTX_MAX` sigue mandando sobre las dos, tambien hacia abajo.
+    ns["_ctx_max_env"].__dict__["_v"] = 300_000
+    try:
+        igual("lo que fija el usuario no se discute",
+              tope("claude-opus-5[1m]", 60_000, True), 300_000)
+    finally:
+        ns["_ctx_max_env"].__dict__["_v"] = None
+
     # La propiedad que de verdad importa, sobre todo el rango: pase lo que pase, la
     # barra no puede pasar del 100%. Si algun dia se anade un tope intermedio, esto
     # sigue vigilando el invariante sin tener que reescribir los casos de arriba.
