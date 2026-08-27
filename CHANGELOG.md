@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.12.0
+
+**Sessions that never got a reply stop competing for the top of the list.**
+
+On the machine this was written on, **21 of the 39 history rows** were sessions that had never
+received a single reply — and 16 of those were the same one, launched over and over and dying
+instantly with `API Error: 401 · Please run /login`, zero tokens each. Because they had just died,
+they were the *most recent* rows, so the default sort put them first. More than half of a list whose
+whole job is "which one do I go back to" was sessions you cannot go back to.
+
+They now sort below everything, in grey, and the header counts them separately: `3 resumable ·
+1 never started` instead of `4 resumable`. Resuming one hands you its startup error and nothing else,
+so counting it as resumable was a claim the tool could not keep.
+
+The fact is deliberately narrow: **no reply anywhere in the session consumed a token**. `pico` is the
+largest context the session ever held, so a zero can only come from zero real replies — and it is
+only read once the transcript has been read whole, because a partial zero means "not known yet".
+
+**A live session is never marked**, even at zero. One you just launched has not answered yet and is
+exactly the row you want at the top; there was one 23 seconds old when this was measured.
+
 ## 1.11.0
 
 **The context bar remembers where the session has been.**

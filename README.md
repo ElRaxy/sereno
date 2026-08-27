@@ -194,6 +194,23 @@ Twenty minutes stuck on one call does **not** get a line of its own — `status`
 that, and the same fact twice is not a second opinion. The trail shows it as what it is: a
 glyph and a clock.
 
+### Sessions that never started
+
+A session whose replies never consumed a single token never got an answer, and resuming it hands you
+its startup error and nothing else. Those sort below everything, print in grey, and are counted
+apart in the header — `3 resumable · 1 never started`, not `4 resumable`.
+
+It is worth the special case. On the machine this was written on, 21 of 39 history rows were like
+that, 16 of them the same session relaunched in a loop and dying on `API Error: 401 · Please run
+/login`. Having just died, they were the newest rows, so the default sort put them at the top of a
+list whose entire purpose is telling you which session to go back to.
+
+Two guards, both because a zero is not always a zero:
+
+- Only once the transcript has been read whole. Half-read, zero means *not known yet*.
+- **Never a live session.** One you just launched has not answered yet, and it is the row you most
+  want to see.
+
 ### About that context bar
 
 It answers the question you currently answer by opening the session: *can this one take
