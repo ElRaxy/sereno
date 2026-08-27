@@ -788,7 +788,7 @@ Issues y pull requests bienvenidos, en castellano o en inglés. Antes de abrir u
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-Son veintidós, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
+Son veintitrés, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
 algo que falla **en silencio**, que es justo por lo que existen:
 
 - **`test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco de

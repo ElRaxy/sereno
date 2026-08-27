@@ -32,9 +32,15 @@ git show "${SHA}:sereno" > "$TMP/sereno"
 chmod +x "$TMP/sereno"
 
 # ── guardas: hechos, y el veredicto compuesto encima ────────────────────────────
+# El `|| true` NO es de adorno. Con `set -euo pipefail`, si lo extraido no es un
+# programa de python la tuberia devuelve el fallo de python3, la asignacion falla y el
+# script muere AHI: aborta —que es lo correcto— pero sin imprimir una sola linea, asi
+# que quien lo lanza no sabe por que. Es justo el caso que estas guardas existen para
+# explicar. Se vio escribiendo `tests/test_release_guardas.py`, no antes: la primera
+# comprobacion uso un fichero valido, y con uno valido python3 no falla.
 primera="$(head -1 "$TMP/sereno")"
-declarada="$(python3 "$TMP/sereno" --version 2>/dev/null | awk '{print $2}')"
 bytes="$(wc -c < "$TMP/sereno" | tr -d ' ')"
+declarada="$(python3 "$TMP/sereno" --version 2>/dev/null | awk '{print $2}' || true)"
 echo "extraido: ${bytes}B · primera linea: ${primera} · dice ser: ${declarada:-<nada>}"
 
 [ "$primera" = "#!/usr/bin/env python3" ] || {
