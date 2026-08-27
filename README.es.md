@@ -144,6 +144,41 @@ El panel de la derecha enseña **el último prompt y la última respuesta** de e
 que puedas decidir si volver a ella sin abrirla — y además las cifras exactas de contexto
 (`176k / 200k`) y el modelo.
 
+### Lo que ha estado haciendo
+
+El panel dice lo último que hizo una sesión. Lo que no dice es el **camino**, que es donde se
+ve si avanza o da vueltas. Debajo del prompt y de la respuesta va un rastro corto de las
+últimas llamadas a herramienta, cada una con lo que tardó y cómo acabó:
+
+```
+▸ lo que ha estado haciendo  (+4 antes)
+  ! el mismo comando ha fallado 3 veces
+  ·    2s  Read · tests/webhooks/test_retry.py
+  ·    1s  Edit · src/webhooks/handler.py
+  ✗   34s  Bash · pytest tests/webhooks -x -q
+  ✗   31s  Bash · pytest tests/webhooks -x -q
+  ✗   33s  Bash · pytest tests/webhooks -x -q
+  ◐   12m  Bash · pytest tests/webhooks -x -q
+```
+
+`·` hecha · `✗` volvió con error · `∅` una búsqueda que no encontró nada · `◐` todavía
+corriendo, con el reloj andando.
+
+Las dos líneas que empiezan por `!` son los únicos juicios de la pantalla, y ninguno es una
+corazonada: se cuentan, no se intuyen. **El mismo comando fallando tres veces seguidas** es
+donde para una persona, y tres es además el presupuesto de reintentos que este proyecto ya usa
+en todo lo demás. **Dos búsquedas seguidas que no encuentran nada** es el otro, y es dos y no
+tres a propósito: un reintento fallido puede ser un flake, pero una segunda búsqueda que vuelve
+vacía ya dice que la pregunta está mal hecha. Cualquier otra cosa por medio corta la cuenta:
+dos greps vacíos con una edición en medio son trabajo, no un barrido.
+
+No cuesta ni una lectura más. El rastro sale de la misma cola del transcript que el panel ya
+abre, y solo para la fila bajo el cursor.
+
+Veinte minutos colgada de una llamada **no** se lleva una línea propia — eso ya lo dice
+`estado`, y el mismo hecho dos veces no es una segunda opinión. El rastro lo enseña como lo que
+es: un glifo y un reloj.
+
 ### Sobre la barra de contexto
 
 Contesta lo que hoy contestas abriendo la sesión: *¿le cabe otra tarea, o toca compactar?* El
@@ -657,6 +692,10 @@ algo que falla **en silencio**, que es justo por lo que existen:
 - **`test_json_sin_conversacion.py`** — `--json` no lleva dentro ni prompt ni respuesta.
 - **`test_uso.py`** — tres líneas de la misma respuesta cuentan una vez, la caché leída no se
   suma nunca con la entrada, y leer solo lo nuevo da exactamente lo que leerlo entero.
+- **`test_recorrido.py`** — un bucle son tres fallos del *mismo* comando, un barrido son dos
+  búsquedas vacías seguidas, y lo que no se pudo observar nunca cuenta como éxito.
+- **`test_panel_geometria.py`** — el terminal se sustituye por un doble que apunta cada
+  escritura, así ninguna celda se pinta dos veces ni nada se sale del marco.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,
   los flags desconocidos diciéndose, y una sesión reanudada seguida hasta el fichero que escribe.
 

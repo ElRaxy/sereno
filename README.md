@@ -145,6 +145,41 @@ The panel on the right shows that session's **last prompt and last reply**, so y
 whether to go back to it without opening it — plus the exact context figures (`176k / 200k`)
 and the model.
 
+### What it has been doing
+
+The panel says what a session did last. What it does not say is the **path**, which is where
+you see whether it is getting anywhere or going in circles. Under the prompt and the reply
+there is a short trail of the last tool calls, each with how long it took and how it ended:
+
+```
+▸ what it has been doing  (+4 earlier)
+  ! the same command has failed 3 times
+  ·    2s  Read · tests/webhooks/test_retry.py
+  ·    1s  Edit · src/webhooks/handler.py
+  ✗   34s  Bash · pytest tests/webhooks -x -q
+  ✗   31s  Bash · pytest tests/webhooks -x -q
+  ✗   33s  Bash · pytest tests/webhooks -x -q
+  ◐   12m  Bash · pytest tests/webhooks -x -q
+```
+
+`·` done · `✗` came back an error · `∅` a search that found nothing · `◐` still running, with
+the clock ticking.
+
+The two lines that start with `!` are the only judgements on the page, and neither is a guess:
+they are counted, not sensed. **The same command failing three times in a row** is where a
+person stops and looks; three is also the retry budget this project already uses everywhere
+else. **Two searches in a row that find nothing** is the other one, and it is two and not three
+on purpose — one failed retry can be a flake, but a second search that comes back empty already
+says the question is wrong. Anything else in between resets the count: two empty greps with an
+edit between them are work, not a sweep.
+
+It costs no extra reading. The trail comes out of the same tail of the transcript the panel
+already opens, and only for the row under the cursor.
+
+Twenty minutes stuck on one call does **not** get a line of its own — `status` already says
+that, and the same fact twice is not a second opinion. The trail shows it as what it is: a
+glyph and a clock.
+
 ### About that context bar
 
 It answers the question you currently answer by opening the session: *can this one take
@@ -659,6 +694,10 @@ Most guard against something that fails **silently**, which is why they exist at
 - **`test_json_sin_conversacion.py`** — `--json` carries no prompt and no reply.
 - **`test_uso.py`** — three lines of the same reply count once, cache read never joins the
   input, and reading only what is new gives exactly what reading the whole file gives.
+- **`test_recorrido.py`** — a loop is three failures of the *same* command, a sweep is two
+  empty searches in a row, and nothing unobserved ever counts as success.
+- **`test_panel_geometria.py`** — the terminal is replaced by a stand-in that records every
+  write, so no cell gets painted twice and nothing spills out of the frame.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
   unknown flags being reported, and a resumed session being followed to its live transcript.
 

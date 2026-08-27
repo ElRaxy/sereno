@@ -1043,6 +1043,40 @@ _DEMO_USO = (
 )
 
 
+# El recorrido de la demo. (resumen, segundos, error, vacio_si_es_busqueda).
+# La primera sesion ensena el caso que esto existe para cazar —el mismo comando fallando
+# tres veces y un cuarto intento corriendo— y la segunda, el barrido sin resultados.
+_DEMO_RUTA = {
+    0: [("Read \u00b7 tests/webhooks/test_retry.py", 2, False, None),
+        ("Edit \u00b7 src/webhooks/handler.py", 1, False, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", 34, True, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", 31, True, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", 33, True, None),
+        ("Bash \u00b7 pytest tests/webhooks -x -q", None, False, None)],
+    1: [("Read \u00b7 tests/test_login.py", 2, False, None),
+        ("Edit \u00b7 tests/test_login.py", 1, False, None),
+        ("Bash \u00b7 rg -n freeze_time tests/", 1, True, True),
+        ("Bash \u00b7 rg -n 'clock|monotonic' tests/", 1, True, True)],
+    2: [("Bash \u00b7 git log --oneline v2.3..HEAD", 3, False, None),
+        ("Write \u00b7 NOTES.md", 1, False, None)],
+}
+
+
+def _ruta_demo(i):
+    """Eventos inventados con la MISMA forma que los de verdad: si el modelo de datos
+    cambia, la demo deja de cuadrar y el test lo dice."""
+    ahora, pasos = time.time(), _DEMO_RUTA.get(i, [])
+    fuera = []
+    for k, (res, dur, err, vacio) in enumerate(pasos):
+        fuera.append({"nom": res.split(" ")[0], "res": res,
+                      "t0": ahora - 60 * (len(pasos) - k),
+                      "dur": None if dur is None else float(dur),
+                      "pend": dur is None, "err": err, "cod": 1 if err else 0,
+                      "bytes": 0 if (err or vacio) else 400,
+                      "busca": vacio is not None, "vacio": vacio})
+    return fuera
+
+
 def sesiones_demo():
     rows = []
     for i, (tit, proy, rama, idle, mb, esc, tool, pr, resp, cmd, fu) in enumerate(_DEMO):
@@ -1062,6 +1096,7 @@ def sesiones_demo():
             # `_det` precocinado: `detalles()` lo respeta y no abre ningun transcript.
             "_det": {"fase": None, "peso": (3 + i * 7) * 1024 * 1024,
                      "lastPrompt": pr, "resp": resp, "tool": cmd or None,
+                     "ruta": _ruta_demo(i),
                      "gitBranch": rama, "cwd": f"/Users/you/code/{proy}"},
         })
     # Dos de las falsas chocan a proposito: es el caso que el detector existe para
@@ -2088,6 +2123,234 @@ def _resume_tool(b):
     return f"{nom} \u00b7 {_clean(v)}" if v else nom
 
 
+# ────────────────────── el recorrido de una sesion ──────────────────────
+# El panel dice lo ULTIMO que hizo la sesion. Lo que no dice es el camino, que es
+# donde se ve si avanza o da vueltas: el mismo comando fallando tres veces, un barrido
+# de greps que no encuentra nada, una llamada que lleva veinte minutos. Todo eso sale
+# de la MISMA cola que `detalles()` ya abre, sin leer un byte de mas.
+#
+# La frontera: aqui abajo solo se CONSTATA —cuanto duro, si vino marcado como error,
+# cuantos caracteres devolvio—. El veredicto lo compone `alertas()` con esos numeros.
+# Un hecho que hay que explicar es un hecho mal elegido.
+
+MAX_EVENTOS = 12          # los que se guardan por sesion
+RUTA_VISIBLE = 6          # los que se pintan; el resto se cuenta, no se dibuja
+RUTA_FIJO = 10            # columnas del glifo + la duracion + sus blancos
+
+# Tres intentos identicos fallidos es donde para una persona, y es el mismo numero que
+# el presupuesto de rechazos del revisor: reintentar UNA vez es trabajo normal.
+UMBRAL_BUCLE = 3
+# El barrido va con dos y no con tres a proposito: un reintento fallido puede ser un
+# flake, pero una segunda busqueda que no encuentra nada ya dice que la hipotesis esta
+# mal planteada. Y ademas no cuesta nada: buscar es barato, seguir barriendo no.
+UMBRAL_BARRIDO = 2
+
+# Herramientas cuyo trabajo es buscar: que no encuentren nada es informacion. Que un
+# Read devuelva poco, no lo es.
+_BUSCAN = ("Grep", "Glob", "WebSearch", "ToolSearch")
+# Y los que llegan dentro de un Bash, que en la practica son la via habitual: medido
+# sobre los 12 transcripts mas recientes de esta maquina, 2.788 llamadas a Bash y cero
+# a Grep. Mirar solo el nombre de la herramienta dejaria el barrido invisible.
+_BUSCAN_SH = ("grep", "egrep", "fgrep", "rg", "ag", "ack", "find", "fd", "locate")
+_CODIGO = re.compile(r"^Exit code (\d+)\s*\n?")
+# Lo que deja un comando que no devolvio nada. El primero esta medido en los
+# transcripts de esta maquina; los otros dos son los de Grep/Glob y NO se han podido
+# verificar aqui (cero llamadas a esas dos herramientas en los 120 ultimos
+# transcripts), asi que van de refuerzo: quien sostiene la deteccion es el cuerpo de
+# cero caracteres, que es lo que deja un grep sin aciertos.
+_SIN_NADA = ("(bash completed with no output)", "no files found", "no matches found")
+
+
+def _cabeza_sh(cmd):
+    """El programa que de verdad se ejecuta en un Bash.
+
+    Sin esto `sudo rg foo` figura como `sudo`, `LC_ALL=C grep x` como una asignacion y
+    `git grep -l x` como `git`: los tres son busquedas y los tres se perderian.
+    """
+    for palabra in cmd.split()[:5]:          # 5 tokens sobran: el comando esta ahi
+        nombre = palabra.rsplit("/", 1)[-1]
+        if "=" in palabra or nombre in ("sudo", "command", "time", "nice", "env", "git"):
+            continue
+        return nombre
+    return ""
+
+
+def _texto_resultado(b):
+    """(cuerpo, codigo_de_salida) de un bloque tool_result.
+
+    El `content` llega como cadena o como lista de trozos, y cuando viene de un Bash
+    empieza por `Exit code N`. Ese prefijo se separa en vez de contarlo como cuerpo: si
+    no, un `grep` que no encuentra nada devolveria once caracteres en vez de cero y
+    pareceria que si encontro algo.
+    """
+    c = b.get("content")
+    if isinstance(c, list):
+        c = "".join(x.get("text") or "" for x in c if isinstance(x, dict))
+    texto = c if isinstance(c, str) else ""
+    m = _CODIGO.match(texto)
+    if not m:
+        return texto.strip(), None
+    return texto[m.end():].strip(), int(m.group(1))
+
+
+def _evento(bloque, t0):
+    """Un evento recien nacido: lo que se sabe con solo ver el `tool_use`."""
+    nom = bloque.get("name") or "?"
+    ent = bloque.get("input") if isinstance(bloque.get("input"), dict) else {}
+    cmd = ent.get("command") if isinstance(ent.get("command"), str) else ""
+    return {"nom": nom, "res": _resume_tool(bloque), "t0": t0, "dur": None,
+            "pend": True, "err": False, "cod": None, "bytes": 0,
+            "busca": nom in _BUSCAN or _cabeza_sh(cmd) in _BUSCAN_SH, "vacio": None}
+
+
+def recorrido(lineas, tope=MAX_EVENTOS):
+    """Las ultimas llamadas a herramienta, en orden, con lo medible de cada una.
+
+    `lineas` son los objetos YA parseados de la cola del transcript: se pasa lo parseado
+    y no el fichero para que esto no vuelva a abrirlo ni a decodificarlo.
+
+    El emparejamiento es el MISMO que usa `pulso()` para saber si hay una llamada
+    colgando: el `id` de un `tool_use` en un mensaje `assistant` y el `tool_use_id` de
+    un `tool_result` en el `user` siguiente, con los `isSidechain` fuera porque son
+    subagentes. Alli basta un conjunto y por eso alli sigue siendo un conjunto; aqui
+    hace falta la duracion, asi que se guarda el par.
+    """
+    abiertos, orden = {}, []
+    for j in lineas:
+        if not isinstance(j, dict) or j.get("isSidechain"):
+            continue
+        cont = (j.get("message") or {}).get("content")
+        if not isinstance(cont, list):
+            continue
+        t = _iso(j.get("timestamp") or "")
+        for b in cont:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use" and j.get("type") == "assistant":
+                bid = b.get("id") or ""
+                if bid and bid not in abiertos:
+                    abiertos[bid] = _evento(b, t)
+                    orden.append(bid)
+            elif b.get("type") == "tool_result":
+                e = abiertos.get(b.get("tool_use_id") or "")
+                if e is None:
+                    continue          # su tool_use se quedo fuera de la cola leida
+                cuerpo, cod = _texto_resultado(b)
+                e["pend"] = False
+                e["dur"] = (t - e["t0"]) if (t and e["t0"]) else None
+                e["err"] = bool(b.get("is_error"))
+                e["cod"] = cod
+                e["bytes"] = len(cuerpo)
+                if e["busca"]:
+                    e["vacio"] = e["bytes"] == 0 or cuerpo.lower() in _SIN_NADA
+    return [abiertos[k] for k in orden[-tope:]]
+
+
+def sintomas(eventos):
+    """Cuentas sobre una tanda de eventos. Enteros, ni una frase.
+
+    El veredicto lo compone `alertas()` a partir de esto, asi que no hay forma de que
+    un numero de aqui tape al de al lado: se ven los cuatro o no se ve ninguno.
+    """
+    if not eventos:
+        return {"eventos": 0, "repeticiones_consecutivas": 0, "fallos_seguidos": 0,
+                "busquedas_sin_resultado": 0, "segundos_en_curso": 0}
+    ult = eventos[-1]
+    repes = 0
+    for e in reversed(eventos):
+        if e["res"] != ult["res"]:
+            break
+        repes += 1
+    # Una llamada aun en curso no ha fallado, pero tampoco rompe la racha: al cuarto
+    # intento del mismo comando la racha es justo lo que hay que ver, y contar el que
+    # esta en vuelo la borraria en el momento en que estas mirandola.
+    cerrados = eventos[:-1] if ult["pend"] else eventos
+    fallos = 0
+    for e in reversed(cerrados):
+        if not e["err"]:
+            break
+        fallos += 1
+    vacias = 0
+    for e in reversed(cerrados):
+        # Cualquier otra cosa por medio corta la racha: dos greps vacios con un Edit
+        # en medio no son un barrido, son trabajo.
+        if not e["busca"] or not e["vacio"]:
+            break
+        vacias += 1
+    return {"eventos": len(eventos),
+            "repeticiones_consecutivas": repes,
+            "fallos_seguidos": fallos,
+            "busquedas_sin_resultado": vacias,
+            "segundos_en_curso": (round(max(0.0, time.time() - ult["t0"]))
+                                  if ult["pend"] and ult["t0"] else 0)}
+
+
+def alertas(s):
+    """Los veredictos, compuestos con los numeros de `sintomas()` y con nada mas.
+
+    Devuelve claves de un enum cerrado, no frases: la frase depende del idioma y del
+    ancho de la ventana, y quien decide no tiene por que enterarse de ninguna de las
+    dos. Lo que lleva veinte minutos corriendo NO sale por aqui: ya lo dice el campo
+    `status`, y un dato repetido no es una segunda opinion.
+    """
+    fuera = []
+    if (s["fallos_seguidos"] >= UMBRAL_BUCLE
+            and s["repeticiones_consecutivas"] >= UMBRAL_BUCLE):
+        fuera.append("bucle")
+    if s["busquedas_sin_resultado"] >= UMBRAL_BARRIDO:
+        fuera.append("barrido")
+    return fuera
+
+
+# La frase de cada alerta, con su cifra dentro. El enum viaja; la frase se traduce y se
+# puede reescribir sin tocar a quien decide.
+_TEXTO_ALERTA = {
+    "bucle": lambda s: _("the same command has failed {n} times",
+                         n=s["fallos_seguidos"]),
+    "barrido": lambda s: _("{n} searches in a row with no result",
+                           n=s["busquedas_sin_resultado"]),
+}
+
+
+def _seg(secs):
+    """'3s' / '12m' / '2h'. `_lapso()` no vale aqui: empieza en minutos y la mitad de
+    las llamadas a una herramienta duran menos de uno — la columna saldria de ceros."""
+    secs = int(secs or 0)
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    return f"{secs // 3600}h"
+
+
+# El glifo dice el desenlace y no repite el nombre de la herramienta, que va al lado:
+# corriendo, error, busqueda sin nada, y hecho sin mas. Los cuatro son de UNA columna
+# segun `ancho()` y tambien en pantalla — por eso no hay un simbolo de aviso aqui:
+# U+26A0 es de ancho ambiguo, `ancho()` cuenta 1 y muchos terminales pintan 2, y una
+# columna de mas en curses no da error: envuelve el sobrante al principio de la fila
+# siguiente.
+_GLIFO_RUTA = {"pend": ("\u25d0", 7), "err": ("\u2717", 5),
+               "vacio": ("\u2205", 2), "ok": ("\u00b7", 4)}
+
+
+def linea_ruta(e, cols):
+    """(glifo, par_de_color, duracion, resumen) de un evento, acotado a `cols` columnas.
+
+    Vive aparte del pintado a proposito: asi el ancho se puede probar sin curses, que es
+    donde el caracter huerfano aparece dos filas por debajo del fallo que lo causo. La
+    duracion de la llamada en vuelo se calcula AQUI y no en `recorrido()`: `_det` se
+    cachea por fila, y una duracion guardada se quedaria congelada.
+    """
+    clave = ("pend" if e["pend"] else "err" if e["err"]
+             else "vacio" if e["vacio"] else "ok")
+    glifo, par = _GLIFO_RUTA[clave]
+    secs = e["dur"]
+    if secs is None and e["pend"] and e["t0"]:
+        secs = max(0.0, time.time() - e["t0"])
+    return (glifo, par, f"{_seg(secs) if secs is not None else '':>4}",
+            recorta(e["res"], max(1, cols - RUTA_FIJO)))
+
+
 def detalles(r):
     """aiTitle / lastPrompt / rama / peso del transcript, de su cola.
 
@@ -2103,11 +2366,17 @@ def detalles(r):
             d["peso"] = t.stat().st_size
         except OSError:
             pass
-        for raw in ultimas_lineas(t, 60):
+        # 100 y no 60: medido sobre los 8 transcripts mas recientes, 60 lineas dan
+        # entre 4 y 9 llamadas a herramienta y el recorrido saldria corto; 100 dan
+        # entre 6 y 13. `ultimas_lineas` lee en bloques de 256 KB, esto corre para UNA
+        # fila —la del cursor— y el coste medido no llega al milisegundo.
+        crudos = []
+        for raw in ultimas_lineas(t, 100):
             try:
                 j = json.loads(raw)
             except Exception:
                 continue
+            crudos.append(j)
             for k in ("aiTitle", "lastPrompt", "gitBranch", "cwd"):
                 if j.get(k):
                     d[k] = j[k]
@@ -2125,6 +2394,11 @@ def detalles(r):
                         d["resp"] = txt
                 elif b.get("type") == "tool_use":
                     d["tool"] = _resume_tool(b)
+        # El recorrido sale de la MISMA cola: ni una lectura mas. Lo que se guarda son
+        # los doce eventos ya resumidos, NUNCA las lineas crudas — una sola de ellas
+        # puede pasar de 96 KB y `_det` se queda pegado a la fila hasta el proximo
+        # refresco.
+        d["ruta"] = recorrido(crudos)
     d["fase"] = _fase(r)
     r["_det"] = d
     return d
@@ -2922,38 +3196,95 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # El choque va ARRIBA del todo, por delante de lo que la sesion esta
                 # haciendo: si dos escriben en el mismo fichero, eso es lo primero que hay
                 # que leer del panel, no el ultimo prompt.
+                # El recorrido ensena la llamada en curso con su duracion en vivo, asi
+                # que "ahora mismo" pasaria a decir lo mismo una linea mas arriba. De
+                # los dos dibujos del mismo hecho se queda el que ademas trae el camino,
+                # y "ahora mismo" solo vuelve cuando el recorrido no cabe.
+                ruta = d.get("ruta") or []
+                sn = sintomas(ruta)
+                alertas_ruta = alertas(sn)
+                hay_ruta = bool(ruta) and ancho_det >= RUTA_FIJO + 26
                 cl = rows[cur].get("colision")
                 bloques = [b for b in (
                     ((_("\u25b8 another session is writing here too"),
                       _texto_colision(cl), 5, 3) if cl else None),
                     ((_("\u25b8 right now"), d.get("tool"), 7, 2)
-                     if (rows[cur].get("pulso") or {}).get("herramienta") else None),
+                     if (not hay_ruta
+                         and (rows[cur].get("pulso") or {}).get("herramienta"))
+                     else None),
                     (_("\u25b8 what you last said"), ult, 6, 4),
                     (_("\u25b8 what it last replied"), d.get("resp"), 9, 5),
                 ) if b and b[1]]
                 # Sin texto arriba (las sesiones de otros CLI no traen prompt) anclar
                 # abajo dejaria veinte lineas en blanco y tres etiquetas al fondo.
-                base_campos = (max(fila0 + 2, fondo - len(campos) + 1) if bloques
-                               else fila0)
+                base_campos = (max(fila0 + 2, fondo - len(campos) + 1)
+                               if (bloques or hay_ruta) else fila0)
+                # El recorrido se reserva su sitio ANTES de repartir el texto: cuando
+                # falta altura lo que cede es la respuesta —que sigue entera dentro de
+                # la sesion— y no la unica vista que dice donde se atasco. Y si la
+                # ventana es baja encoge por el extremo VIEJO antes de desaparecer: dos
+                # filas del camino informan mas que ninguna, y la que importa se queda.
+                n_ruta = 0
+                if hay_ruta:
+                    margen = 2 if bloques else 0
+                    sitio = base_campos - fila0 - 2 - len(alertas_ruta) - margen
+                    n_ruta = max(0, min(RUTA_VISIBLE, len(ruta), sitio))
+                    hay_ruta = n_ruta > 0
+                alto_ruta = (2 + len(alertas_ruta) + n_ruta) if hay_ruta else 0
+                base_ruta = base_campos - alto_ruta
                 # Tope por bloque, y reparto proporcional solo si no caben: sin tope,
                 # una respuesta con tabla se comia veinte lineas y tapaba el prompt.
-                libre = max(0, base_campos - fila0 - 1 - 2 * len(bloques))
+                libre = max(0, base_ruta - fila0 - 1 - 2 * len(bloques))
                 pide = [min(tope, max(1, -(-ancho(t) // max(1, ancho_det))))
                         for _e, t, _p, tope in bloques]
                 fila = fila0
                 for (etiq, txt, par, _t), q in zip(bloques, pide):
-                    if fila >= base_campos - 2:
+                    if fila >= base_ruta - 2:
                         break          # cabecera sin ni una linea debajo no informa
                     cuota = q if sum(pide) <= libre else max(
                         1, min(q, round(libre * q / max(1, sum(pide)))))
                     stdscr.addnstr(fila, x0, etiq, ancho_det, C(par) | curses.A_BOLD)
                     fila += 1
                     for trozo in _troceado(txt, ancho_det, cuota):
-                        if fila >= base_campos - 1:
+                        if fila >= base_ruta - 1:
                             break
                         stdscr.addnstr(fila, x0, trozo, ancho_det)
                         fila += 1
                     fila += 1
+
+                if hay_ruta:
+                    fila = base_ruta
+                    # Los nombres llevan sufijo `_ev`/`_ruta` a proposito: `run()` es
+                    # una funcion larga y ya tiene un `res` (el dict que devuelve), un
+                    # `par` y un `cab`. Reusar cualquiera de los tres aqui los pisa, y
+                    # el fallo no sale en esta linea sino donde se leen despues.
+                    cab_ruta = _("\u25b8 what it has been doing")
+                    stdscr.addnstr(fila, x0, cab_ruta, ancho_det, C(6) | curses.A_BOLD)
+                    # Los que no caben se cuentan pero no se dibujan: "hay mas arriba"
+                    # es informacion; media fila de un evento cortado, no.
+                    ocultos = len(ruta) - n_ruta
+                    if ocultos and ancho(cab_ruta) + 16 <= ancho_det:
+                        stdscr.addnstr(fila, x0 + ancho(cab_ruta) + 2,
+                                       _("(+{n} earlier)", n=ocultos),
+                                       ancho_det - ancho(cab_ruta) - 2, C(4))
+                    fila += 1
+                    for clave in alertas_ruta:
+                        # `!` y no un simbolo de aviso: U+26A0 es de ancho ambiguo y
+                        # descuadraria la columna en la mitad de los terminales.
+                        stdscr.addnstr(fila, x0 + 2, "!", 1, C(5) | curses.A_BOLD)
+                        stdscr.addnstr(fila, x0 + 4,
+                                       recorta(_TEXTO_ALERTA[clave](sn), ancho_det - 4),
+                                       ancho_det - 4, C(5))
+                        fila += 1
+                    for e in ruta[-n_ruta:]:
+                        glifo, par_ev, dur, res_ev = linea_ruta(e, ancho_det)
+                        stdscr.addnstr(fila, x0 + 2, glifo, 1,
+                                       C(par_ev) | curses.A_BOLD)
+                        stdscr.addnstr(fila, x0 + 4, dur, 4, C(4))
+                        stdscr.addnstr(fila, x0 + RUTA_FIJO, res_ev,
+                                       ancho_det - RUTA_FIJO,
+                                       C(par_ev) if (e["pend"] or e["err"]) else 0)
+                        fila += 1
 
                 fila = base_campos
                 for etiq, valor, par in campos:
@@ -3548,7 +3879,13 @@ def _T():
         " resumable": " reanudables",
         " total": " en total",
         " writing": " escribiendo",
+        "(+{n} earlier)": "(+{n} antes)",
         "(id not resolved)": "(id sin resolver)",
+        "the same command has failed {n} times":
+            "el mismo comando ha fallado {n} veces",
+        "{n} searches in a row with no result":
+            "{n} b\u00fasquedas seguidas sin ning\u00fan resultado",
+        "\u25b8 what it has been doing": "\u25b8 lo que ha estado haciendo",
         "spent": "gastado",
         "rhythm": "ritmo",
         "{i} in \u00b7 {o} out \u00b7 {c} cache":

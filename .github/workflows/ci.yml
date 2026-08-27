@@ -64,3 +64,7 @@ jobs:
         run: python tests/test_colisiones.py
       - name: el consumo no cuenta dos veces la misma respuesta
         run: python tests/test_uso.py
+      - name: el recorrido cuenta bucles y barridos, y ninguna fila se sale
+        run: python tests/test_recorrido.py
+      - name: ninguna celda del panel se pinta dos veces ni se sale del marco
+        run: python tests/test_panel_geometria.py

@@ -2,6 +2,17 @@
 
 ## 1.3.0
 
+**The panel shows the path, not just the last step.** Under the prompt and the reply there is
+now a trail of the last tool calls — what each one was, how long it took, and how it ended:
+done, error, a search that found nothing, or still running with the clock ticking. It comes out
+of the same tail of the transcript the panel already reads, only for the row under the cursor.
+
+Two things in that trail are called out, and both are counted rather than sensed: the same
+command failing three times in a row, and two searches in a row that come back empty. Anything
+else in between resets the count — two empty greps with an edit between them are work, not a
+sweep. "Twenty minutes on one call" gets no line of its own: `status` already says that, and
+the same fact twice is not a second opinion.
+
 **What a session has burned, with `--usage`.** The context bar says how full the window is right
 now; it says nothing about the twelve hours already spent, because a session that compacted three
 times reads 20%. The new flag adds tokens in and out, cache read, replies, compactions and the

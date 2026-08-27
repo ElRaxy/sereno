@@ -40,7 +40,9 @@ def main():
         "pulso": {"escribe": False, "herramienta": False, "ctx": 176_000,
                   "modelo": "claude-opus-5", "lastPrompt": SECRETO, "aiTitle": "t"},
         # Lo que `detalles()` deja pegado a la fila cuando ya se ha mirado el panel.
-        "_det": {"lastPrompt": SECRETO, "resp": SECRETO, "tool": SECRETO},
+        "_det": {"lastPrompt": SECRETO, "resp": SECRETO, "tool": SECRETO,
+                 # El recorrido lleva comandos dentro: que no se escape por --json.
+                 "ruta": [{"res": SECRETO}]},
     }
     (salida,) = ns["filas_json"]([fila])
 
