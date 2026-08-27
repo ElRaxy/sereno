@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.13.1
+
+**Same program as 1.13.0. Use this one: the file published under 1.13.0 is not the program.**
+
+The release procedure extracted the file with `git show $SHA:sereno`. Under zsh that does not
+extract anything: `$SHA:sereno` starts with `:s`, the substitution modifier, so the shell eats the
+suffix and leaves the bare sha — the command becomes `git show <sha>`, which prints the commit
+log. No error, exit 0. The asset published under v1.13.0 was that log, and GitHub releases are
+immutable, so it could not be replaced.
+
+The trap only springs when the path starts with `s` (`$V:foo` expands fine) and the file in this
+repo is called `sereno`, so it is not something to remember. Releases now go through
+`./release.sh <version>`, which uses braces and — more to the point — **refuses to publish** if
+what it extracted does not start with the shebang or does not report the version being released,
+and re-downloads the published asset to check it before saying OK.
+
+Also: the Spanish README was missing the click-to-copy section that 1.13.0 added to the English
+one.
+
 ## 1.13.0
 
 **The values you were going to retype are one click away.**

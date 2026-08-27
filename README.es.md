@@ -428,7 +428,7 @@ línea de tmux filtra por él antes de dividir.
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
-| `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` |
+| `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` (o pincharlo — ver abajo) |
 | `/` | filtrar por título mientras escribes |
 | `TAB` | Claude · historial reanudable · Codex · Gemini · todas |
 | `?` | el resto |
@@ -436,6 +436,17 @@ línea de tmux filtra por él antes de dividir.
 **El ratón funciona.** Click para seleccionar, doble click para abrir, click derecho (o en la
 barra del borde izquierdo) para marcar, rueda para desplazar. Las pestañas de arriba y los
 botones de abajo son botones de verdad.
+
+**Y los valores subrayados se copian al pincharlos.** Con sereno abierto no puedes seleccionar
+arrastrando: el reporte de ratón está encendido y el terminal le pasa el arrastre a la
+aplicación. Así que lo que ibas a volver a teclear es un click: el proyecto, el id de sesión y
+las cabeceras de *what you last said* y *what it last replied*, que copian el texto entero y no
+el trozo que cupo. Va por OSC 52, que no necesita ningún programa extra y funciona por SSH; el
+rótulo de abajo dice siempre qué ha llegado al portapapeles.
+
+Dos de ellos copian a propósito algo que no se puede leer en pantalla: `project` enseña
+`docs-site · main` y copia `/Users/you/code/docs-site`, y la cabecera de la respuesta la copia
+entera. Un click que copiara lo pintado te devolvería justo lo que acabas de leer.
 
 Ninguna acción te echa del selector. Cerrar cuatro sesiones y abrir una quinta es una visita,
 no cinco.
@@ -777,7 +788,7 @@ Issues y pull requests bienvenidos, en castellano o en inglés. Antes de abrir u
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-Son diecinueve, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
+Son veintidós, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
 algo que falla **en silencio**, que es justo por lo que existen:
 
 - **`test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco de
