@@ -332,6 +332,11 @@ sereno --watch              # every 20s
 sereno --watch --every 60
 ```
 
+It reports three transitions, and only transitions: a session **stopping**, two sessions
+**starting** to write in the same place, and one **starting** to go in circles. Twenty minutes
+of the same loop is one line, not one per poll — and a session that is already looping when you
+start `--watch` is part of the baseline, not news.
+
 You get a desktop notification (`osascript` on macOS, `notify-send` on Linux — both already on
 your system) and a line on stdout, so it works over SSH and pipes fine. The first pass is
 always silent: it only sets the baseline, otherwise starting it would announce everything you

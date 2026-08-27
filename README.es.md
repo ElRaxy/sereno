@@ -333,6 +333,11 @@ sereno --watch              # cada 20s
 sereno --watch --every 60
 ```
 
+Avisa de tres cambios, y solo de cambios: que una sesión **pare**, que dos **empiecen** a
+escribir en el mismo sitio, y que una **empiece** a dar vueltas. Veinte minutos del mismo bucle
+son una línea, no una por vuelta — y una sesión que ya estaba dando vueltas cuando arrancaste
+`--watch` es parte de la línea base, no una novedad.
+
 Te llega un aviso de escritorio (`osascript` en macOS, `notify-send` en Linux — los dos ya
 están en tu sistema) y una línea por stdout, así que funciona por SSH y se puede canalizar. La
 primera vuelta siempre calla: solo fija la línea base, o arrancarlo te anunciaría todo lo que

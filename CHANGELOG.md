@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0
+
+**`--watch` has a third thing to tell you: a session that starts going in circles.** It already
+reported one stopping and two starting to write in the same place; the counts behind `↻` were
+being computed for every row anyway, so this cost nothing to add.
+
+Like the other two it fires on the transition, not the state: twenty minutes of the same loop is
+one line, not one per poll. A session already looping when you start `--watch` is baseline, not
+news — and if it then *also* starts sweeping, that is new and gets said.
+
 ## 1.5.0
 
 **"Which one is stuck?" is answered in the list now, not one row at a time.** The two counts the

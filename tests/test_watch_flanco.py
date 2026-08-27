@@ -87,6 +87,30 @@ def main():
         if trans({r["id"]: r["state"] for r in v2}, v2):
             fallos.append("repite el aviso mientras la sesion sigue esperando")
 
+        # ── el tercer flanco: que una sesion empiece a dar vueltas ─────────────
+        # No hace falta un transcript atascado de verdad: `atascos_nuevos` es pura y lo
+        # que se prueba es el flanco, no la deteccion (esa la cubre test_recorrido).
+        an = ns["atascos_nuevos"]
+        limpia = [dict(v2[0], stuck=[])]
+        con_bucle = [dict(v2[0], stuck=["loop"])]
+        con_las_dos = [dict(v2[0], stuck=["loop", "sweep"])]
+        if an({}, limpia):
+            fallos.append("avisa de una sesion que no esta atascada")
+        salta = an({UUID: []}, con_bucle)
+        if [a for _r, a in salta] != ["loop"]:
+            fallos.append(f"el flanco del atasco no se detecta: {salta!r}")
+        # Veinte minutos dando vueltas son UN aviso, no uno por vuelta del bucle.
+        if an({UUID: ["loop"]}, con_bucle):
+            fallos.append("repite el aviso mientras la sesion sigue en bucle")
+        # Pero empezar ADEMAS a barrer si es nuevo, y se dice.
+        salta = an({UUID: ["loop"]}, con_las_dos)
+        if [a for _r, a in salta] != ["sweep"]:
+            fallos.append(f"no avisa del aviso nuevo que se suma: {salta!r}")
+        # Cada clave del enum publico tiene su frase, o el aviso reventaria al salir.
+        for clave in ("loop", "sweep"):
+            if clave not in ns["_AVISO_WATCH"]:
+                fallos.append(f"falta la frase de --watch para {clave!r}")
+
     if fallos:
         print("FALLA:")
         for f in fallos:
