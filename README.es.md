@@ -215,6 +215,22 @@ este orden, y para en el primero que responde:
 La regla 5 es la que mantiene honesta la barra: el porcentaje no puede pasar del 100%, y hay un
 test que falla si algún día lo hace.
 
+**Y esa guarda tiene memoria: mira también el pico**, no solo el contexto de ahora. Compactar
+borra la prueba —la ventana cae a 16k y una sesión de un millón pasa a dibujarse contra la
+estándar—, así que el pico se reconstruye del transcript: el `usage` de cada respuesta y el
+`preTokens` de cada compactación, que es contexto y no un acumulado (comprobado contra la
+respuesta anterior: mediana +0,4%, 165 de 169 dentro del ±5%).
+
+Sobre los 524 transcripts de la máquina donde se escribió esto, el pico corrige **30** (5,7%) y
+los 30 hacia el mismo lado: uno marcaba 171k sobre 200k —un **86%**, "compacta ya"— cuando eran
+171k de un millón, un **17%**. Como cobertura, `preTokens` aparece en 107 de 524 transcripts
+frente a los 13 del `cost-state`.
+
+El pico sale de leer el transcript entero, así que **hoy solo lo tienen el panel y `--usage`**;
+la lista sin `--usage` sigue con el dato de ahora. Y el sentido contrario —probar que una sesión
+*no* es de un millón— no tiene más evidencia que el `cost-state`: en esos 524 transcripts no hay
+ni una auto-compactación (que delataría el umbral) ni un solo `message.model` con sufijo.
+
 **La 2 va antes que la 3, y funciona en los dos sentidos.** Tu configuración global es la floja
 —una sesión lanzada con otro `--model` no la cumple— así que el único hecho que describe *esta*
 sesión manda sobre ella, para subir el tope **y** para bajarlo. Con el orden anterior, una
@@ -419,8 +435,8 @@ no cinco.
 
 La barra de contexto dice lo llena que está la ventana **ahora mismo**. No dice cuánto lleva
 quemado la sesión: una que ha compactado tres veces marca 20% con doce horas dentro. `--usage`
-añade eso — entrada y salida, caché leída, cuántas respuestas, cuántas compactaciones y los
-minutos que de verdad estuvo trabajando.
+añade eso — entrada y salida, caché leída, cuántas respuestas, cuántas compactaciones, el pico
+de contexto al que llegó y los minutos que de verdad estuvo trabajando.
 
 ```bash
 sereno --list --usage

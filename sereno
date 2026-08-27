@@ -1055,21 +1055,26 @@ _DEMO_CTX = (
 # medidas en esta maquina: la cache leida cien veces la entrada, y el ritmo entre 1,4k y
 # 2,1k por minuto. La quinta fila lleva tres compactaciones a proposito: es el caso que
 # este dato existe para explicar, un contexto bajo en una sesion que lleva horas.
+#
+# Los `pico` de la segunda y la cuarta ensenan las dos caras del mismo dato: las dos han
+# compactado y las dos marcan poco contexto, pero la segunda llego a 540k —imposible en
+# la ventana estandar, asi que su barra se dibuja contra el millon— y la cuarta se quedo
+# en 180k, que cabe de sobra y no cambia nada.
 _DEMO_USO = (
     {"in": 1_200, "out": 194_378, "cw": 1_646_733, "cr": 77_218_269,
-     "turnos": 259, "compacta": 0, "activo": 6_960.0, "usd": None},
+     "turnos": 259, "compacta": 0, "pico": 176_000, "activo": 6_960.0, "usd": None},
     {"in": 1_042, "out": 414_831, "cw": 2_125_425, "cr": 128_435_885,
-     "turnos": 521, "compacta": 2, "activo": 17_940.0, "usd": None},
+     "turnos": 521, "compacta": 2, "pico": 540_000, "activo": 17_940.0, "usd": None},
     {"in": 882, "out": 140_559, "cw": 436_049, "cr": 26_413_017,
-     "turnos": 129, "compacta": 0, "activo": 4_260.0, "usd": None},
+     "turnos": 129, "compacta": 0, "pico": 128_000, "activo": 4_260.0, "usd": None},
     {"in": 458, "out": 196_362, "cw": 1_071_413, "cr": 61_614_069,
-     "turnos": 229, "compacta": 1, "activo": 6_960.0, "usd": None},
+     "turnos": 229, "compacta": 1, "pico": 180_000, "activo": 6_960.0, "usd": None},
     {"in": 1_984, "out": 765_291, "cw": 2_993_300, "cr": 299_643_093,
-     "turnos": 992, "compacta": 3, "activo": 22_020.0, "usd": None},
+     "turnos": 992, "compacta": 3, "pico": 890_000, "activo": 22_020.0, "usd": None},
     {"in": 334, "out": 138_544, "cw": 512_961, "cr": 37_574_214,
-     "turnos": 167, "compacta": 0, "activo": 5_220.0, "usd": None},
+     "turnos": 167, "compacta": 0, "pico": 93_000, "activo": 5_220.0, "usd": None},
     {"in": 86, "out": 29_035, "cw": 253_649, "cr": 5_693_619,
-     "turnos": 43, "compacta": 0, "activo": 900.0, "usd": None},
+     "turnos": 43, "compacta": 0, "pico": 12_000, "activo": 900.0, "usd": None},
 )
 
 
@@ -1202,8 +1207,11 @@ def filas_json(rows):
             "attached": bool(r.get("attached")),
             "memory_mb": None if r.get("mem_mb") is None else round(r["mem_mb"]),
             "context_tokens": ctx,
-            "context_max": tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"))
-                           if ctx else None,
+            # El pico solo consta con `--usage`, que es quien lee el transcript entero.
+            # Sin el, este campo puede quedarse en la ventana estandar en una sesion que
+            # ya compacto: el dato de ahora no la delata y el de antes no se ha leido.
+            "context_max": tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"),
+                                         pico_de(r)) if ctx else None,
             "model": pu.get("modelo"),
             "pid": r.get("pid") or None,
             # Los cuatro crudos y ninguna suma: juntar la cache leida con la entrada da
@@ -1215,6 +1223,10 @@ def filas_json(rows):
             "cache_read_tokens": u["cr"] if u else None,
             "assistant_turns": u["turnos"] if u else None,
             "compactions": u["compacta"] if u else None,
+            # El mayor contexto que llego a tener, compactaciones incluidas. Es lo que
+            # `context_tokens` deja de contar en cuanto se compacta, y de donde sale el
+            # `context_max` de una sesion que ya lo hizo.
+            "peak_context_tokens": u["pico"] if u else None,
             "working_seconds": round(u["activo"]) if u else None,
             # Lo escribio el propio CLI con sus precios; `sereno` no calcula dinero ni
             # lleva tabla de tarifas. En un plan de suscripcion es lo que HABRIA costado
@@ -1525,7 +1537,8 @@ def print_live(rows):
         ctx = pu.get("ctx")
         # El tope se saca ANTES del f-string: partir una expresion en dos lineas dentro
         # de uno es legal desde 3.12 y un SyntaxError en 3.8, que es el suelo del repo.
-        tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m")) if ctx else 0
+        tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"),
+                                 pico_de(r)) if ctx else 0
         pct = f"  {round(100 * ctx / tope_ctx):>3}%" if ctx else "      "
         # `--list` es lo que sale en un pipe y en una terminal sin tty: si el aviso
         # solo viviera en el selector, quien lea la lista se lo pierde justo cuando importa.
@@ -1873,7 +1886,8 @@ def _uso(path):
         if st.st_size > TOPE_USO:
             return None
         d = {"in": 0, "out": 0, "cw": 0, "cr": 0, "turnos": 0, "compacta": 0,
-             "activo": 0.0, "usd": None, "_pos": 0, "_ult": None, "_ts": 0.0}
+             "pico": 0, "activo": 0.0, "usd": None,
+             "_pos": 0, "_ult": None, "_ts": 0.0}
     try:
         with path.open("rb") as f:
             f.seek(d["_pos"])
@@ -1895,6 +1909,14 @@ def _uso(path):
                 if tipo == "system" and j.get("subtype") == "compact_boundary":
                     # Lo que explica una barra de contexto baja en una sesion larga.
                     d["compacta"] += 1
+                    # Y lo que la sesion tenia dentro justo antes. Es la unica huella
+                    # del pico que sobrevive a compactar: las respuestas de despues ya
+                    # cuentan la ventana nueva. Comprobado que es contexto y no un
+                    # acumulado — contra el `usage` de la respuesta anterior, mediana
+                    # +0,4% y 165 de 169 dentro del +-5%.
+                    v = (j.get("compactMetadata") or {}).get("preTokens")
+                    if isinstance(v, int):
+                        d["pico"] = max(d["pico"], v)
                     continue
                 if tipo == "cost-state":
                     # Lo escribe el CLI al cerrar, con SUS precios. `sereno` no calcula
@@ -1916,6 +1938,11 @@ def _uso(path):
                 d["turnos"] += 1
                 for clave, campo in _USO_CAMPOS:
                     d[clave] += u.get(campo) or 0
+                # El contexto de ESA respuesta, que es lo que suma la barra: entrada
+                # nueva mas cache. La salida no cuenta, no viaja de vuelta al modelo.
+                d["pico"] = max(d["pico"], (u.get("input_tokens") or 0)
+                                + (u.get("cache_read_input_tokens") or 0)
+                                + (u.get("cache_creation_input_tokens") or 0))
                 t = _epoch(j.get("timestamp") or "")
                 if t:
                     # Trabajo = huecos entre respuestas que no pasan de `VIVA`. Se reusa
@@ -1944,6 +1971,16 @@ def uso_de(r):
     t = (r.get("meta") or {}).get("_transcript")
     r["_uso"] = _uso(t) if t else None
     return r["_uso"]
+
+
+def pico_de(r):
+    """El mayor contexto que la fila llego a tener, o 0 si nadie ha leido su transcript.
+
+    No lee: solo mira lo que `uso_de()` haya dejado. `0` es "no consta" y la cascada no
+    decide nada con el, igual que `None` en `ventana_1m`. Asi la lista puede pintar la
+    barra sin pagar el fichero entero, y el panel —que ya lo paga— la pinta mejor.
+    """
+    return (r.get("_uso") or {}).get("pico") or 0
 
 
 def _uso_texto(u):
@@ -2528,6 +2565,14 @@ def _mb(x):
 #      debajo del contexto YA observado. Si la sesion lleva 560k dentro, su tope no es
 #      200k lo diga quien lo diga. Es lo que impide pintar un 207%.
 #
+# La guarda 5 mira dos cosas: el contexto de AHORA y el PICO que la sesion llego a
+# tener. La segunda existe porque compactar borra la prueba: el contexto cae a 16k y
+# una sesion de un millon pasa a dibujarse contra la ventana estandar. El pico se
+# reconstruye del transcript entero —el `usage` de cada respuesta y el `preTokens` de
+# cada compactacion— y ahi si queda. Medido sobre los 524 transcripts de esta maquina,
+# corrige 30 (5,7%), y en los 30 hacia el mismo lado: uno marcaba 171k sobre 200k, un
+# 86% que pedia compactar cuando eran 171k de un millon, un 17%.
+#
 # El orden 2 antes que 3 es el que importa y cambio el 2026-08-27: la config global es
 # la floja —una sesion lanzada con otro `--model` no la cumple— y mientras iba delante,
 # un `cost-state` sin sufijo no podia corregirla. Ahora si: el unico hecho que habla de
@@ -2568,7 +2613,7 @@ def _ctx_max_config():
     return _ctx_max_config._v
 
 
-def tope_contexto(modelo, ctx=0, ventana_1m=None):
+def tope_contexto(modelo, ctx=0, ventana_1m=None, pico=0):
     forzado = _ctx_max_env()
     if forzado:
         return forzado                    # lo pusiste tu: no se discute
@@ -2582,8 +2627,10 @@ def tope_contexto(modelo, ctx=0, ventana_1m=None):
         tope = _ctx_max_config() or CTX_STD        # la maquina, que es la floja
     # Y la guarda, que corrige a todas: una sesion con 560k dentro no tiene un tope de
     # 200k lo diga quien lo diga. Sin esto, dejar que `cost-state` baje el tope podria
-    # pintar un 280%.
-    return CTX_1M if (ctx or 0) > tope else tope
+    # pintar un 280%. `pico` es lo mismo con memoria: lo que la sesion llego a tener
+    # antes de compactar, que es cuando el dato de ahora deja de delatarla. Es 0
+    # mientras nadie haya leido el transcript entero, y 0 no decide nada.
+    return CTX_1M if max(ctx or 0, pico or 0) > tope else tope
 
 
 def _tok(n):
@@ -2791,7 +2838,8 @@ def _clave_orden(r, modo):
         # fraccion. Ordenar por tokens crudos pondria la holgada delante de la llena.
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx") or 0
-        return -(ctx / tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m")))
+        return -(ctx / tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"),
+                                     pico_de(r)))
     if modo == "project":
         return ((r.get("proyecto") or "").lower(), (r.get("rama") or "").lower(),
                 r.get("idle") or 0)
@@ -3267,7 +3315,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # no lo publica, y cero seria mentira.
                 if an_ctx:
                     ctx = pu.get("ctx")
-                    tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"))
+                    tope_ctx = tope_contexto(pu.get("modelo"), ctx,
+                                             pu.get("ventana_1m"), pico_de(r))
                     lleno = (ctx or 0) / tope_ctx
                     put(barra(ctx, tope_ctx), color_contexto(lleno))
                     put(f" {round(lleno * 100):>3}%" if ctx else "     ",
@@ -3327,9 +3376,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # cosa. Cuesta 10 columnas y las hay de sobra.
                 pu_cur = rows[cur].get("pulso") or {}
                 ctx_cur = pu_cur.get("ctx")
-                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
-                                         pu_cur.get("ventana_1m"))
+                # El consumo se lee ANTES del tope y no despues: es de donde sale el
+                # pico, y sin el una sesion que ya compacto se dibuja contra la ventana
+                # estandar aunque haya tenido 700k dentro.
                 uso_cur = uso_de(rows[cur])
+                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
+                                         pu_cur.get("ventana_1m"), pico_de(rows[cur]))
                 campos = [
                     (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")
                      else 7 if (d.get("fase") or "").startswith(("esperando", "escribiendo", "lleva")) else 4),
@@ -4265,7 +4317,7 @@ def _T():
 _T()
 
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
