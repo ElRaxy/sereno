@@ -816,7 +816,7 @@ Issues and pull requests welcome, in English or Spanish. Run the tests before yo
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-There are twenty-two, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
+There are twenty-three, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
 Most guard against something that fails **silently**, which is why they exist at all:
 
 - **`test_demo_aislado.py`** — demo mode must not return a single row that came from real disk.
@@ -845,6 +845,9 @@ Most guard against something that fails **silently**, which is why they exist at
   hands over the reply and not itself, and a field with nothing worth pasting neither underlines
   nor reacts. The stand-in records attributes as well as characters, so the *visible* half — the
   underline — is checked too; colour still can't be, since colour pairs are 0 in the stand-in.
+- **`test_release_guardas.py`** — `release.sh` refuses to publish something that isn't the
+  program. It runs the script against throwaway repos rather than reading its conditions, which
+  is the only reason it caught the script aborting **silently** on a broken extraction.
 - **`test_suelo_38.py`** — nothing uses syntax newer than 3.8. The CI already runs on 3.8,
   but it tells you late: whoever wrote the line has 3.12 and it compiles fine there.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
@@ -857,12 +860,32 @@ Two house rules:
   something it shouldn't have.
 - **GitHub Actions are pinned by commit SHA**, and the repository enforces it, so a workflow
   edit using `@v4` will be rejected. Dependabot raises the bumps.
-- **Releases go through `./release.sh <version>`, never by hand.** It refuses to publish a file
-  that doesn't start with the shebang or doesn't report the version being released, and it
-  re-downloads the published asset before saying OK. Both guards exist because v1.13.0 shipped a
-  `git show` of the commit log instead of the program — `$SHA:sereno` under zsh drops the suffix,
-  since `:s` is the substitution modifier — and GitHub releases are immutable, so it could not be
-  fixed.
+- **Releases go through `./release.sh <version>`, never by hand** — see below.
+
+### Releasing
+
+```bash
+# 1. bump VERSION in `sereno` and add the section to CHANGELOG.md, in a PR
+# 2. once it is on main:
+./release.sh 1.13.1
+```
+
+That is the whole procedure, and it is a script rather than a list of commands for a reason.
+It used to be a list, and one of its lines was `git show $SHA:sereno > /tmp/rel/sereno`. **Under
+zsh that extracts nothing**: `$SHA:sereno` begins with `:s`, the substitution modifier, so the
+shell eats the suffix and the command becomes `git show <sha>` — which prints the commit log. No
+error, exit 0. **v1.13.0 shipped that log as its binary**, and GitHub releases are immutable, so
+it could not be replaced.
+
+The trap only springs when the path begins with `s`, and the file here is called `sereno`. So the
+script does what a written procedure cannot: it **refuses to publish** if what it extracted does
+not begin with the shebang or does not report the version being released, and it **re-downloads**
+the published asset and compares before saying OK. `tests/test_release_guardas.py` runs it against
+throwaway repos and checks it aborts, says why, and leaves no tag behind.
+
+`release.sh` calls `gh`, so it reaches the network — it is a maintainer tool and **is not part of
+the published program**. The release ships one file, `sereno`, and `test_sin_red.py` covers that
+one.
 
 Regenerate the demo with `vhs demo.tape` ([vhs](https://github.com/charmbracelet/vhs)) — and
 look at the frames before you commit them. `SERENO_DEMO=1` first, always: the panel shows real
