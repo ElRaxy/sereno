@@ -17,6 +17,11 @@ repeated. It is now cut at the first sentence, capped at 60 characters, and rows
 get their short id appended. A sentence under twelve characters ("Done.", "Ok.") is skipped rather
 than used as a name, and a dot inside `progress/x.md` or `1.9.0` does not cut.
 
+**The demo has session ids now**, one per row and fixed, so the panel and the copy key show
+something shaped like the real thing instead of falling back to the row name (`demo-infra-3`).
+They are paths that do not exist and nothing opens them. The recording was redone on top of that
+and it now walks through the sort by spend and the copy key as well.
+
 **The list refreshes while you are typing.** The refresh only ran on the `getch` timeout, so a
 `/rename` done in another window did not show up until you left the keyboard alone for 2.5 s.
 The clock is now checked on every turn, same period. Same cost — the refresh was not extra work,

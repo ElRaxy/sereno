@@ -33,6 +33,14 @@ Up    Sleep 500ms
 Space Sleep 900ms
 Space Sleep 1400ms
 
+# ordenar por lo gastado: `s` recorre actividad, contexto, proyecto, memoria y gasto.
+# Cuatro pulsaciones para llegar al quinto, con una pausa en cada uno para que se vea
+# que la lista se recoloca y que la cabecera dice cual esta puesto.
+Type "s" Sleep 900ms
+Type "s" Sleep 900ms
+Type "s" Sleep 900ms
+Type "s" Sleep 2400ms
+
 # el historial de sesiones que ya no corren
 Tab   Sleep 2200ms
 Down  Sleep 1200ms
@@ -43,6 +51,9 @@ Type "/"  Sleep 500ms
 Type "cli" Sleep 1800ms
 Escape Sleep 400ms
 Backspace Backspace Backspace Sleep 800ms
+
+# copiar el id de la sesion — el de Claude, el que come `--resume`
+Type "y" Sleep 1800ms
 
 # volver y abrir la ayuda
 Tab Sleep 400ms
