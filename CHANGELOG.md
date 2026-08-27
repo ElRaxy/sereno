@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.4.0
+
+**The context ceiling now listens to the session before the machine.** `SERENO_CTX_MAX` still
+wins, but under it the order flipped: what *this* session says — the `cost-state` line, then a
+`[1m]` suffix in the transcript — now overrules the `model` in your global `settings.json`,
+which a session launched with a different `--model` does not obey anyway.
+
+The point of the flip is the direction that was impossible before: a session the CLI recorded
+**without** the suffix can now bring the ceiling back down to the standard window. On a machine
+configured for the big window, a 200k session used to be drawn against a million — 6% where 30%
+was due.
+
+A guard sits above all of it: the ceiling can never end up below the context already seen, so
+lowering it can never produce a bar over 100%. And the Haiku the CLI runs for titles is ignored
+when reading `cost-state` — counting it would let a throwaway conversation talk the ceiling
+down on its own.
+
 ## 1.3.0
 
 **The panel shows the path, not just the last step.** Under the prompt and the reply there is
