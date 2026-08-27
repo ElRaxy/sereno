@@ -72,5 +72,7 @@ jobs:
         run: python tests/test_orden_en_pantalla.py
       - name: el titulo cabe en una linea y el id es el de la sesion
         run: python tests/test_nombre_e_id.py
+      - name: la barra recuerda el pico y no lo cuela en el porcentaje
+        run: python tests/test_barra_pico.py
       - name: nada usa sintaxis posterior a 3.8, que es el suelo del repo
         run: python tests/test_suelo_38.py

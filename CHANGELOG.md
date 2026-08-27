@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.11.0
+
+**The context bar remembers where the session has been.**
+
+Compacting resets the number but not the session, and the list was reading backwards because of
+it. On the machine this was written on: a session on its 716th turn that had compacted twice drew
+**11%** and looked like the freshest of the nine, while an untouched one on turn 246 drew **36%**
+and looked heavier. It is the reading you use to decide whether a session takes another task, and
+it was pointing the wrong way for four of nine rows.
+
+The peak was already computed (1.8.0) and already survived compacting — it just lived in the panel,
+one row at a time, which is no use for comparing nine of them. It is now in the bar: filled cells
+in colour are what the session holds now, filled cells in grey are where it has been, hollow cells
+it never reached. The percentage is untouched — a peak that inflated it would say the session is
+full, which is the opposite of true.
+
+Not drawn when the terminal has no colour: colour is the only thing separating "holds" from "held",
+and without it a fuller bar just lies upwards. Not drawn either until the transcript has been read
+whole — the peak is `0` until then, and `0` draws nothing.
+
 ## 1.10.0
 
 **Three fixes to how a session is named and identified.**

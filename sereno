@@ -2822,15 +2822,36 @@ def color_contexto(lleno):
     return 5 if lleno > 0.85 else 7 if lleno > 0.6 else 3
 
 
-def barra(valor, tope, celdas=5):
+def _celdas(valor, tope, celdas=5):
+    """Cuantas celdas de la barra ocupa `valor`. Sale aparte porque la quieren dos
+    medidas de la MISMA barra —lo que hay ahora y lo que llego a haber— y si cada una
+    redondeara por su cuenta, la segunda podria quedar por debajo de la primera.
+
+    El minimo de una celda es a proposito: un hilo de contexto que redondea a cero
+    desaparece de la barra y la sesion parece sin estrenar.
+    """
+    if not valor or not tope:
+        return 0
+    return max(1, min(celdas, round(celdas * valor / tope)))
+
+
+def barra(valor, tope, celdas=5, pico=0):
     """Barra de bloques unicode. Una cifra sola no se compara de un vistazo; cinco
-    celdas si: se ve de golpe cual es la sesion que se esta comiendo la maquina."""
+    celdas si: se ve de golpe cual es la sesion que se esta comiendo la maquina.
+
+    `pico` es lo que la sesion llego a tener antes de compactar, y se pinta LLENO
+    igual que lo de ahora. La diferencia entre "lo tiene" y "lo tuvo" la lleva el
+    color, no el glifo: quien pinta esto apaga el pico si el terminal no da color
+    (`_celdas` no decide nada de eso), porque una barra mas llena sin nada que lo
+    matice miente hacia arriba.
+    """
     if not valor or not tope:
         return " " * celdas
-    llenas = max(1, min(celdas, round(celdas * valor / tope)))
+    llenas = _celdas(valor, tope, celdas)
+    hasta = max(llenas, _celdas(pico, tope, celdas))
     # Segmentos (U+25B0/25B1) y no bloques llenos: `█` pinta un rectangulo macizo
     # que a tamaño de terminal parece una mancha de color, no una barra.
-    return "\u25b0" * llenas + "\u25b1" * (celdas - llenas)
+    return "\u25b0" * hasta + "\u25b1" * (celdas - hasta)
 
 
 COL_BASE = 3 + 3 + 9 + 1   # margen+canal+margen, estado+choque, tiempo, marca adjunta
@@ -3427,7 +3448,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     el FONDO (pares 10..19), asi que el estado, el proyecto y la RAM
                     siguen distinguiendose en la fila que estas mirando."""
                     nonlocal x
-                    if x >= ancho_lista:
+                    if not txt or x >= ancho_lista:
                         return
                     attr = (CF(par) if foco else CH(par) if roza else C(par)) | extra
                     stdscr.addnstr(fila_y, x, txt, ancho_lista - x, attr)
@@ -3495,7 +3516,21 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     tope_ctx = tope_contexto(pu.get("modelo"), ctx,
                                              pu.get("ventana_1m"), pico_de(r))
                     lleno = (ctx or 0) / tope_ctx
-                    put(barra(ctx, tope_ctx), color_contexto(lleno))
+                    # Y lo que LLEGO a tener. Compactar borra la prueba: una sesion de
+                    # 700 turnos que ha compactado dos veces marca un 11% y parece la
+                    # mas fresca de la lista justo cuando es la mas gastada. Las celdas
+                    # del pico van llenas y en gris: llenas para que se vea que estuvo
+                    # ahi, en gris para que no se confunda con lo que tiene ahora.
+                    #
+                    # Sin color no se dibujan. Seria la misma barra mas llena sin nada
+                    # que dijera que eso ya no esta, y eso es mentir hacia arriba: mejor
+                    # la de siempre. `pico` es 0 hasta que se lee el transcript entero,
+                    # y 0 no pinta nada.
+                    alto_pico = pico_de(r) if color else 0
+                    cad = barra(ctx, tope_ctx, pico=alto_pico)
+                    llenas = _celdas(ctx, tope_ctx)
+                    put(cad[:llenas], color_contexto(lleno))
+                    put(cad[llenas:], 4)
                     put(f" {round(lleno * 100):>3}%" if ctx else "     ",
                         color_contexto(lleno))
                 if an_ram:
@@ -4509,7 +4544,7 @@ def _T():
 _T()
 
 
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

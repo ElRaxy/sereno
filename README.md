@@ -227,6 +227,29 @@ all of them the same way: one read 171k against 200k — an **86%**, "compact no
 171k of a million, a **17%**. As coverage, `preTokens` shows up in 107 of 524 transcripts against
 13 for `cost-state`.
 
+#### The bar remembers where it has been
+
+Compacting resets the number but not the session. A session on its 700th turn that has compacted
+twice reads **11%** and looks like the freshest row on the list, right when it is the most worn
+one — while an untouched session at 36% looks heavier than it is. That is backwards, and it is
+the reading you use to decide whether a session takes another task or gets closed.
+
+So the bar draws both. Filled cells in colour are what it holds **now**; filled cells in grey are
+where it **has been**; hollow cells it has never reached.
+
+```
+▰▰▱▱▱   36%     never compacted — what you see is what it holds
+▰▰▰▱▱   11%     compacted twice: it reached 52% before
+```
+
+The percentage is untouched — it is still the context of right now. Only the cells remember; a
+peak that inflated the number would say the session is full, which is the opposite of true.
+
+Two deliberate limits. The peak is `0` until the transcript has been read whole, and `0` draws
+nothing: a session still loading shows the plain bar rather than a wrong one. And with no colour
+in the terminal the grey cells are not drawn at all — the only thing separating "holds" from
+"held" is the colour, and without it a fuller bar would simply lie upwards.
+
 The peak comes from reading the whole transcript, and **the list now does that too**, a chunk per
 refresh: see [Reading without blocking](#reading-without-blocking). And the opposite direction —
 proving a session is *not* on the big window — has no evidence beyond `cost-state`: across those
