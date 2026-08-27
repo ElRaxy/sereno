@@ -153,6 +153,40 @@ def main():
         igual("al completarse, cuenta una vez", completado["turnos"], 2)
         igual("y coincide con leerlo entero", completado["out"], _uso(p)["out"])
 
+        # 7bis. Leer por TROZOS da exactamente lo mismo que leer de una vez, y lo que
+        #       vuelve a medias se distingue: `completo` es False mientras falte algo.
+        #       Es lo que permite que el selector no de un tiron de 120 ms al llegar con
+        #       el cursor a un transcript de 89 MB.
+        p = d / "trozos.jsonl"
+        escribe(p, [resp(f"m{i}", T(i), out=10 * i, cr=1_000 * i) for i in range(1, 12)]
+                + [json.dumps({"type": "system", "subtype": "compact_boundary",
+                               "compactMetadata": {"preTokens": 300_000}})])
+        entero = dict(_uso(p))
+        if not entero["completo"]:
+            fallos.append("una lectura sin tope tiene que quedar completa")
+        _CACHE_USO.clear()
+        vueltas, parcial = 0, None
+        while vueltas < 200:
+            parcial = _uso(p, 300)             # trozos pequenos a proposito
+            vueltas += 1
+            if parcial["completo"]:
+                break
+        if vueltas < 2:
+            fallos.append("el tope no partio la lectura: el caso no se prueba")
+        for k in ("in", "out", "cw", "cr", "turnos", "compacta", "pico", "activo"):
+            igual(f"por trozos vs de una vez: {k}", parcial[k], entero[k])
+        # Y el parcial NO se pinta como total: mientras falta, `completo` es False. El
+        # pico es la excepcion y por eso se comprueba aparte — solo puede crecer, asi
+        # que a medias se queda corto pero nunca se pasa.
+        _CACHE_USO.clear()
+        primero = _uso(p, 300)
+        if primero["completo"]:
+            fallos.append("el primer trozo se declara completo")
+        if primero["pico"] > entero["pico"]:
+            fallos.append("el pico de un parcial se pasa del real")
+        if primero["out"] >= entero["out"]:
+            fallos.append("el primer trozo ya trae todo: el tope no corta nada")
+
         # 8. Fichero reescrito mas corto: se rehace desde cero. Aqui la cache NO se
         #    limpia a proposito — el caso que se prueba es justamente que el offset
         #    guardado ya no apunta a donde creia.
