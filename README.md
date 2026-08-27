@@ -402,6 +402,7 @@ on it first.
 | `ENTER` | open it |
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
 | `x` | close the marked ones — asks first, and warns if any is mid-task |
+| `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
 | `/` | filter by title as you type |
 | `TAB` | Claude · resumable history · Codex · Gemini · all |
 | `?` | everything else |
@@ -447,6 +448,26 @@ That other thing travels apart, as `api_cost_usd` in `--json --usage` only: the 
 the CLI wrote with its own prices, relayed as-is. `sereno` carries no price table — one in a
 public repo goes stale without telling anyone — and it never puts a dollar figure in the TUI,
 where on a subscription plan it would be money you did not pay.
+
+#### Sorting by what it burned
+
+`s` cycles the modes and the fifth one is **spend**: the heaviest first, new input plus output.
+It is the only one of the five that sorts on something it has to go and read, so it reads once,
+when you enter the mode — 94 ms for the 8 live sessions on this machine and 389 ms for the 40 in
+history the first time, then nothing.
+
+It is not the context bar under another name, and the case above is what separates them:
+**compacting empties the window and does not give back what was already spent**. Measured here
+across 40 sessions, the three that had compacted ranked 2nd, 3rd and 4th by spend and 5th, 7th
+and 8th by context. Against *activity* there is no resemblance at all (rho 0.13): that one sorts
+by recent, not by accumulated.
+
+Which figure you pick barely matters — `out`, `input+output` and `cache read` correlate at
+rho ≥ 0.98 with each other across those 40 transcripts and share the same top 5 — so it takes the
+one that fits in a line. Money is out for a different reason: `totalCostUSD` is only written by
+the CLI **on exit**, so it was present in 16 of 40 sessions and in **none** of the live ones.
+
+You can leave it on: `SERENO_SORT=spend`, or `-spend` to invert it.
 
 ### 🎭 Try it without touching your data
 
@@ -659,6 +680,7 @@ you deleting the script.
 | `SERENO_LANG` | your locale | `en` or `es`. On macOS it reads `AppleLocale` |
 | `SERENO_DEMO` | off | `1` for invented sessions. Set it before any screenshot |
 | `SERENO_CTX_MAX` | worked out | context ceiling in tokens, when the cascade gets it wrong |
+| `SERENO_SORT` | `activity` | which sort the picker opens on: `context`, `project`, `memory`, `spend`. A `-` in front inverts it |
 | `SERENO_TMUX_SOCK` | `claude-code` | which tmux socket to read |
 | `SERENO_REGISTRY` | `~/.claude/warp-sessions` | where the optional launcher registry lives |
 | `SERENO_BIN` | `~/.local/bin` | where `install.sh` puts the file |
@@ -715,7 +737,7 @@ Issues and pull requests welcome, in English or Spanish. Run the tests before yo
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-There are ten, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
+There are eighteen, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
 Most guard against something that fails **silently**, which is why they exist at all:
 
 - **`test_demo_aislado.py`** — demo mode must not return a single row that came from real disk.
@@ -732,6 +754,9 @@ Most guard against something that fails **silently**, which is why they exist at
   empty searches in a row, and nothing unobserved ever counts as success.
 - **`test_panel_geometria.py`** — the terminal is replaced by a stand-in that records every
   write, so no cell gets painted twice and nothing spills out of the frame.
+- **`test_orden_en_pantalla.py`** — the sort key reaches `spend` and the list is painted in that
+  order. With the rows EMPTIED of usage: the demo ships it precooked, and with it in place the
+  test passed even without the wiring it claims to cover.
 - **`test_suelo_38.py`** — nothing uses syntax newer than 3.8. The CI already runs on 3.8,
   but it tells you late: whoever wrote the line has 3.12 and it compiles fine there.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,

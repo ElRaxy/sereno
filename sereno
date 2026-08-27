@@ -2709,7 +2709,7 @@ def color_tiempo(idle):
 # que deciden que fila ve el usuario y en que sitio, y dentro del bucle de pintado no
 # habia forma de comprobarlas sin arrancar un pty. Mismo motivo que `reparto()`.
 
-MODOS_ORDEN = ("activity", "context", "project", "memory")
+MODOS_ORDEN = ("activity", "context", "project", "memory", "spend")
 
 
 def modo_orden_inicial():
@@ -2732,7 +2732,8 @@ def etiqueta_orden(modo):
     daria las cuatro traducciones por huerfanas. Con literales el test las sigue
     vigilando, que es justo lo que se quiere de una tabla de idiomas."""
     return {"activity": _("activity"), "context": _("context"),
-            "project": _("project"), "memory": _("memory")}.get(modo, modo)
+            "project": _("project"), "memory": _("memory"),
+            "spend": _("spend")}.get(modo, modo)
 
 
 def _plano(s):
@@ -2773,6 +2774,10 @@ def _ausente(r, modo):
         return 0 if (r.get("proyecto") or "") else 1
     if modo == "memory":
         return 0 if r.get("mem_mb") else 1
+    if modo == "spend":
+        # `_uso` es None en las filas de otro CLI, que no tienen transcript, y en el
+        # transcript que no se pudo leer entero. Las dos son huecos, no ceros.
+        return 0 if (r.get("_uso") or {}).get("turnos") else 1
     return 1 if r.get("idle") is None else 0
 
 
@@ -2790,13 +2795,42 @@ def _clave_orden(r, modo):
     if modo == "project":
         return ((r.get("proyecto") or "").lower(), (r.get("rama") or "").lower(),
                 r.get("idle") or 0)
+    if modo == "spend":
+        # Entrada nueva mas salida, y la cache LEIDA fuera, por lo mismo que ya explica
+        # `_uso_texto`: es material releido y es cien veces mayor que todo lo demas.
+        # Cual de las tres se elija da bastante igual: medidos los 40 transcripts de
+        # esta maquina, `out`, `in+cw+out` y `cr` correlacionan rho >= 0,98 entre si y
+        # comparten el top-5, asi que se toma la que se explica en una linea.
+        u = r.get("_uso") or {}
+        return -((u.get("in") or 0) + (u.get("cw") or 0) + (u.get("out") or 0))
     if modo == "memory":
         return -(r.get("mem_mb") or 0)
     return r.get("idle") or 0
 
 
+def carga_uso(rows, modo):
+    """Abre los transcripts que `ordena()` va a necesitar, y solo si hace falta.
+
+    Existe para que `ordena()` siga sin tocar disco. El modo `spend` es el unico que
+    ordena por un dato que no esta ya en la fila: los otros cuatro los compone
+    `live_sessions()` de balde, y este cuesta leer el transcript entero de CADA fila.
+    Medido aqui: 94 ms las 8 vivas y 389 ms las 40 del historial la primera vez, 0,1 ms
+    despues —`_uso` cachea por (tamano, mtime) y de una sesion viva relee solo lo nuevo.
+    Se paga al entrar en el modo, no en cada refresco, y no se paga nunca si no entras.
+    """
+    if modo == "spend":
+        for r in rows:
+            uso_de(r)
+    return rows
+
+
 def ordena(rows, modo="activity", invertido=False):
     """Ordena la lista. Pura: ni pinta, ni lee el reloj, ni toca disco.
+
+    Por eso el modo `spend` lee el campo `_uso` que ya este en la fila y no lo va a
+    buscar: quien llama pasa antes por `carga_uso()`. Sin esa llamada, `spend` no
+    revienta —trata las filas como huecos y las deja donde estaban—, que es la forma
+    correcta de fallar en una funcion que se llama cuatro veces por segundo.
 
     Tres pasadas y no una clave compuesta, aprovechando que `sort` es estable:
 
@@ -2997,9 +3031,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             fuentes = ([f for f in ORDEN_FUENTES if f in hay]
                        + sorted(f for f in hay if f not in ORDEN_FUENTES))
             base = todas + extra
-            rows = ordena([r for r in base if casa(r, filtro)
-                           and (vista == "todas"
-                                or r.get("fuente", "claude") == vista)],
+            rows = ordena(carga_uso([r for r in base if casa(r, filtro)
+                                     and (vista == "todas"
+                                          or r.get("fuente", "claude") == vista)],
+                                    modo),
                           modo, orden_inv)
             if not rows:
                 rows = [{"name": "", "title": "", "title_full": _("(nothing matches)"),
@@ -3489,7 +3524,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     (_("ENTER"), _("open it (a NEW window when Warp is there)")),
                     (_("arrows"), _("move (j / k too)")),
                     (_("home/end"), _("first / last (g / G too)")),
-                    ("s / S", _("sort: activity, context, project, memory / invert")),
+                    ("s / S", _("sort: activity, context, project, memory, spend / invert")),
                     ("y", _("copy the session id")),
                     (_("SPACE"), _("mark / unmark")),
                     ("v", _("range mode: drop an anchor, SPACE marks to the cursor")),
@@ -4071,8 +4106,9 @@ def _T():
         "first / last (g / G too)": "primera / última (g / G también)",
         "sort": "orden",
         "sort: ": "orden: ",
-        "sort: activity, context, project, memory / invert":
-            "ordenar: actividad, contexto, proyecto, memoria / invertir",
+        "sort: activity, context, project, memory, spend / invert":
+            "ordenar: actividad, contexto, proyecto, memoria, gasto / invertir",
+        "spend": "gasto",
         "HEADS UP: {n} are working right now": "OJO: {n} están trabajando ahora mismo",
         "I don't understand that selection: {e}": "No entiendo la selección: {e}",
         "Keys": "Teclas",
@@ -4229,7 +4265,7 @@ def _T():
 _T()
 
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

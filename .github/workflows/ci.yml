@@ -68,5 +68,7 @@ jobs:
         run: python tests/test_recorrido.py
       - name: ninguna celda del panel se pinta dos veces ni se sale del marco
         run: python tests/test_panel_geometria.py
+      - name: la tecla del orden llega a gasto y la lista se pinta por lo consumido
+        run: python tests/test_orden_en_pantalla.py
       - name: nada usa sintaxis posterior a 3.8, que es el suelo del repo
         run: python tests/test_suelo_38.py
