@@ -874,7 +874,7 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
     # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
     # cursor, que es lo que abre ENTER.
-    return colisiones(ordena(rows))
+    return colisiones(ordena(desambigua(rows)))
 
 
 # ─────────────── sesiones leidas del historial, sin tmux ni registro ───────────────
@@ -899,6 +899,57 @@ def _proyecto_de_dir(nombre):
     ULTIMO recurso — el `cwd` bueno viene dentro del transcript.
     """
     return "/" + nombre.lstrip("-").replace("-", "/") if nombre.startswith("-") else ""
+
+
+def id_sesion(r):
+    """El id de la sesion de CLAUDE, o "" si no consta.
+
+    No es lo mismo que `r["name"]`, y confundirlos era el bug: `name` es la clave de la
+    fila —el nombre de la sesion de tmux (`cc-VanguardIA-90a6fb95`) en una viva, y el
+    uuid en una del historial—, asi que la misma etiqueta ensenaba dos cosas distintas
+    y la de tmux no sirve para `claude --resume`.
+
+    Sale del nombre del transcript, que es el uuid y lo escribe el propio CLI. El `id`
+    del registro vale de respaldo, pero solo si es un uuid: en una sesion reanudada
+    apunta al fichero viejo.
+    """
+    e = r.get("meta") or {}
+    t = e.get("_transcript")
+    if t is not None and _UUID.match(t.stem):
+        return t.stem
+    v = str(e.get("id") or "")
+    if _UUID.match(v):
+        return v
+    return v if _UUID.match(str(r.get("name") or "")) else ""
+
+
+def desambigua(rows):
+    """Dos sesiones con el mismo titulo se distinguen con su id corto.
+
+    Pasa mas de lo que parece: doce de las cuarenta filas del historial de esta maquina
+    empezaban con el mismo encargo, asi que en el panel eran la misma fila repetida. El
+    id corto no es bonito, pero es unico por definicion y ademas es lo que hace falta
+    para reanudarla. Se toca el titulo de las REPETIDAS y solo el suyo.
+
+    Idempotente: sobre una lista ya desambiguada no hay grupos, asi que no hace nada.
+    """
+    grupos = {}
+    for r in rows:
+        grupos.setdefault((r.get("title_full") or "").strip(), []).append(r)
+    for titulo, iguales in grupos.items():
+        if len(iguales) < 2 or not titulo:
+            continue
+        for r in iguales:
+            corto = (id_sesion(r) or r.get("name") or "")[:8]
+            if not corto:
+                continue
+            r["title_full"] = f"{titulo}  \u00b7 {corto}"
+            r["title"] = _recorta(r["title_full"], 34)
+    return rows
+
+
+def _recorta(t, ancho):
+    return (t[:ancho - 1] + "\u2026") if len(t) > ancho else t
 
 
 def _ids(rows):
@@ -1193,7 +1244,12 @@ def filas_json(rows):
         # quien lo consuma distinguir "no se midio" de "no gasto nada".
         u = uso_de(r) if USO else None
         fuera.append({
+            # `id` es la CLAVE de la fila y se queda como estaba: nombre de tmux en una
+            # viva, uuid en una del historial. El id de la sesion de Claude —el que se le
+            # pasa a `--resume`— es `session_id`, y va aparte justamente porque no son lo
+            # mismo: confundirlos era lo que hacia que la interfaz ensenara uno por otro.
             "id": r.get("name") or "",
+            "session_id": id_sesion(r) or None,
             "title": r.get("title_full") or r.get("title") or "",
             "project": r.get("proyecto") or "",
             "branch": r.get("rama") or "",
@@ -2075,8 +2131,44 @@ def _uso_ritmo(u):
              t=_lapso(u["activo"]))
 
 
-def first_user_text(path, minlen=25):
-    """Primer mensaje sustancial del usuario: es lo que identifica el hilo.
+# Lo que corta una frase. El `:` NO esta: "Objetivo: arreglar el login" se quedaria en
+# "Objetivo", que es la parte que no dice nada. El punto suelto tampoco vale sin mirar
+# lo que sigue, porque `progress/x.md` y `1.9.0` lo llevan dentro.
+_FIN_FRASE = re.compile(r"[.?!\u2026](?=\s|$)|[\n\r]")
+FRASE_MAX = 60
+# Por debajo de esto una "frase" no titula nada ("Hecho.", "Vale.", "Ok.") y se sigue
+# con la siguiente. Doce y no veinte: "Arregla el login" son dieciseis caracteres y es
+# un titulo perfectamente bueno.
+FRASE_MIN = 12
+
+
+def _primera_frase(t, tope=FRASE_MAX):
+    """La primera frase de un prompt, para titular con ella.
+
+    Un prompt entero no es un titulo: los de esta maquina llegan a 1.727 caracteres, y
+    cuatro sesiones que empiezan con el mismo encargo salian con el mismo nombre en el
+    panel. Se corta por la primera frase, y si esa se queda en nada —"Hecho.", "Vale."—
+    se sigue con la siguiente en vez de titular con una palabra.
+    """
+    t = (t or "").strip()
+    if not t:
+        return ""
+    corte = 0
+    while corte < len(t):
+        m = _FIN_FRASE.search(t, corte)
+        if not m:
+            corte = len(t)
+            break
+        corte = m.start() if m.group().strip() else m.start()
+        if corte >= FRASE_MIN:
+            break
+        corte = m.end()
+    frase = t[:corte].strip() or t.strip()
+    return (frase[:tope - 1].rstrip() + "\u2026") if len(frase) > tope else frase
+
+
+def first_user_text(path, minlen=25, tope=FRASE_MAX):
+    """Primer mensaje sustancial del usuario, recortado a su primera frase.
 
     Medido sobre las 8 sesiones del 2026-08-24: el PRIMER mensaje da 8/8 titulos
     reconocibles y el ultimo da basura ('Continua', 'Si procede'), porque una
@@ -2085,6 +2177,7 @@ def first_user_text(path, minlen=25):
     for t in _user_texts(_head(path)):
         t = _strip_saludo(t)
         if len(t) >= minlen:
+            t = _primera_frase(t, tope)
             return t[:1].upper() + t[1:]
     return None
 
@@ -3121,7 +3214,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
         sobre, ultimo_click = None, (None, 0.0)
         if recargar:
             stdscr.timeout(2500)      # refresco solo; -1 seria bloqueante
+        ultima_recarga = time.monotonic()
         while True:
+            # El refresco iba SOLO en el `timeout` del `getch`, asi que mientras te
+            # movias por la lista con las flechas no llegaba nunca: un `/rename` hecho
+            # en otra ventana no aparecia hasta que soltabas el teclado 2,5 s. Ahora se
+            # mira el reloj tambien aqui, con el mismo periodo, asi que el titulo llega
+            # igual estes navegando o quieto. No cuesta mas: es el mismo refresco, solo
+            # que ya no se pospone por teclear.
+            if recargar and time.monotonic() - ultima_recarga >= 2.5:
+                foco = rows[cur]["name"] if rows and 0 <= cur < len(rows) else foco
+                todas = recargar()
+                ultima_recarga = time.monotonic()
             hay = {r.get("fuente", "claude") for r in todas + extra}
             fuentes = ([f for f in ORDEN_FUENTES if f in hay]
                        + sorted(f for f in hay if f not in ORDEN_FUENTES))
@@ -3470,7 +3574,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
                      if d.get("peso") else
                      ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
-                    (_("session"), rows[cur]["name"], 4),
+                    # El id de la SESION, no la clave de la fila: en una viva esta era
+                    # el nombre de tmux, que no sirve para `claude --resume`.
+                    (_("session"), id_sesion(rows[cur]) or rows[cur]["name"], 4),
                 ]
                 if fu != "claude":
                     campos.insert(0, (_("source"),
@@ -3690,6 +3796,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             if c == -1:               # nadie ha tocado nada: refrescar y seguir
                 foco = rows[cur]["name"] if rows else None
                 todas = recargar()
+                ultima_recarga = time.monotonic()
                 continue
             ev = None
             if c == curses.KEY_MOUSE:                 # ncurses lo parseo el
@@ -3835,10 +3942,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # todos los terminales traducen a KEY_HOME/KEY_END.
                 cur = len(rows) - 1
             elif c == ord("y"):
-                copia_al_portapapeles(rows[cur]["name"])
+                # El id de la sesion de Claude, que es el que se le pasa a `--resume`.
+                # Antes se copiaba `name`, que en una sesion viva es el nombre de tmux:
+                # se pegaba en un `claude --resume` y no reanudaba nada.
+                que_copiar = id_sesion(rows[cur]) or rows[cur]["name"]
+                copia_al_portapapeles(que_copiar)
                 # El id se ensena ADEMAS de copiarlo: hay terminales que ignoran OSC 52
                 # y el fallo seria mudo. Asi, como poco, se puede seleccionar a mano.
-                aviso = _("copied: {s}", s=rows[cur]["name"])
+                aviso = _("copied: {s}", s=que_copiar)
             elif c == ord(" "):
                 if ancla is not None:          # modo rango: marca de ancla a cursor
                     for i in range(min(ancla, cur), max(ancla, cur) + 1):
@@ -4379,7 +4490,7 @@ def _T():
 _T()
 
 
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

@@ -146,10 +146,55 @@ def main():
     if "/min" in pant:
         fallos.append("el panel pinta el ritmo con la lectura a medias")
 
+    # 5. La lista se refresca aunque no dejes de teclear. El refresco iba SOLO en el
+    #    `timeout` del `getch`, asi que mientras navegabas con las flechas no llegaba
+    #    nunca: un `/rename` hecho en otra ventana no aparecia hasta soltar el teclado
+    #    2,5 s. Aqui se teclea sin parar y el reloj corre a cada consulta.
+    import curses as real
+    import time as _time_real
+
+    class RelojQueCorre:
+        """El modulo `time` del programa, con un `monotonic` que avanza medio segundo
+        cada vez que se le pregunta. Se sustituye solo en el namespace de `sereno`, no
+        en el proceso: `time.time`, `sleep` y el resto siguen siendo los de verdad."""
+
+        def __init__(s):
+            s.t = 0.0
+
+        def monotonic(s):
+            s.t += 0.5
+            return s.t
+
+        def __getattr__(s, n):
+            return getattr(_time_real, n)
+
+    veces = []
+
+    def recarga():
+        veces.append(1)
+        return ns["sesiones_demo"]()
+
+    cajon, guardado_time = [], ns["time"]
+    ns["time"] = RelojQueCorre()
+    sys.modules["curses"] = espia(real, 32, 170, [258] * 12 + [Q], cajon, ns["ancho"])
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ns["pick_ui"](ns["sesiones_demo"](), recargar=recarga)
+    except Exception as e:
+        fallos.append(f"el selector revento con el reloj corriendo: {e}")
+    finally:
+        sys.modules["curses"] = real
+        ns["time"] = guardado_time
+    # Doce pulsaciones seguidas, sin un solo hueco de inactividad: antes eran cero
+    # refrescos porque el unico sitio que recargaba era el `timeout` del `getch`.
+    if len(veces) < 2:
+        fallos.append(f"tecleando sin parar solo hubo {len(veces)} refresco(s)")
+
     for f in fallos:
         print("FALLO:", f)
-    print("ok: `s` llega a gasto, la lista se ordena por lo consumido y una lectura a "
-          "medias no se pinta como un total"
+    print("ok: `s` llega a gasto, la lista se ordena por lo consumido, una lectura a "
+          "medias no se pinta como un total y el refresco no espera a que sueltes el "
+          "teclado"
           if not fallos else f"{len(fallos)} fallo(s)")
     return 1 if fallos else 0
 

@@ -368,7 +368,15 @@ un pipe no, así que no lo hace. Hay un test que falla si algún campo cuela una
 ```bash
 sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
 sereno --json --all      # añade el historial reanudable, el equivalente de pulsar TAB
+sereno --json | jq -r '.sessions[] | .session_id'   # para pasárselos a `claude --resume`
 ```
+
+**`id` y `session_id` no son lo mismo, y conviene saber cuál quieres.** `id` es la **clave de la
+fila**: el nombre de la sesión de tmux en una viva (`cc-VanguardIA-90a6fb95`) y el uuid en una del
+historial — sirve para casar filas entre dos llamadas. `session_id` es el **id de la sesión de
+Claude**, el que se le pasa a `--resume`, y es `null` si la fila es de otro CLI. Iban mezclados en
+un solo campo hasta la 1.10.0, y en el selector eso significaba que la tecla que copia daba un
+nombre de tmux que no reanudaba nada.
 
 <details>
 <summary><strong>Tres sitios donde merece la pena engancharlo</strong></summary>
@@ -420,6 +428,7 @@ línea de tmux filtra por él antes de dividir.
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
+| `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` |
 | `/` | filtrar por título mientras escribes |
 | `TAB` | Claude · historial reanudable · Codex · Gemini · todas |
 | `?` | el resto |
@@ -768,7 +777,7 @@ Issues y pull requests bienvenidos, en castellano o en inglés. Antes de abrir u
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-Son dieciocho, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
+Son diecinueve, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
 algo que falla **en silencio**, que es justo por lo que existen:
 
 - **`test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco de
@@ -789,6 +798,9 @@ algo que falla **en silencio**, que es justo por lo que existen:
   ese orden, y una lectura a medias sale como «leyendo…» y no como una cifra. Con las filas
   VACIADAS de consumo: la demo lo trae precocinado, y con él puesto el test pasaba igual sin el
   cableado que dice probar.
+- **`test_nombre_e_id.py`** — el título se corta por la primera frase, dos sesiones con el
+  mismo nombre se separan con su id corto, y el id que se enseña y se copia es el de la sesión
+  de Claude y no el nombre de la sesión de tmux.
 - **`test_suelo_38.py`** — nada usa sintaxis posterior a 3.8. El CI ya corre en 3.8, pero
   avisa tarde: quien escribió la línea tiene 3.12 y ahí compila sin rechistar.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,

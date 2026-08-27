@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.10.0
+
+**Three fixes to how a session is named and identified.**
+
+**The id shown is the session's id.** The panel's `session` row, the key that copies, and the
+`id` field in `--json` were all handing out `name` — which is the row's *key*: the tmux session
+name (`cc-VanguardIA-90a6fb95`) for a live one, the uuid for one from history. Pasting the first
+into `claude --resume` resumes nothing. The panel and the copy key now give the Claude session id,
+and `--json` gained `session_id` alongside `id`, which keeps its meaning.
+
+**A title is a line, not a prompt.** With no `/rename` and no `aiTitle`, the title came from the
+first user message *in full* — 1,727 characters in the longest one here — so twelve of the forty
+rows in this machine's history showed the same name, and in the panel they were the same row
+repeated. It is now cut at the first sentence, capped at 60 characters, and rows that still match
+get their short id appended. A sentence under twelve characters ("Done.", "Ok.") is skipped rather
+than used as a name, and a dot inside `progress/x.md` or `1.9.0` does not cut.
+
+**The list refreshes while you are typing.** The refresh only ran on the `getch` timeout, so a
+`/rename` done in another window did not show up until you left the keyboard alone for 2.5 s.
+The clock is now checked on every turn, same period. Same cost — the refresh was not extra work,
+it was postponed work.
+
 ## 1.9.0
 
 **The picker stopped reading transcripts in one bite.** Each turn of the loop spends a 25 ms budget
