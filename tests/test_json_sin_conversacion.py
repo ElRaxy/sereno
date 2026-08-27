@@ -15,7 +15,11 @@ exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
 
 SECRETO = "CANARIO-CONVERSACION-QUE-NO-DEBE-SALIR"
 CAMPOS = {
-    "id": str, "title": str, "project": str, "branch": str, "source": str,
+    # `id` es la clave de la fila (nombre de tmux en una viva, uuid en una del
+    # historial) y `session_id` es el id de la sesion de Claude, el que se le pasa a
+    # `--resume`. Van los dos porque no son lo mismo, y confundirlos era un bug.
+    "id": str, "session_id": str,
+    "title": str, "project": str, "branch": str, "source": str,
     "state": str, "writing": bool, "tool_pending": bool, "idle_seconds": int,
     "attached": bool, "memory_mb": int, "context_tokens": int, "context_max": int,
     "model": str, "pid": str,

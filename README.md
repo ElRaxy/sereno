@@ -368,7 +368,15 @@ doesn't. A test fails if a field ever sneaks one in.
 ```bash
 sereno --json | jq -r '.sessions[] | select(.state=="waiting") | .title'
 sereno --json --all      # add the resumable history, the equivalent of pressing TAB
+sereno --json | jq -r '.sessions[] | .session_id'   # to hand to `claude --resume`
 ```
+
+**`id` and `session_id` are not the same thing, and it is worth knowing which you want.** `id` is
+the **row key**: the tmux session name for a live one (`cc-VanguardIA-90a6fb95`) and the uuid for
+one from history — good for matching rows across two calls. `session_id` is the **Claude session
+id**, the one `--resume` takes, and it is `null` when the row belongs to another CLI. They were
+mixed into one field until 1.10.0, and in the picker that meant the copy key handed you a tmux
+name that resumed nothing.
 
 <details>
 <summary><strong>Three things worth wiring it into</strong></summary>
@@ -420,6 +428,7 @@ on it first.
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
 | `x` | close the marked ones — asks first, and warns if any is mid-task |
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
+| `y` | copy the session id, the one `claude --resume` takes |
 | `/` | filter by title as you type |
 | `TAB` | Claude · resumable history · Codex · Gemini · all |
 | `?` | everything else |
@@ -755,7 +764,7 @@ Issues and pull requests welcome, in English or Spanish. Run the tests before yo
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-There are eighteen, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
+There are nineteen, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
 Most guard against something that fails **silently**, which is why they exist at all:
 
 - **`test_demo_aislado.py`** — demo mode must not return a single row that came from real disk.
@@ -776,6 +785,9 @@ Most guard against something that fails **silently**, which is why they exist at
   order, and a half-read row shows "reading…" rather than a figure. With the rows EMPTIED of
   usage: the demo ships it precooked, and with it in place the test passed even without the
   wiring it claims to cover.
+- **`test_nombre_e_id.py`** — the title is cut at the first sentence, two sessions sharing a
+  name are separated by their short id, and the id shown and copied is the Claude session id
+  rather than the tmux session name.
 - **`test_suelo_38.py`** — nothing uses syntax newer than 3.8. The CI already runs on 3.8,
   but it tells you late: whoever wrote the line has 3.12 and it compiles fine there.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
