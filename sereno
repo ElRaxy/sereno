@@ -1077,6 +1077,13 @@ _DEMO = [
      "Done and the old tests pass unchanged. One behaviour difference worth knowing: "
      "argparse rejects `--limit=-1`, the old parser silently accepted it.",
      "", "historial"),
+    # Una que nunca arranco. Va con idle bajo A PROPOSITO: por actividad seria de las
+    # primeras, y la gracia de la demo es ensenar que aun asi cae al fondo y en gris.
+    ("Summarise the overnight build failures", "infra", "", 240, None, False, False,
+     "Read last night's CI logs and tell me which failures are the same bug.",
+     "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\","
+     "\"message\":\"Invalid bearer token\"}} \u00b7 Please run /login",
+     "", "historial"),
     ("Shrink the docker image", "infra", "", 250000, None, False, False,
      "The API image is 1.2 GB. Get it under 300 MB without changing the base distro.",
      "310 MB with a multi-stage build and no dev dependencies in the final layer. The "
@@ -1126,6 +1133,10 @@ _DEMO_USO = (
      "turnos": 167, "compacta": 0, "pico": 93_000, "activo": 5_220.0, "usd": None, "completo": True},
     {"in": 86, "out": 29_035, "cw": 253_649, "cr": 5_693_619,
      "turnos": 43, "compacta": 0, "pico": 12_000, "activo": 900.0, "usd": None, "completo": True},
+    # La que nunca arranco: un turno, cero tokens en toda su vida. `completo` en True es
+    # lo que separa "no hay nada" de "todavia no se sabe", y sin el la fila no se marca.
+    {"in": 0, "out": 0, "cw": 0, "cr": 0,
+     "turnos": 1, "compacta": 0, "pico": 0, "activo": 0.0, "usd": None, "completo": True},
 )
 
 
@@ -3052,6 +3063,29 @@ def _clave_orden(r, modo):
     return r.get("idle") or 0
 
 
+def vacia(r):
+    """1 si la sesion nunca recibio una respuesta. No hay nada a lo que volver.
+
+    El hecho es que NINGUNA respuesta consumio un token. `pico` es el mayor contexto que
+    la sesion llego a tener, asi que un 0 solo sale de cero respuestas de verdad — y solo
+    se mira con el transcript leido ENTERO: a medias, 0 significa "todavia no se sabe", no
+    "no hay nada". Un dato ausente no es un dato bueno.
+
+    En esta maquina son 21 de 39 filas del historial, y 16 de ellas son la misma: sesiones
+    que arrancaron y murieron en el acto con `API Error: 401 · Please run /login`, cero
+    tokens. Sin esto, mas de la mitad de la lista de "a cual vuelvo" son sesiones a las que
+    no se puede volver.
+
+    **Las vivas no se marcan nunca**, aunque esten a cero. Una que acabas de lanzar todavia
+    no ha contestado y es justo la que quieres arriba: medido, habia una con 23 segundos de
+    vida que esta guarda salva.
+    """
+    if r.get("fuente", "claude") != "historial":
+        return 0
+    u = r.get("_uso") or {}
+    return 1 if (u.get("completo") and not u.get("pico")) else 0
+
+
 def ordena(rows, modo="activity", invertido=False):
     """Ordena la lista. Pura: ni pinta, ni lee el reloj, ni toca disco.
 
@@ -3068,12 +3102,16 @@ def ordena(rows, modo="activity", invertido=False):
          como parpadeo.
       2. el orden principal del modo, que si respeta `invertido`.
       3. los huecos al fondo, en las dos direcciones.
+      4. y debajo de los huecos, las que nunca arrancaron. Un hueco es una sesion real
+         cuyo dato no consta; una vacia no tiene dato porque no tiene nada. La cuarta
+         pasada va la ultima y por eso manda sobre las tres.
     """
     if modo not in MODOS_ORDEN:
         modo = MODOS_ORDEN[0]
     out = sorted(rows, key=lambda r: r.get("name") or "")
     out.sort(key=lambda r: _clave_orden(r, modo), reverse=invertido)
     out.sort(key=lambda r: _ausente(r, modo))
+    out.sort(key=vacia)
     return out
 
 
@@ -3337,11 +3375,20 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                         + ("\u2191" if orden_inv else "\u2193"), 7, curses.A_BOLD)
                 zonas.append((0, x0, hx - 1, "orden", None))
                 cab_put("   ")
-            cab_put(str(len(rows)), 6, curses.A_BOLD)
+            # Las que nunca arrancaron no se cuentan como reanudables: reanudar una te
+            # devuelve su error de arranque y nada mas. Solo se descuentan de ESE rotulo
+            # — en "todas" el numero es el total de filas y ahi si es verdad.
+            vacias = sum(1 for r in rows if vacia(r))
+            resumible = (muertas or externa) and vista != "todas"
+            cab_put(str(len(rows) - (vacias if resumible else 0)), 6, curses.A_BOLD)
             # En "todas" conviven abiertas y reanudables: llamarlas "abiertas" a todas
             # decia que 46 sesiones muertas seguian corriendo.
             cab_put(_(" total") if vista == "todas" else
                     _(" resumable") if (muertas or externa) else _(" open"), 4)
+            if vacias:
+                cab_put("  \u00b7  ", 4)
+                cab_put(str(vacias), 4, curses.A_BOLD)
+                cab_put(_(" never started"), 4)
             currando = sum(1 for r in rows if (r.get("pulso") or {}).get("herramienta"))
             escriben = sum(1 for r in rows if (r.get("pulso") or {}).get("escribe")
                            and not (r.get("pulso") or {}).get("herramienta"))
@@ -3500,7 +3547,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 put(" ")
                 titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
                                  anchura_t)
-                put(titulo, 2 if marcada else (5 if sin_rastro else 0),
+                put(titulo, 2 if marcada else (5 if sin_rastro else
+                                               4 if vacia(r) else 0),
                     curses.A_BOLD if (marcada or foco) else 0)
                 proy = _proy(r)
                 if ancho_p:
@@ -4331,6 +4379,7 @@ def _T():
         "stopped": "parada",
         " open": " abiertas",
         " resumable": " reanudables",
+        " never started": " sin arrancar",
         " total": " en total",
         " writing": " escribiendo",
         "(+{n} earlier)": "(+{n} antes)",
@@ -4544,7 +4593,7 @@ def _T():
 _T()
 
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

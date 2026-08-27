@@ -187,10 +187,16 @@ def main():
     if not casa(fila("x", titulo="Revisar la sesión de pagos"), "sesion"):
         fallos.append("el filtro no ignora las tildes")
 
-    # 10. Y el caso completo: filtrar por proyecto sobre la demo devuelve las tres de
-    #     `infra`, que es lo que hoy devuelve vacio.
-    if len([r for r in demo if casa(r, "infra")]) != 3:
-        fallos.append("filtrar la demo por 'infra' no devuelve sus tres sesiones")
+    # 10. Y el caso completo: filtrar por proyecto sobre la demo devuelve TODAS las de
+    #     `infra`, que es lo que hoy devuelve vacio. El numero se cuenta de la propia
+    #     demo y no se clava a mano: clavarlo obligaba a tocar este test cada vez que la
+    #     demo gana una fila, y un test que hay que "arreglar" por un cambio legitimo
+    #     acaba arreglandose sin mirar.
+    esperadas = len([r for r in demo if r.get("proyecto") == "infra"])
+    if esperadas < 3:
+        fallos.append("la demo tiene que traer varias sesiones de 'infra' para este caso")
+    if len([r for r in demo if casa(r, "infra")]) != esperadas:
+        fallos.append("filtrar la demo por 'infra' no devuelve sus %d sesiones" % esperadas)
 
     for x in fallos:
         print("FALLO:", x)
