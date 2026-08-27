@@ -706,6 +706,8 @@ Most guard against something that fails **silently**, which is why they exist at
   empty searches in a row, and nothing unobserved ever counts as success.
 - **`test_panel_geometria.py`** — the terminal is replaced by a stand-in that records every
   write, so no cell gets painted twice and nothing spills out of the frame.
+- **`test_suelo_38.py`** — nothing uses syntax newer than 3.8. The CI already runs on 3.8,
+  but it tells you late: whoever wrote the line has 3.12 and it compiles fine there.
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
   unknown flags being reported, and a resumed session being followed to its live transcript.
 

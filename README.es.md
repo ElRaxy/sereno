@@ -705,6 +705,8 @@ algo que falla **en silencio**, que es justo por lo que existen:
   búsquedas vacías seguidas, y lo que no se pudo observar nunca cuenta como éxito.
 - **`test_panel_geometria.py`** — el terminal se sustituye por un doble que apunta cada
   escritura, así ninguna celda se pinta dos veces ni nada se sale del marco.
+- **`test_suelo_38.py`** — nada usa sintaxis posterior a 3.8. El CI ya corre en 3.8, pero
+  avisa tarde: quien escribió la línea tiene 3.12 y ahí compila sin rechistar.
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,
   los flags desconocidos diciéndose, y una sesión reanudada seguida hasta el fichero que escribe.
 

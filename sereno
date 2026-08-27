@@ -1452,9 +1452,10 @@ def print_live(rows):
         edad = _dur(now - r["created"]) if r["created"] else "?"
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx")
-        pct = (f"  {round(100 * ctx / tope_contexto(pu.get('modelo'), ctx,
-                                            pu.get('ventana_1m'))):>3}%"
-               if ctx else "      ")
+        # El tope se saca ANTES del f-string: partir una expresion en dos lineas dentro
+        # de uno es legal desde 3.12 y un SyntaxError en 3.8, que es el suelo del repo.
+        tope_ctx = tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m")) if ctx else 0
+        pct = f"  {round(100 * ctx / tope_ctx):>3}%" if ctx else "      "
         # `--list` es lo que sale en un pipe y en una terminal sin tty: si el aviso
         # solo viviera en el selector, quien lea la lista se lo pierde justo cuando importa.
         choque = ("  \u29c9 " + _("clashes with another session")) if r.get("colision") else ""
