@@ -17,6 +17,7 @@ optional and only add live process control; without them everything is read from
   sereno --json [--all]  the same facts as JSON, without any conversation in it
   sereno --usage         add what each session has burned (reads whole transcripts)
   sereno --disk          what the transcripts weigh, by project. Reads nothing else
+  sereno --now           what every live session is running, all of them at once
   sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
@@ -4533,6 +4534,10 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "{n} live \u00b7 {t} working, {e} waiting on you":
+            "{n} vivas \u00b7 {t} trabajando, {e} te esperan",
+        "no tool calls in the tail of its transcript":
+            "ninguna llamada a herramienta en la cola de su transcript",
         " idle": " en espera",
         " in a command": " en un comando",
         "in a command": "en un comando",
@@ -4769,7 +4774,7 @@ def _T():
 _T()
 
 
-VERSION = "1.16.0"
+VERSION = "1.17.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -4777,7 +4782,7 @@ VERSION = "1.16.0"
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
-    "--usage": 0, "--disk": 0,
+    "--usage": 0, "--disk": 0, "--now": 0,
     "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
@@ -4885,7 +4890,74 @@ def peso_historial(tope=20):
 
 
 _FILA_PROY = "  %-30s %5d  %10s%s"
+_FILA_NOW = "    %s %s  %s"
 _FILA_SES = "  %10s  %8s  %-46s %s%s"
+
+
+def que_hacen(tope_eventos=3):
+    """Hechos: que esta ejecutando cada sesion viva, todas de una vez.
+
+    El panel ya pinta este recorrido, pero SOLO el de la fila bajo el cursor, y por eso
+    saber en que anda cada una cuesta bajar el cursor nueve veces. Aqui salen las nueve
+    en una pantalla.
+
+    Devuelve hechos tipados; el texto lo compone `cmd_now()`. La lectura es la misma que
+    hace el panel —la cola del transcript— con la diferencia de que se hace para todas
+    las filas en vez de para una: son 9-16 transcripts, no los 595 del historial.
+    """
+    filas = []
+    for r in ordena(live_sessions(con_ram=False), "activity"):
+        if r.get("fuente", "claude") != "claude":
+            continue          # las del historial no estan haciendo nada por definicion
+        d = detalles(r)
+        ruta = d.get("ruta") or []
+        # Los sintomas se sacan del recorrido ENTERO, no de los tres que se enseñan:
+        # un bucle son tres fallos seguidos y con tres eventos a la vista no se ve.
+        sint = sintomas(ruta)
+        filas.append({
+            "id": r.get("name") or "",
+            "titulo": r.get("title_full") or r.get("title") or "",
+            "proyecto": r.get("proyecto") or "",
+            "estado": estado_estable(r),
+            "idle": None if r.get("idle") is None else round(r["idle"]),
+            "atasco": alertas(sint),
+            "sintomas": sint,
+            "eventos": ruta[-tope_eventos:],
+        })
+    return filas
+
+
+def cmd_now(cols=None, tope_eventos=3):
+    """Imprime lo que `que_hacen()` observo. Solo formatea: no vuelve a mirar nada."""
+    filas = que_hacen(tope_eventos)
+    if not filas:
+        print(nada_que_ensenar())
+        return 1
+    ancho_t = min(80, max(40, (cols or shutil.get_terminal_size((92, 24)).columns) - 34))
+    trabajando = sum(1 for f in filas if f["estado"] in TRABAJANDO)
+    print(_("{n} live · {t} working, {e} waiting on you",
+            n=len(filas), t=trabajando, e=len(filas) - trabajando))
+    for f in filas:
+        print()
+        # El estado va en texto y no en color: esto se lee tambien por tuberia, y un
+        # color que se pierde deja las nueve lineas iguales.
+        cola = ESTADO_LARGO(f["estado"])
+        if f["estado"] not in TRABAJANDO and f["idle"]:
+            cola += " \u00b7 " + _hace(f["idle"])
+        # Titulo, proyecto y estado en UNA linea: el proyecto en la suya gastaba un
+        # renglon por sesion para repetir nueve veces la misma palabra.
+        cabeza = f["titulo"] or f["id"]
+        if f["proyecto"]:
+            cabeza += "  \u00b7  " + f["proyecto"]
+        print("%s  %s" % (rellena(recorta(cabeza, ancho_t), ancho_t), cola))
+        for clave in f["atasco"]:
+            print("  ! %s" % _TEXTO_ALERTA[clave](f["sintomas"]))
+        for e in f["eventos"]:
+            glifo, _par, dur, res = linea_ruta(e, ancho_t + 20)
+            print(_FILA_NOW % (glifo, dur, res))
+        if not f["eventos"]:
+            print("    " + _("no tool calls in the tail of its transcript"))
+    return 0
 
 
 def _peso(b):
@@ -5039,6 +5111,9 @@ def main():
 
     if "--disk" in argv:
         return cmd_disk()
+
+    if "--now" in argv:
+        return cmd_now()
 
     if "--find" in argv:
         i = argv.index("--find")
