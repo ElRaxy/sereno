@@ -25,14 +25,40 @@ esac
   echo "ABORTA: el sha256 tiene ${#SHA} caracteres y tiene que tener 64." >&2; exit 2; }
 
 REMOTO="${SERENO_TAP_REMOTO:-https://github.com/ElRaxy/homebrew-tap.git}"
+BASE="${SERENO_ASSET_BASE:-https://github.com/ElRaxy/sereno/releases/download}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# ── que el asset EXISTA y sea ese sha, no solo que el sha tenga forma de sha ─────
+# Hasta aqui este guion validaba la FORMA (64 hex, una url y un sha256 unicos) y nunca
+# el HECHO. Lo unico que impedia apuntar el tap a una version inexistente era el orden
+# dentro de `release.sh`, que lo llama detras de la verificacion por descarga — y este
+# guion invita por escrito a lanzarlo a mano, que es donde esa red no existe. Se probo:
+# con una version inventada salia con 0 y dejaba la formula apuntando a un 404, y el
+# unico que se enteraba era el cron semanal del tap, hasta siete dias despues.
+command -v curl > /dev/null || {
+  echo "ABORTA: hace falta curl para comprobar que el asset existe." >&2; exit 1; }
+URL="$BASE/v$VER/sereno"
+curl -fsSL "$URL" -o "$TMP/asset" || {
+  echo "ABORTA: no se pudo descargar $URL — esa version no esta publicada." >&2; exit 1; }
+real="$(shasum -a 256 "$TMP/asset" | awk '{print $1}')"
+echo "asset: $(wc -c < "$TMP/asset" | tr -d ' ')B · sha publicado: ${real:0:12}… · pedido: ${SHA:0:12}…"
+[ "$real" = "$SHA" ] || {
+  echo "ABORTA: el asset publicado tiene sha $real y se pidio escribir $SHA." >&2; exit 1; }
 
 git clone --quiet --depth 1 "$REMOTO" "$TMP/tap" || {
   echo "ABORTA: no se pudo clonar el tap ($REMOTO)." >&2; exit 1; }
 
 F="$TMP/tap/Formula/sereno.rb"
 [ -f "$F" ] || { echo "ABORTA: el tap clonado no tiene Formula/sereno.rb." >&2; exit 1; }
+
+# Una stanza `version` explicita es una TERCERA copia del numero que este guion no
+# toca: Homebrew usaria la vieja mientras descarga el asset de la nueva, la guarda del
+# `install` haria `odie` y `brew install` quedaria roto para todo el mundo. Se reprodujo
+# empujando una formula asi. Hoy la formula no la tiene, pero eso no es una garantia.
+grep -qE '^\s*version\s+"' "$F" && {
+  echo "ABORTA: la formula trae una stanza \`version\` explicita, que este guion no bumpea." >&2
+  echo "        Quitala de la formula o bumpeala a mano; asi quedaria descuadrada." >&2; exit 1; }
 
 python3 - "$F" "$VER" "$SHA" <<'RB'
 import pathlib, re, sys

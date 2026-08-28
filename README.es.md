@@ -918,6 +918,11 @@ mentira: clona, edita, **empuja y relee del remoto**, sin tocar la red. Si el pa
 el mensaje lo dice **sin llamarlo FALLO**: la release está publicada y es buena, y te da el
 comando exacto para reintentar solo esa parte.
 
+Tres variables de entorno lo gobiernan, y existen para probarlo más que para el día a día:
+`SERENO_SIN_TAP=1` se salta el paso del tap, y `SERENO_TAP_REMOTO` / `SERENO_ASSET_BASE` apuntan el
+bump a un remoto de mentira y a un directorio local de assets — que es como `test_bump_tap.py`
+ejerce el camino entero, empujón incluido, sin tocar la red.
+
 `release.sh` llama a `gh`, así que sale a la red — es una herramienta de mantenimiento y **no
 forma parte del programa publicado**. La release lleva un fichero, `sereno`, y `test_sin_red.py`
 cubre ese.
