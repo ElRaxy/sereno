@@ -282,15 +282,28 @@ estándar—, así que el pico se reconstruye del transcript: el `usage` de cada
 `preTokens` de cada compactación, que es contexto y no un acumulado (comprobado contra la
 respuesta anterior: mediana +0,4%, 165 de 169 dentro del ±5%).
 
-Sobre los 524 transcripts de la máquina donde se escribió esto, el pico corrige **30** (5,7%) y
-los 30 hacia el mismo lado: uno marcaba 171k sobre 200k —un **86%**, "compacta ya"— cuando eran
-171k de un millón, un **17%**. Como cobertura, `preTokens` aparece en 107 de 524 transcripts
-frente a los 13 del `cost-state`.
+Cuando el pico corrige, corrige en un solo sentido: una sesión marcaba 171k sobre 200k —un
+**86%**, "compacta ya"— cuando eran 171k de un millón, un **17%**.
+
+**Vuelto a medir el 2026-08-28, sobre 599 transcripts: corrige cero.** No porque se haya roto
+—301 de esas filas pasan de 200k de pico— sino porque el paso 3 ya las caza todas: el
+`~/.claude/settings.json` de esta máquina dice `opus[1m]`, así que nada llega a la guarda. Es la
+última línea, no un camino habitual, y solo se gana el sueldo en una máquina cuyos ajustes no lo
+digan. La primera medición, sobre 524 transcripts, encontró 30 (5,7%).
+
+Cobertura sobre esos mismos 599: `preTokens` en **115** y `cost-state` en **40** — este último se
+ha triplicado desde 13, así que el sufijo que nombra la ventana llega mucho más a menudo que antes.
 
 El pico sale de leer el transcript entero, y **eso lo hace ahora también la lista**, un trozo por
 refresco: ver [Leer sin bloquear](#leer-sin-bloquear). Y el sentido contrario —probar que una sesión
-*no* es de un millón— no tiene más evidencia que el `cost-state`: en esos 524 transcripts no hay
-ni una auto-compactación (que delataría el umbral) ni un solo `message.model` con sufijo.
+*no* es de un millón— no tiene más evidencia que el `cost-state`. Vuelto a comprobar sobre los
+599: **ni una auto-compactación**, que delataría el umbral, y **ni un solo `message.model` con
+sufijo**.
+
+Lo primero ahora está comprobado y no deducido: cada compactación escribe
+`compactMetadata.trigger`, y las **182** de esta máquina dicen `manual`. Una compactación manual
+ocurre cuando tú la pides, así que su `preTokens` dice lo que la sesión llevaba dentro — nunca
+dónde estaba el techo.
 
 **La 2 va antes que la 3, y funciona en los dos sentidos.** Tu configuración global es la floja
 —una sesión lanzada con otro `--model` no la cumple— así que el único hecho que describe *esta*
