@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.22.0
+
+**The handover went one way, and its guard did not hold.**
+
+Three defects in `c`, found by asking what it does for someone who is not me.
+
+`Path("").is_dir()` returns **`True`**: Python reads the empty path as `.`. The guard that
+existed to stop a handover starting in the wrong directory therefore let through every row with
+no recorded `cwd` — which is every Codex row, they carry `""` — and opened the other CLI wherever
+the process happened to be standing, announcing *1 handed over*. It is the exact failure the
+guard was written to prevent, passing as a success. The check now asks for an **absolute** path,
+so a relative one is out too: it exists relative to the process, not to the session.
+
+**Nothing hands a session to the CLI it is already running under.** A Codex row handed to Codex
+opened a blank session and counted it as a handover.
+
+**And it goes both ways now.** `claude` is in the table beside `codex` (`claude [PROMPT]` starts
+an interactive session with a seed, checked against its own `--help`), the briefing names the CLI
+it comes from instead of always saying *"a Claude Code session"* — false for a Codex row — and
+with nothing chosen the destination is whichever available CLI is not the origin. So a Codex
+session is handed to Claude without picking anything.
+
+**And a Codex row now knows where it lives.** Its index carries `{id, thread_name,
+updated_at}` and nothing else, so every Codex session arrived with an empty directory — which,
+once the guard above holds, means none of them could be handed over at all: the other half of the
+handover would have shipped implemented and dead. The header of its rollout does carry it, in
+`payload.cwd`. Only the rows about to be drawn are opened, and only their first line: **9 of 11
+resolved in 7 ms** on this machine, against 699 rollouts on disk. The two without one keep an
+empty directory rather than inheriting a neighbour's, and the project column fills in for the
+rest.
+
+Ten new cases across `test_relevo.py` and `test_cwd_codex.py`, each checked by mutation: the old
+guard, the missing same-CLI filter, the fixed briefing, splitting the uuid on hyphens and sharing
+one `cwd` between rows were each put back, and each one turned a case red.
+
+**Checked by opening the window, not by reading the YAML.** A real Codex row was handed over:
+Warp opened, `claude` started in `/Users/alex/Desktop/VanguardIA` — the directory read from that
+session's rollout — and its transcript's first prompt is the briefing, whole, saying it comes
+from a Codex session. Warp reports nothing when a launch does not happen, so the first attempt
+was confirmed against a positive control (a trivial configuration that writes a file) before
+concluding anything about this one.
+
 ## 1.21.0
 
 **Two places where it filled a gap in instead of leaving it empty.**

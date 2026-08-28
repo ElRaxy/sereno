@@ -1951,7 +1951,21 @@ def pestanas_de(rows):
 # INTERACTIVA: `gemini` no esta instalado en esta maquina, asi que no se pone a ojo.
 ARNESES = {
     "codex": lambda prompt: "codex " + shlex.quote(prompt),
+    # `claude [options] [command] [prompt]` -- "Your prompt", y sin `-p` la sesion es
+    # interactiva. Verificado contra `claude --help` el 2026-08-28. Esta aqui para que
+    # el relevo vaya en los dos sentidos: una sesion de Codex tambien se entrega.
+    "claude": lambda prompt: "claude " + shlex.quote(prompt),
 }
+
+# El CLI del que sale una fila. `fuente` tiene cinco valores y dos son el mismo arnes:
+# "historial" es Claude Code parado, no otro programa.
+NOMBRE_CLI = {"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini",
+              "antigravity": "Antigravity"}
+
+
+def cli_de(r):
+    f = r.get("fuente", "claude")
+    return "claude" if f in ("claude", "historial") else f
 
 
 def arneses_disponibles():
@@ -1974,8 +1988,9 @@ def briefing(r, con_conversacion=False):
     """
     d = detalles(r)
     cwd = d.get("cwd") or (r.get("meta") or {}).get("cwd") or ""
-    lineas = [_("You are taking over from a Claude Code session. You do not have its "
-                "history: what follows is everything that is known about it."), ""]
+    origen = NOMBRE_CLI.get(cli_de(r), cli_de(r))
+    lineas = [_("You are taking over from a {c} session. You do not have its history: "
+                "what follows is everything that is known about it.", c=origen), ""]
     campos = [(_("project"), cwd), (_("branch"), d.get("gitBranch") or ""),
               (_("title"), r.get("title_full") or r.get("title") or ""),
               (_("state"), ESTADO_LARGO(estado_estable(r)))]
@@ -1996,38 +2011,60 @@ def briefing(r, con_conversacion=False):
 
 
 def pestanas_de_relevo(rows, arnes, con_conversacion=False):
-    """(pestanas, sin_sitio) para entregar estas filas a otro CLI.
+    """(pestanas, sin_sitio, mismo_cli) para entregar estas filas a otro CLI.
 
     Se cae la fila cuyo directorio ya no existe: un relevo que arranca en `~` porque el
-    proyecto se movio es peor que no arrancar, porque parece que ha funcionado.
+    proyecto se movio es peor que no arrancar, porque parece que ha funcionado. Y se cae
+    la que YA es de ese CLI: relevar Codex a Codex abre una sesion en blanco y la cuenta
+    como entregada.
     """
     compone = ARNESES[arnes]
-    pestanas, sin_sitio_ = [], []
+    pestanas, sin_sitio_, mismo_ = [], [], []
     for r in rows:
+        if cli_de(r) == arnes:
+            mismo_.append(r)
+            continue
         cwd = detalles(r).get("cwd") or (r.get("meta") or {}).get("cwd") or ""
-        if not pathlib.Path(cwd or "").is_dir():
+        # La guarda pide ruta ABSOLUTA, no solo que exista: `Path("").is_dir()` devuelve
+        # True porque Python lee la ruta vacia como `.`, asi que una fila sin `cwd` —las
+        # de Codex traen ""— la pasaba entera y el relevo arrancaba en el directorio del
+        # proceso, anunciando exito. Es justo lo que la guarda existia para impedir.
+        ruta_cwd = pathlib.Path(cwd) if cwd else None
+        if ruta_cwd is None or not ruta_cwd.is_absolute() or not ruta_cwd.is_dir():
             sin_sitio_.append(r)
             continue
         titulo = "%s \u2192 %s" % (r.get("title") or r.get("name") or "", arnes)
         pestanas.append((titulo, compone(briefing(r, con_conversacion)), cwd))
-    return pestanas, sin_sitio_
+    return pestanas, sin_sitio_, mismo_
 
 
 def relevo(sel, arnes=None):
-    """Abre una sesion NUEVA del otro CLI por cada fila, en su directorio."""
+    """Abre una sesion NUEVA del otro CLI por cada fila, en su directorio.
+
+    Sin arnes pedido, el destino por defecto es cualquiera MENOS el de las filas: es lo
+    que hace que una sesion de Codex se entregue a Claude sin elegir nada, y lo que
+    evita ofrecer como relevo el mismo programa del que se sale.
+    """
     disponibles = arneses_disponibles()
-    arnes = arnes or (disponibles[0] if disponibles else None)
+    if not arnes:
+        origen = {cli_de(r) for r in sel}
+        otros = [a for a in disponibles if a not in origen]
+        arnes = (otros or disponibles or [None])[0]
     if not arnes:
         return None, _("No other CLI found on your PATH.")
-    pestanas, sin_sitio_ = pestanas_de_relevo(
+    pestanas, sin_sitio_, mismo_ = pestanas_de_relevo(
         sel, arnes, con_conversacion=_env("SERENO_RELEVO") == "completo")
     if not pestanas:
+        if mismo_ and not sin_sitio_:
+            return None, _("Those are already {c} sessions.", c=arnes)
         return None, _("None of those has a directory to go back to.")
     _escribe_config(RELEVO_CONFIG, pestanas)
     subprocess.run(["open", f"warp://launch/{RELEVO_CONFIG}"], check=False)
     aviso = _("{n} handed over to {c}", n=len(pestanas), c=arnes)
     if sin_sitio_:
         aviso += " \u00b7 " + _("{n} have nowhere to go back to", n=len(sin_sitio_))
+    if mismo_:
+        aviso += " \u00b7 " + _("{n} are already {c}", n=len(mismo_), c=arnes)
     return arnes, aviso
 
 
@@ -4211,7 +4248,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     ("a / i", _("mark all / invert")),
                     ("d", _("mark the ones idle for over an hour")),
                     ("r", _("reopen the marked ones as tabs")),
-                    ("c", _("hand the marked ones to another CLI (codex...)")),
+                    ("c", _("hand the marked ones to another CLI (codex, claude...)")),
                     ("n", _("what they are ALL running, in one screen")),
                     ("q", _("quit without touching anything")),
                     ("", ""),
@@ -4582,6 +4619,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
 # tmux (no las lanza nuestro wrapper): son historial en disco, se listan como
 # muertas y se abren con el `resume` de su propio CLI.
 CODEX_INDEX = HOME / ".codex/session_index.jsonl"
+CODEX_SESIONES = HOME / ".codex/sessions"
 GEMINI_TMP = HOME / ".gemini/tmp"
 ANTIGRAVITY = HOME / ".gemini/antigravity-cli/conversations"
 
@@ -4631,7 +4669,44 @@ def sesiones_codex(limite=40):
                                  _iso(j.get("updated_at") or ""),
                                  ["codex", "resume", j["id"]]))
     out.sort(key=lambda r: -(r["created"] or 0))
-    return out[:limite]
+    out = out[:limite]
+    donde = _cwd_codex([r["name"] for r in out])
+    for r in out:
+        r["meta"]["cwd"] = donde.get(r["name"], "")
+    return out
+
+
+def _cwd_codex(ids):
+    """El directorio de cada sesion de Codex, sacado de la cabecera de su rollout.
+
+    El indice no lo trae, y sin el una fila de Codex no tiene proyecto que pintar ni
+    sitio al que relevar: se descarta entera. Esta aqui y no en `sesiones_codex` porque
+    solo interesan las filas que se van a pintar — se abren 40 ficheros, no los 699 — y
+    de cada uno la PRIMERA linea, que es la cabecera con `payload.cwd`.
+    """
+    quiero = set(ids)
+    if not quiero or not CODEX_SESIONES.is_dir():
+        return {}
+    # El uuid va al final del nombre (`rollout-<fecha>-<uuid>.jsonl`), asi que se lee
+    # del final del `stem` en vez de partir por guiones: la fecha tambien los lleva.
+    suyos = {}
+    for f in CODEX_SESIONES.glob("*/*/*/rollout-*.jsonl"):
+        sid = f.stem[-36:]
+        if sid in quiero:
+            hay = suyos.get(sid)
+            if hay is None or f.stat().st_mtime > hay.stat().st_mtime:
+                suyos[sid] = f
+    fuera = {}
+    for sid, f in suyos.items():
+        try:
+            with f.open("r", errors="replace") as fh:
+                cab = json.loads(fh.readline())
+        except Exception:
+            continue
+        cwd = (cab.get("payload") or {}).get("cwd") or ""
+        if cwd:
+            fuera[sid] = cwd
+    return fuera
 
 
 def _sesiones_json_dir(fuente, raiz, patron, abrir_cmd, limite=20):
@@ -4765,8 +4840,8 @@ def _T():
             "qu\u00e9 est\u00e1n ejecutando TODAS, en una pantalla",
         "What they are all running": "Qu\u00e9 est\u00e1n ejecutando todas",
         "{n} lines more": "{n} l\u00edneas m\u00e1s",
-        "hand the marked ones to another CLI (codex...)":
-            "entregar las marcadas a otro CLI (codex\u2026)",
+        "hand the marked ones to another CLI (codex, claude...)":
+            "entregar las marcadas a otro CLI (codex, claude\u2026)",
         "Mark which ones you want to hand over first.":
             "Marca primero cu\u00e1les quieres entregar.",
         "No other CLI found on your PATH.":
@@ -4775,10 +4850,12 @@ def _T():
             "Ninguna de esas tiene un directorio al que volver.",
         "{n} handed over to {c}": "{n} entregadas a {c}",
         "{n} have nowhere to go back to": "{n} no tienen sitio al que volver",
-        "You are taking over from a Claude Code session. You do not have its "
-        "history: what follows is everything that is known about it.":
-            "Vienes a relevar a una sesi\u00f3n de Claude Code. No tienes su "
-            "historial: esto es todo lo que se sabe de ella.",
+        "{n} are already {c}": "{n} ya son de {c}",
+        "Those are already {c} sessions.": "Esas ya son sesiones de {c}.",
+        "You are taking over from a {c} session. You do not have its history: "
+        "what follows is everything that is known about it.":
+            "Vienes a relevar a una sesi\u00f3n de {c}. No tienes su historial: "
+            "esto es todo lo que se sabe de ella.",
         "project": "proyecto",
         "branch": "rama",
         "title": "t\u00edtulo",
@@ -5034,7 +5111,7 @@ def _T():
 _T()
 
 
-VERSION = "1.21.0"
+VERSION = "1.22.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
