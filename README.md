@@ -405,6 +405,7 @@ sereno --json     # the same facts, for your statusline or your scripts
 sereno --watch    # sit there and tell you the moment one stops and waits on you
 sereno --find "the thing you half remember"
 sereno --usage    # add what each session has burned
+sereno --disk     # what the transcripts weigh, by project
 sereno --help
 ```
 
@@ -595,6 +596,37 @@ one that fits in a line. Money is out for a different reason: `totalCostUSD` is 
 the CLI **on exit**, so it was present in 16 of 40 sessions and in **none** of the live ones.
 
 You can leave it on: `SERENO_SORT=spend`, or `-spend` to invert it.
+
+### `--disk`
+
+What the transcripts weigh, and where that weight is. The panel gives the size of the row under
+the cursor and nothing else, so the split was invisible — and on the machine this was written on it
+turned out to be **3.4 GB across 595 sessions**, with 3,464 MB of it in a single project and
+**403 MB in five sessions**.
+
+```
+3.4 GB in 595 sessions · /Users/you/.claude/projects
+  plus 285 subagent transcripts, 436 KB
+
+by project
+  VanguardIA                       442      3.4 GB
+  and 56 more projects, 3.8 MB between them
+
+the heaviest sessions
+     85.2 MB  25d ago  Rebuild the atelier landing page       445cdc22
+     84.9 MB  20d ago  Continue with the atelier              68e64cae
+     …
+
+102 of them (2.9 MB) have no place to go back to.
+```
+
+It **does not delete anything, does not offer to, and calls nothing garbage.** `sereno` writes to
+nothing that belongs to a session, and a heavy history is not a problem — it is a fact you decide
+what to do with. Reading it costs 340ms for 595 sessions: a `stat` on each, the `cwd` from the
+header of each, and the title only of the handful it prints.
+
+Subagent transcripts (`agent-*.jsonl`) are counted apart: 285 files and 436 KB here, so folding
+them into the per-project split would have moved the file count without moving a megabyte.
 
 ### 🎭 Try it without touching your data
 

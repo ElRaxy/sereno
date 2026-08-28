@@ -16,6 +16,7 @@ optional and only add live process control; without them everything is read from
   sereno --list          plain list, touches nothing
   sereno --json [--all]  the same facts as JSON, without any conversation in it
   sereno --usage         add what each session has burned (reads whole transcripts)
+  sereno --disk          what the transcripts weigh, by project. Reads nothing else
   sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
@@ -4521,6 +4522,18 @@ def _T():
         " open": " abiertas",
         " resumable": " reanudables",
         " never started": " sin arrancar",
+        "{mb} in {n} sessions \u00b7 {d}": "{mb} en {n} sesiones \u00b7 {d}",
+        "  plus {n} subagent transcripts, {mb}":
+            "  y {n} transcripts de subagentes, {mb}",
+        "by project": "por proyecto",
+        "and {n} more projects, {mb} between them":
+            "y {n} proyectos m\u00e1s, {mb} entre todos",
+        "the heaviest sessions": "las que m\u00e1s pesan",
+        "({mb} with nowhere to go back to)": "({mb} sin sitio al que volver)",
+        "no place to go back to": "sin sitio al que volver",
+        "{n} of them ({mb}) have no place to go back to.":
+            "{n} de ellas ({mb}) ya no tienen sitio al que volver.",
+        "No transcripts in {d}": "No hay transcripts en {d}",
         " with nowhere to go back to": " sin sitio al que volver",
         " total": " en total",
         " writing": " escribiendo",
@@ -4737,7 +4750,7 @@ def _T():
 _T()
 
 
-VERSION = "1.14.2"
+VERSION = "1.15.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -4745,11 +4758,169 @@ VERSION = "1.14.2"
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
-    "--usage": 0,
+    "--usage": 0, "--disk": 0,
     "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
 }
+
+
+def _cwd_de_cabecera(path, tope=40):
+    """El `cwd` de una sesion leyendo solo la CABECERA del transcript.
+
+    `pulso()` tambien lo saca, pero leyendo la cola y calculando de paso titulo, estado y
+    rastro: para 880 ficheros eso es un barrido caro para tirar todo menos un campo. Aqui
+    hace falta el dato mas barato que conteste "¿este historial pertenece a algo que
+    todavia existe?", y el `cwd` de una sesion no cambia, asi que la primera linea que lo
+    traiga vale igual que la ultima. Medido: 880 ficheros en 114 ms.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, linea in enumerate(f):
+                if i > tope:
+                    break
+                try:
+                    j = json.loads(linea)
+                except Exception:
+                    continue
+                cwd = j.get("cwd") or (j.get("meta") or {}).get("cwd")
+                if cwd:
+                    return cwd
+    except OSError:
+        pass
+    return ""
+
+
+def peso_historial(tope=20):
+    """Cuanto ocupa en disco el historial, y donde esta ese peso. HECHOS, sin veredicto.
+
+    Existe porque el dato no estaba en ningun sitio y resulto ser grande: en la maquina
+    donde se escribio esto, **3.469 MB en 595 sesiones**, con 3.464 de ellos en un solo
+    proyecto y **403 MB en cinco sesiones**. Nada de eso se veia: el panel dice el peso de
+    la fila bajo el cursor y ya.
+
+    Lo que NO hace, y es la mitad del asunto: no borra, no propone borrar y no llama
+    "basura" a nada. `sereno` no escribe en nada que sea de una sesion, y un historial
+    gordo no es un problema — es un hecho que quien mira decide que hacer con el. Por eso
+    esto devuelve numeros y la funcion de al lado los imprime.
+
+    Los transcripts de subagentes (`agent-*.jsonl`) se cuentan aparte: son 285 ficheros en
+    esta maquina y pesan 0,4 MB, o sea que meterlos en el reparto por proyecto habria
+    inflado el numero de ficheros sin mover un MB.
+    """
+    por_proyecto, mayores = {}, []
+    n = n_sub = 0
+    bytes_tot = bytes_sub = bytes_sin_sitio = 0
+    n_sin_sitio = 0
+    for d in sorted(PROJECTS.iterdir()) if PROJECTS.is_dir() else ():
+        if not d.is_dir():
+            continue
+        for jl in d.glob("*.jsonl"):
+            try:
+                tam = jl.stat().st_size
+            except OSError:
+                continue
+            if not _UUID.match(jl.stem):
+                n_sub += 1
+                bytes_sub += tam
+                continue
+            n += 1
+            bytes_tot += tam
+            cwd = _cwd_de_cabecera(jl)
+            sin_sitio = bool(cwd) and not hay_sitio(cwd)
+            if sin_sitio:
+                n_sin_sitio += 1
+                bytes_sin_sitio += tam
+            clave = pathlib.Path(cwd).name if cwd else _proyecto_de_dir(d.name).name
+            e = por_proyecto.setdefault(clave, {"proyecto": clave, "ficheros": 0,
+                                                "bytes": 0, "bytes_sin_sitio": 0})
+            e["ficheros"] += 1
+            e["bytes"] += tam
+            e["bytes_sin_sitio"] += tam if sin_sitio else 0
+            try:
+                edad = time.time() - jl.stat().st_mtime
+            except OSError:
+                edad = None
+            mayores.append({"bytes": tam, "proyecto": clave, "id": jl.stem,
+                            "sin_sitio": sin_sitio, "idle": edad, "_path": jl})
+    mayores.sort(key=lambda x: -x["bytes"])
+    # El titulo se lee SOLO de las que se van a ensenar. Un "85 MB · 445cdc22" no dice
+    # cual es, y leerlo de las 595 seria pagar un barrido entero para tirar 587 titulos.
+    for e in mayores[:tope]:
+        # El mismo titulo que ensena la lista, y por el mismo orden: el que puso el CLI
+        # y, si no hay, la primera cosa que se dijo. `pulso()` lee la COLA, asi que sale
+        # igual de barato en un transcript de 85 MB que en uno de 8 KB.
+        pu = pulso({"_transcript": e["_path"], "id": e["id"]})
+        e["titulo"] = ((pu.get("aiTitle") or first_user_text(e["_path"]) or "")[:44]) or None
+    for e in mayores:
+        e.pop("_path", None)
+    return {
+        "raiz": str(PROJECTS),
+        "sesiones": n, "bytes": bytes_tot,
+        "subagentes": n_sub, "bytes_subagentes": bytes_sub,
+        "sin_sitio": n_sin_sitio, "bytes_sin_sitio": bytes_sin_sitio,
+        "proyectos": len(por_proyecto),
+        "por_proyecto": sorted(por_proyecto.values(), key=lambda x: -x["bytes"]),
+        "mayores": mayores[:tope],
+    }
+
+
+_FILA_PROY = "  %-30s %5d  %10s%s"
+_FILA_SES = "  %10s  %8s  %-46s %s%s"
+
+
+def _peso(b):
+    """Bytes legibles. No se reusa `_mb`: redondea a entero porque nacio para la columna
+    de RAM, donde 0,8 MB no existe — aqui hay proyectos de 800 KB y salian como "0 MB",
+    que ademas es lo que se lee como "no ocupa nada" justo cuando se esta contando peso.
+    """
+    if b >= 1024 ** 3:
+        return "%.1f GB" % (b / 1024 ** 3)
+    if b >= 1024 ** 2:
+        return "%.1f MB" % (b / 1024 ** 2)
+    return "%d KB" % max(1, b // 1024)
+
+
+def cmd_disk(tope=8):
+    """Imprime lo que `peso_historial()` observo. Solo formatea: no vuelve a mirar nada."""
+    h = peso_historial()
+    if not h["sesiones"]:
+        print(_("No transcripts in {d}", d=h["raiz"]))
+        return 1
+    print(_("{mb} in {n} sessions · {d}",
+            mb=_peso(h["bytes"]), n=h["sesiones"], d=h["raiz"]))
+    if h["subagentes"]:
+        print(_("  plus {n} subagent transcripts, {mb}",
+                n=h["subagentes"], mb=_peso(h["bytes_subagentes"])))
+    print()
+    print(_("by project"))
+    # La cola se resume en una linea. Sin esto, en esta maquina cinco de las ocho lineas
+    # eran proyectos de un fichero suelto diciendo "0 KB": ordenar por peso los pone ahi
+    # porque no hay mas, y el reparto que se venia a ver quedaba escondido entre ceros.
+    gordos = [e for e in h["por_proyecto"] if e["bytes"] >= h["bytes"] // 100][:tope]
+    for e in gordos:
+        cola = ("   " + _("({mb} with nowhere to go back to)", mb=_peso(e["bytes_sin_sitio"]))
+                if e["bytes_sin_sitio"] else "")
+        linea = _FILA_PROY % (e["proyecto"][:30], e["ficheros"], _peso(e["bytes"]), cola)
+        print(linea)
+    resto_n = h["proyectos"] - len(gordos)
+    resto_b = h["bytes"] - sum(e["bytes"] for e in gordos)
+    if resto_n > 0:
+        print("  " + _("and {n} more projects, {mb} between them",
+                       n=resto_n, mb=_peso(resto_b)))
+    print()
+    print(_("the heaviest sessions"))
+    for e in h["mayores"][:tope]:
+        marca = "  " + _("no place to go back to") if e["sin_sitio"] else ""
+        linea = _FILA_SES % (_peso(e["bytes"]),
+                             _hace(e["idle"]) if e["idle"] is not None else "",
+                             e.get("titulo") or "", e["id"][:8], marca)
+        print(linea)
+    if h["sin_sitio"]:
+        print()
+        print(_("{n} of them ({mb}) have no place to go back to.",
+                n=h["sin_sitio"], mb=_peso(h["bytes_sin_sitio"])))
+    return 0
 
 
 def _parecido(malo):
@@ -4846,6 +5017,9 @@ def main():
         return 0
     if argv and argv[0] == "--add":
         return cmd_add(argv[1:])
+
+    if "--disk" in argv:
+        return cmd_disk()
 
     if "--find" in argv:
         i = argv.index("--find")
