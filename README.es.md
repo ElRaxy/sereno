@@ -381,6 +381,7 @@ sereno --json     # los mismos hechos, para tu statusline o tus scripts
 sereno --watch    # se queda ahí y te avisa en cuanto una para y te espera
 sereno --find "eso que recuerdas a medias"
 sereno --usage    # añade lo que lleva quemado cada sesión
+sereno --disk     # lo que pesan los transcripts, por proyecto
 sereno --help
 ```
 
@@ -584,6 +585,37 @@ se puede explicar en una línea. El dinero queda fuera por otra razón: el `tota
 escribe el CLI **al cerrar**, así que estaba en 16 de 40 sesiones y en **ninguna** de las vivas.
 
 Se puede dejar puesto: `SERENO_SORT=spend`, o `-spend` para invertirlo.
+
+### `--disk`
+
+Lo que pesan los transcripts, y dónde está ese peso. El panel da el tamaño de la fila bajo el
+cursor y nada más, así que el reparto no se veía — y en la máquina donde se escribió esto resultó
+ser **3,4 GB en 595 sesiones**, con 3.464 MB de ellos en un solo proyecto y **403 MB en cinco
+sesiones**.
+
+```
+3.4 GB en 595 sesiones · /Users/tu/.claude/projects
+  y 285 transcripts de subagentes, 436 KB
+
+por proyecto
+  VanguardIA                       442      3.4 GB
+  y 56 proyectos más, 3.8 MB entre todos
+
+las que más pesan
+     85.2 MB  hace 25d  Rehacer la portada del atelier        445cdc22
+     84.9 MB  hace 20d  Continuar con el atelier              68e64cae
+     …
+
+102 de ellas (2,9 MB) ya no tienen sitio al que volver.
+```
+
+**No borra nada, no se ofrece a hacerlo y no llama basura a nada.** `sereno` no escribe en nada que
+sea de una sesión, y un historial gordo no es un problema: es un hecho con el que tú decides qué
+hacer. Leerlo cuesta 340 ms para 595 sesiones: un `stat` a cada una, el `cwd` de su cabecera, y el
+título solo de las pocas que imprime.
+
+Los transcripts de subagentes (`agent-*.jsonl`) se cuentan aparte: aquí son 285 ficheros y 436 KB,
+así que meterlos en el reparto por proyecto habría movido el número de ficheros sin mover un MB.
 
 ### 🎭 Probarlo sin tocar tus datos
 

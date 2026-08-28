@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.15.0
+
+**`sereno --disk` — what the transcripts weigh, and where that weight is.**
+
+The panel gives the size of the row under the cursor and nothing else, so the split was invisible.
+On the machine this was written on it turned out to be **3.4 GB across 595 sessions**, with
+3,464 MB of it in a single project and **403 MB in five sessions** — none of which was visible
+anywhere, on a laptop whose disk sits at 97%.
+
+```
+3.4 GB in 595 sessions · /Users/you/.claude/projects
+  plus 285 subagent transcripts, 436 KB
+
+by project
+  VanguardIA                       442      3.4 GB
+  and 56 more projects, 3.8 MB between them
+
+the heaviest sessions
+     85.2 MB  25d ago  Rebuild the atelier landing page       445cdc22
+     …
+
+102 of them (2.9 MB) have no place to go back to.
+```
+
+**It deletes nothing, offers to delete nothing, and calls nothing garbage.** `sereno` writes to
+nothing that belongs to a session — a heavy history is a fact, not a problem, and what to do about
+it is not the tool's call. The facts come out of one function and the printing out of another, so
+the numbers can be checked without reading the layout.
+
+340ms for 595 sessions: a `stat` on each, the `cwd` read from each header — the cheapest thing that
+answers *does this history still belong to something that exists* — and the title only of the
+handful it prints. Subagent transcripts are counted apart, because 285 of them here weigh 436 KB:
+folding them into the split would move the file count without moving a megabyte.
+
+Two things measured on the way in, and worth knowing before you go looking for space: **the
+irrecoverable sessions weigh nothing** (102 of them, 2.9 MB — the ones with nowhere to go back to,
+sunk in the list since 1.14.0), and neither do subagent transcripts. The weight is in long sessions
+of the project you actually work on.
+
 ## 1.14.2
 
 **Closes the four minor findings the 1.14.1 audit left open on purpose.**
