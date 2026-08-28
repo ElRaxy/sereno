@@ -24,7 +24,7 @@ fila sin sitio es la MAS RECIENTE (`idle=0`), asi que el orden por actividad —
 defecto— la pondria la PRIMERA, y su nombre es el primero alfabeticamente, que es el
 desempate. Que salga la ultima solo puede venir de `sin_sitio`.
 """
-import contextlib, io, os, pathlib, shutil, sys, tempfile
+import contextlib, io, os, pathlib, shutil, sys, tempfile, time
 
 os.environ["SERENO_DEMO"] = "1"
 os.environ["SERENO_DEBUG"] = "1"
@@ -67,18 +67,51 @@ def el_disco(f):
         # eso es lo correcto: es el precio de no hacer un `stat` cuatro veces por segundo.
         shutil.rmtree(d)
         f(hay_sitio(d) is True, "dentro del TTL sigue valiendo lo ultimo que se vio")
-        ns["_CACHE_SITIO"].clear()
-        f(hay_sitio(d) is False, "pasado el TTL, un directorio borrado da False")
 
-        # Y revive: una worktree que vuelves a crear vuelve a la lista sin reiniciar nada.
+        # El TTL se deja CADUCAR de verdad, no se borra el cache a mano. Se probo por las
+        # malas: la version anterior de este test llamaba a `_CACHE_SITIO.clear()` aqui, y
+        # con eso un TTL de mil millones de segundos —o sea, una fila que no reviviria
+        # jamas aunque el directorio volviera— pasaba en verde. Un assert que pasa igual
+        # con el mecanismo desactivado no prueba el mecanismo.
+        guardado = ns["TTL_SITIO"]
+        ns["TTL_SITIO"] = 0.05
+        try:
+            time.sleep(0.1)
+            f(hay_sitio(d) is False, "pasado el TTL, un directorio borrado da False")
+        finally:
+            ns["TTL_SITIO"] = guardado
+
+        # Y revive SIN tocar el cache: es lo que promete el README —"la fila vuelve
+        # sola"— y solo lo demuestra dejar caducar el TTL con el valor cacheado en False.
         os.makedirs(d)
-        ns["_CACHE_SITIO"].clear()
-        f(hay_sitio(d) is True, "si el directorio vuelve, la sesion vuelve a tener sitio")
+        ns["TTL_SITIO"] = 0.05
+        try:
+            time.sleep(0.1)
+            f(hay_sitio(d) is True, "si el directorio vuelve, la fila revive sin reiniciar")
+        finally:
+            ns["TTL_SITIO"] = guardado
 
         # Las dos formas de "no consta". Ninguna puede contar como ausencia: marcar una
         # sesion por un dato que falta es el error contrario al que esto arregla.
         f(hay_sitio("") is True, "sin ruta no se puede afirmar que no exista")
         f(hay_sitio(None) is True, "un cwd ausente tampoco afirma nada")
+
+        # Un error al MIRAR no es una ausencia, y esta es la diferencia entre las dos
+        # cosas que `os.path.isdir` mete en el mismo saco: se traga el error dentro y
+        # devuelve False, asi que un permiso denegado salia como "no existe" y hundia una
+        # fila perfectamente reanudable. Con `os.stat` el error llega y se puede distinguir.
+        padre = os.path.join(d, "padre")
+        hijo = os.path.join(padre, "hijo")
+        os.makedirs(hijo)
+        ns["_CACHE_SITIO"].clear()
+        f(hay_sitio(hijo) is True, "control: el directorio anidado existe")
+        os.chmod(padre, 0o000)
+        try:
+            ns["_CACHE_SITIO"].clear()
+            f(hay_sitio(hijo) is True,
+              "un permiso denegado no es una ausencia: el directorio sigue ahi")
+        finally:
+            os.chmod(padre, 0o755)
 
         # Un fichero NO es un directorio al que volver.
         fich = os.path.join(d, "x.txt")

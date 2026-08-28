@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.14.1
+
+**An audit of 1.14.0 refuted one of its claims and found six mechanisms whose tests passed with the
+mechanism switched off.** Nothing was broken; several things were less proven than they read.
+
+- **`hay_sitio()` marked a directory that exists.** It used `os.path.isdir`, which swallows the
+  error inside and returns False, so a permission denied or a symlink loop came out as *the
+  directory is gone* — the exact absence the guard claimed to prevent, and its `except OSError` was
+  dead code that never ran. Now `os.stat` + `S_ISDIR`, with `FileNotFoundError` separated from *could
+  not look*. Reproduced: a directory whose parent is `chmod 000` used to sink its row, and does not
+  any more.
+- **The TTL was never tested.** The test cleared the cache by hand instead of letting it expire, so a
+  cache that never expired — a row that would never revive — passed green. It now moves the clock.
+- **`release.sh` calling the tap bump was checked for existence, not position.** The whole guarantee
+  is positional: `bump-tap.sh` validates the *shape* of a sha, never the *fact* that the asset
+  exists, so what protects the tap is that the call sits behind the verify-by-download. Moving it
+  earlier kept the test green. Now the order itself is asserted.
+- **The zero that meant no accounting.** The CLI writes `cost-state` with `totalCostUSD: 0` and an
+  empty `modelUsage` on a subscription plan; that is not *this session cost nothing*, it is *nobody
+  is counting*. It was stored as `0.0`, telling a statusline the work was free. Measured across the
+  878 transcripts on this machine: 40 lines with a real cost, 8 with that undocumented zero, and
+  **none** with a legitimate zero — so telling them apart loses no real case.
+- **The privacy paragraph named a list of imports it called complete, and it wasn't.** `base64`
+  joined in 1.13.0 with OSC 52 and the list never said so. `test_sin_red.py` now checks the list in
+  both READMEs against the imports the program actually has.
+- **Two published numbers were wrong** and are corrected in the 1.14.0 entry: caching per path saves
+  3 stats out of 40 on a cold start, not 36, and the claim that the `stat` cannot block the TUI is
+  false — the reload is synchronous with painting, so a hung mount freezes the list.
+
+The full audit is in the repo history of the PR that fixed this.
+
 ## 1.14.0
 
 **Sessions you cannot go back to stop competing for the top of the list.**
@@ -18,16 +49,23 @@ of 37**, in two very specific flavours — worktrees already deleted (10 of 15) 
 directories (18 of 18, every single one).
 
 **They are sunk, never hidden.** A directory missing today may be a worktree you recreate or a disk
-you remount. The check is cached per path — not per session, because forty sessions here shared four
-directories — with a 30-second TTL, so a row revives on its own without a restart.
+you remount. The check is cached per path with a 30-second TTL, so a row revives on its own without
+a restart.
 
 Two guards, both because a missing directory is not always a missing directory: a session with no
 recorded `cwd` is never marked (flagging a row over an absent field is the mistake this fixes), and
 a live session is never marked, since its process is running inside that directory.
 
 The `stat` deliberately does not live in `ordena()`, which is pure and runs four times a second: it
-is resolved once when the row is built. Cheap locally, and not cheap at all on an unmounted network
-volume.
+is resolved once when the row is built, which brings the amortised cost down to roughly one `stat`
+per distinct path every 30 seconds.
+
+**That reduces repetition, not blocking**, and the first cut of this entry claimed otherwise. The
+reload runs synchronously in the loop that paints, so on a hung mount — where a `stat` never returns
+— the list freezes: no repaint, no keys. Measured by injecting 1s of latency per `stat`: the first
+pass takes 37.4s. Two numbers from that first cut were wrong too, and are corrected here: caching
+per path saves 3 stats out of 40 on a cold start (40 rows are 36 distinct paths, not four), and what
+it actually saves is the repeat between refreshes — 37 stats down to 1.
 
 `--json` grows one field, `cwd_exists`, so a statusline can filter for what is genuinely resumable
 instead of guessing from the project name.

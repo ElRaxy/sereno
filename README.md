@@ -229,6 +229,10 @@ They are sunk, never hidden. A directory that is missing today may be a worktree
 disk you remount, and the check is cached per path for 30 seconds, so the row comes back on its
 own. Hiding them would trade one error for its opposite.
 
+The cache stops the check repeating, and that is all it stops: the reload runs synchronously in the
+loop that paints, so a hung network mount — where a `stat` never returns — freezes the list.
+Measured with 1s of injected latency per `stat`: 37.4s for the first pass.
+
 Two guards, both because a missing directory is not always a missing directory:
 
 - **No path, no claim.** A session with no recorded `cwd` is never marked — flagging a row over a
@@ -694,8 +698,8 @@ It reads your prompts and your agent's replies to draw them on your screen. That
 straight answer, not a promise:
 
 **`sereno` has zero networking code.** No `socket`, no `urllib`, no `requests` — the whole
-import list is `os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib,
-unicodedata` and `curses`. Nothing it reads can leave your machine, because there is nothing
+import list is `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
+datetime, pathlib, unicodedata` and `curses`. Nothing it reads can leave your machine, because there is nothing
 in it that can send anything anywhere.
 
 The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions),
@@ -911,7 +915,7 @@ Two house rules:
 ```bash
 # 1. bump VERSION in `sereno` and add the section to CHANGELOG.md, in a PR
 # 2. once it is on main:
-./release.sh 1.13.1
+./release.sh 1.14.0
 ```
 
 That is the whole procedure, and it is a script rather than a list of commands for a reason.
@@ -926,6 +930,14 @@ script does what a written procedure cannot: it **refuses to publish** if what i
 not begin with the shebang or does not report the version being released, and it **re-downloads**
 the published asset and compares before saying OK. `tests/test_release_guardas.py` runs it against
 throwaway repos and checks it aborts, says why, and leaves no tag behind.
+
+After that — and only after it — `release.sh` calls `./bump-tap.sh`, which points the Homebrew
+formula at the version just verified. Separate script for a concrete reason: inside `release.sh` it
+would live behind `gh release create`, so testing it would mean publishing a real release. On its
+own it is exercised end to end against a throwaway remote by `tests/test_bump_tap.py`, which
+clones, edits, **pushes and re-reads from the remote**, without touching the network. If the tap
+step fails, the message says so **without calling it a failure**: the release is published and
+good, and it hands you the exact command to retry that part alone.
 
 `release.sh` calls `gh`, so it reaches the network — it is a maintainer tool and **is not part of
 the published program**. The release ships one file, `sereno`, and `test_sin_red.py` covers that
