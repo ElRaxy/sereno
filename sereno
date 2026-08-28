@@ -906,7 +906,10 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
         # a los 90 segundos de callarse, que es EXACTAMENTE cuando acaba de terminar y
         # hay que avisar. Sin tmux delante, el vigilante se quedaba sin ver el flanco
         # que existe para ver. Lo caza `tests/test_watch_flanco.py`.
-        rows += sesiones_de_disco(vistos=ids, solo_activas=solo_activas, fino=fino)
+        # Lo recien cerrado se excluye igual que lo que tmux ya ensena: si no, cerrar
+        # una sesion la devuelve a la lista desde el disco y encima marcada como viva.
+        rows += sesiones_de_disco(vistos=ids | cerradas_recientes(),
+                                  solo_activas=solo_activas, fino=fino)
     # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
     # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
     # cursor, que es lo que abre ENTER.
@@ -1816,8 +1819,10 @@ def stop_rows(rows, forget):
     reanudar a mano con `claude --resume <id>`.
     """
     dest = ROOT / "closed" / time.strftime("%Y%m%d-%H%M%S") if forget else None
+    cerrados = []
     for r in rows:
         tmux_kill(r["name"])
+        cerrados += _claves_de(r)
         f = (r.get("meta") or {}).get("_file")
         if forget and f:
             dest.mkdir(parents=True, exist_ok=True)
@@ -1825,7 +1830,62 @@ def stop_rows(rows, forget):
                 shutil.move(str(f), str(dest / f.name))
             except OSError:
                 pass
+    apunta_cerradas(cerrados)
     return len(rows)
+
+
+# Lo que se acaba de cerrar, para que no vuelva por la puerta del disco.
+#
+# Cerrar saca la sesion de tmux, y `live_sessions` excluye del barrido de
+# `~/.claude/projects` justo lo que tmux le esta ensenando. Asi que al matarla salia de
+# esa lista de excluidos y **volvia a entrar desde el disco**: su transcript se habia
+# tocado hace segundos, o sea `idle` casi cero, o sea pintada como VIVA. Cerrabas cinco
+# y a los pocos segundos reaparecian como activas, ademas con el uuid por nombre en vez
+# del suyo, con lo que ni parecian las mismas filas.
+#
+# Se apunta en disco y no en memoria porque el susto se repite al reabrir el selector,
+# que es otro proceso. Se limpia solo: pasados `VIVA` segundos el filtro por mtime ya la
+# tira, asi que un apunte viejo no cambia nada y el fichero se reescribe entero.
+CERRADAS = ROOT / "closed-recientes.txt"
+
+
+def _claves_de(r):
+    """Con que se reconoce una fila en el barrido del disco: su id y el stem de su
+    transcript. Los dos, porque una sesion reanudada no se llama como su id."""
+    m = r.get("meta") or {}
+    t = m.get("_transcript")
+    return [m.get("id"), t.stem if t is not None else None]
+
+
+def apunta_cerradas(claves):
+    """Deja constancia de lo cerrado ahora, y de paso tira lo que ya no importa."""
+    claves = [c for c in claves if c]
+    if not claves:
+        return
+    ahora = time.time()
+    lineas = ["%.0f %s" % (ahora, c) for c in claves]
+    lineas += ["%.0f %s" % (t, c) for t, c in _cerradas_crudas() if ahora - t <= VIVA]
+    try:
+        CERRADAS.parent.mkdir(parents=True, exist_ok=True)
+        CERRADAS.write_text("\n".join(lineas[:200]) + "\n")
+    except OSError:
+        pass
+
+
+def _cerradas_crudas():
+    try:
+        for linea in CERRADAS.read_text().splitlines():
+            t, _sep, c = linea.partition(" ")
+            if c:
+                yield float(t), c
+    except (OSError, ValueError):
+        return
+
+
+def cerradas_recientes():
+    """Ids y stems cerrados hace menos de `VIVA` segundos."""
+    ahora = time.time()
+    return {c for t, c in _cerradas_crudas() if ahora - t <= VIVA}
 
 
 ABRIR_CONFIG = "claude-abrir"
@@ -5439,7 +5499,7 @@ def _T():
 _T()
 
 
-VERSION = "1.27.0"
+VERSION = "1.28.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5873,11 +5933,15 @@ def main():
             print(_("No sessions running."))
             return 0
         tmux_kill()
+        # Tambien por aqui: parar sin apuntarlo las devuelve desde el disco, y estas
+        # dos rutas no pasan por `stop_rows`.
+        apunta_cerradas([c for r in rows for c in _claves_de(r)])
         print(_("Stopped {n} sessions.", n=len(rows)))
         return 0
     if "--stop" in argv:
         name = argv[argv.index("--stop") + 1]
         tmux_kill(name)
+        apunta_cerradas([c for r in rows if r["name"] == name for c in _claves_de(r)])
         print(_("Stopped {s}.", s=name))
         return 0
     for flag, forget in (("--close-sel", True), ("--stop-sel", False)):

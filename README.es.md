@@ -521,7 +521,7 @@ línea de tmux filtra por él antes de dividir.
 | `r` | abrir las marcadas de una vez — pregunta dónde, si hay más de un sitio |
 | `c` | entregar las marcadas a otro CLI — ver abajo |
 | `n` | qué están ejecutando **todas**, en una pantalla |
-| `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
+| `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea; lo que cierras se queda cerrado |
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
 | `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` (o pincharlo — ver abajo) |
 | `/` | filtrar por título mientras escribes |
