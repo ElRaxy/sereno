@@ -85,11 +85,19 @@ transcript y comprueba si el último `tool_use` llegó a recibir su `tool_result
 
 Esa comprobación es toda la diferencia entre *«se ha colgado»* y *«está trabajando, no la toques»*.
 
+La fecha de modificación miente también al revés: sigue fresca durante los noventa segundos
+**posteriores** a que la sesión te conteste, que es justo la ventana en la que quieres saber cuál
+te está esperando ya. Así que al transcript se le hace una segunda pregunta: ¿cerró el turno el
+CLI? Medido el 2026-08-28 contra el propio spinner de Claude Code, 10 de 35 muestras que decían
+`escribiendo` eran sesiones que ya habían terminado. Ninguna al revés.
+
 ```mermaid
 flowchart LR
     T["últimas 80 líneas del transcript"] --> A{"un tool_use sin<br>su tool_result?"}
     A -->|sí| S1["🟠 en un comando"]
-    A -->|no| B{"escrito en los<br>últimos 90 s?"}
+    A -->|no| D{"cerró el turno el CLI?<br>(stop_reason = end_turn)"}
+    D -->|sí| C
+    D -->|"no / no consta"| B{"escrito en los<br>últimos 90 s?"}
     B -->|sí| S2["🟢 escribiendo"]
     B -->|no| C{"parada desde hace<br>menos de seis horas?"}
     C -->|sí| S3["⚪ te espera a ti"]
@@ -100,7 +108,7 @@ flowchart LR
     classDef ask fill:#2b3242,stroke:#5c6773,color:#e6e6e6
     classDef out fill:#3a3f4b,stroke:#8a8f99,color:#ffffff
     class T fact
-    class A,B,C ask
+    class A,B,C,D ask
     class S1,S2,S3,S4,S5 out
 ```
 
@@ -108,7 +116,7 @@ Para un `ps`, los cuatro son el mismo proceso vivo. Y el orden también cuenta: 
 de la herramienta gana a «está escribiendo»**, porque la línea del `tool_use` acaba de
 escribirse en el fichero, así que las dos son ciertas a la vez y solo la segunda dice algo.
 
-> Cada estado lo compone **el código** a partir de hechos tipados leídos del transcript: dos
+> Cada estado lo compone **el código** a partir de hechos tipados leídos del transcript: tres
 > booleanos y una fecha. A ningún modelo se le pide que resuma nada, así que nada puede decirte
 > con aplomo que una sesión va bien cuando no va. Si los hechos faltan, la fila dice
 > `desconocido` en vez de elegir la respuesta amable.
@@ -650,7 +658,7 @@ sesiones que has abierto en tu vida.
 
 | qué lee | qué saca de ahí |
 |:--|:--|
-| la fecha de modificación | si está escribiendo ahora mismo |
+| la fecha de modificación, y el `stop_reason` del turno | si está escribiendo ahora mismo |
 | el último par `tool_use` / `tool_result` | si está atascada dentro de un comando |
 | el `message.usage` de la última respuesta | contexto gastado, y el modelo |
 | `cwd`, `gitBranch` | proyecto y rama |

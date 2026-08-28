@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.16.0
+
+**The one that has already finished stops calling itself busy.**
+
+`writing` was decided by the transcript's mtime: touched in the last 90 seconds. That stays true
+for a minute and a half **after** a session answers you — precisely the window in which you want
+to know which of the nine is now waiting. Measured against Claude Code's own spinner on
+2026-08-28, **10 of 35 samples reading `writing` were sessions that had already stopped**. None
+the other way round, so the error had a direction: it hid the ones asking for you.
+
+The transcript already said so and nobody was reading it. The CLI writes `stop_reason` on every
+reply, and `end_turn` means the turn is closed. A later `user` line — a new prompt, or the result
+of the command it was waiting on — reopens it. Both facts come out of the same pass `pulso()`
+already makes over the last 80 lines: **no extra read, no extra file opened**.
+
+- `--watch` now fires when the turn actually closes, not up to 90 s later.
+- `--json` gains `turn_closed`, next to `writing` and `tool_pending`. It is `null` when the
+  transcript does not say — an old transcript, another CLI — and there the state is decided
+  exactly as before. A missing fact is not a good fact.
+- Verified by turning the mechanism off: with the guard removed, or with `turn_closed` forced
+  true, `tests/test_fin_de_turno.py` goes red in both directions.
+
 ## 1.15.0
 
 **`sereno --disk` — what the transcripts weigh, and where that weight is.**

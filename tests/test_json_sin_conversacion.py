@@ -20,7 +20,8 @@ CAMPOS = {
     # `--resume`. Van los dos porque no son lo mismo, y confundirlos era un bug.
     "id": str, "session_id": str,
     "title": str, "project": str, "branch": str, "source": str,
-    "state": str, "writing": bool, "tool_pending": bool, "idle_seconds": int,
+    "state": str, "writing": bool, "tool_pending": bool, "turn_closed": bool,
+    "idle_seconds": int,
     "attached": bool, "cwd_exists": bool,
     "memory_mb": int, "context_tokens": int, "context_max": int,
     "model": str, "pid": str,

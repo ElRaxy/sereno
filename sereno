@@ -648,6 +648,7 @@ def pulso(e, secs=90, fino=True):
         return {"escribe": escribe, "herramienta": None}
 
     pendientes, ultimo_tool, extra, toca = set(), False, {}, []
+    cerrado = None
     crudos = []
     for raw in ultimas_lineas(t, 80):
         try:
@@ -718,11 +719,21 @@ def pulso(e, secs=90, fino=True):
                 ultimo_tool = True
             elif any(isinstance(b, dict) and b.get("type") == "text" for b in bloques):
                 ultimo_tool = False
+            # Quien dice que el turno acabo es el CLI, en el `stop_reason` de la propia
+            # respuesta. `None` cuando no consta —transcripts viejos, otros CLI— y ahi
+            # el estado se queda como estaba: un dato que falta no es un dato bueno.
+            fin = msg.get("stop_reason")
+            cerrado = (fin == "end_turn") if fin else None
         elif j.get("type") == "user":
             pendientes -= {b.get("tool_use_id") for b in bloques
                            if isinstance(b, dict) and b.get("type") == "tool_result"}
             if not pendientes:
                 ultimo_tool = False
+            # Cualquier linea de usuario posterior reabre el turno: un prompt nuevo, o
+            # el resultado del comando que la sesion estaba esperando. Sin esto, los
+            # segundos entre que mandas algo y llega la primera linea de la respuesta
+            # se leerian como "ya termino".
+            cerrado = False
     if toca:
         # Se resuelve al final porque el `cwd` sale de esta misma pasada y las primeras
         # lineas pueden llegar antes que el.
@@ -734,7 +745,7 @@ def pulso(e, secs=90, fino=True):
     # frente a los 49 que ya cuesta esta funcion.
     extra["atasco"] = alertas(sintomas(recorrido(crudos)))
     return {"escribe": escribe, "herramienta": bool(pendientes) and ultimo_tool,
-            **extra}
+            "cerrado": cerrado, **extra}
 
 
 def _dur(secs):
@@ -855,7 +866,8 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
             "proyecto": pathlib.Path(pu.get("cwd") or e.get("cwd") or "").name,
             "rama": pu.get("gitBranch", ""),
             "working": None if pu["escribe"] is None
-                       else bool(pu["escribe"] or pu["herramienta"]),
+                       else bool((pu["escribe"] and not pu.get("cerrado"))
+                                 or pu["herramienta"]),
         })
     if con_disco:
         # Por el stem del transcript RESUELTO, no por el id del registro: si no, una
@@ -1061,7 +1073,8 @@ def fila_de_transcript(p, mt=None, fino=True):
     viva = fila["idle"] <= VIVA
     # `working` sale del pulso, que mira el transcript; sin proceso que inspeccionar es
     # lo unico observable, y es honesto: si nadie escribe ahi, no esta trabajando.
-    fila["working"] = bool(fila["pulso"].get("escribe")
+    fila["working"] = bool((fila["pulso"].get("escribe")
+                            and not fila["pulso"].get("cerrado"))
                            or fila["pulso"].get("herramienta")) if viva else False
     fila["fuente"] = "claude" if viva else "historial"
     # Solo para las del historial: una viva tiene su proceso dentro de ese directorio,
@@ -1302,7 +1315,11 @@ def estado_estable(r):
         return "unknown"
     if pu.get("herramienta"):
         return "in_command"
-    if pu.get("escribe"):
+    # `escribe` es que el fichero se toco hace poco, y eso sigue siendo cierto durante
+    # los 90 segundos SIGUIENTES a que la sesion termine: justo cuando empieza a
+    # esperarte. `cerrado` es el corte fino y manda sobre el mtime; cuando no consta
+    # (None) se decide como siempre.
+    if pu.get("escribe") and not pu.get("cerrado"):
         return "writing"
     return "waiting" if (r.get("idle") or 0) < 6 * INACTIVA else "stopped"
 
@@ -1340,6 +1357,8 @@ def filas_json(rows):
             # componer el suyo en vez de fiarse del nuestro.
             "writing": pu.get("escribe"),
             "tool_pending": pu.get("herramienta"),
+            # `null` cuando el transcript no lo dice: distingue "no cerro" de "no consta".
+            "turn_closed": pu.get("cerrado"),
             "idle_seconds": None if r.get("idle") is None else round(r["idle"]),
             # El hecho, no el juicio: si su directorio de trabajo sigue existiendo. Una
             # statusline que solo quiera lo reanudable de verdad filtra por esto sin
@@ -2431,7 +2450,7 @@ def _fase(r):
         if idle > 10 * 60:
             return _("{t} on the same tool: it may be stuck", t=_lapso(idle))
         return _("waiting on a command of its own")
-    if pu.get("escribe"):
+    if pu.get("escribe") and not pu.get("cerrado"):
         return _("writing its reply")
     return (_("waiting on you") if idle < 6 * INACTIVA
             else _("stopped, waiting on you"))
@@ -4750,7 +4769,7 @@ def _T():
 _T()
 
 
-VERSION = "1.15.0"
+VERSION = "1.16.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
