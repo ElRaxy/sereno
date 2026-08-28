@@ -81,3 +81,22 @@ echo "publicado: sha=$real · dice ser: ${dice:-<nada>}"
 [ "$real" = "$esperado" ] && [ "$dice" = "$VER" ] \
   && echo "OK  v$VER publicada y verificada por descarga" \
   || { echo "FALLO: lo publicado no cuadra con lo que se subio." >&2; exit 1; }
+
+# ── el tap de Homebrew, que se bumpea solo ──────────────────────────────────────
+# El README decia que no habria formula porque "es una segunda copia del numero de
+# version que se queda vieja la semana que se te olvide". El argumento era bueno: lo
+# que lo tumba no es cambiar de opinion, es que ese numero ya no lo escriba nadie.
+#
+# Va DESPUES de la verificacion por descarga a proposito: el tap solo puede apuntar a un
+# asset que ya se ha bajado y comprobado. Y si esto falla, la release ya esta publicada y
+# sigue siendo buena — de ahi que el mensaje lo diga, en vez de un "FALLO" a secas que
+# haga pensar que hay que republicar algo que no se puede republicar.
+if [ "${SERENO_SIN_TAP:-}" = "1" ]; then
+  echo "tap: saltado (SERENO_SIN_TAP=1)"
+elif ./bump-tap.sh "$VER" "$esperado"; then
+  :
+else
+  echo "AVISO: el tap se quedo atras, pero la release v$VER SI esta publicada y es buena." >&2
+  echo "       Reintenta solo esa parte:  ./bump-tap.sh $VER $esperado" >&2
+  exit 1
+fi
