@@ -149,6 +149,19 @@ another session is writing in the same place, and `↻`, this one is going in ci
 apply the clash wins the column — miss that one and two sessions can overwrite each other's
 work; miss the other and you lose minutes. Both show in full in the panel and in `--list`.
 
+And when the list **mixes CLIs**, one more: which one the session belongs to.
+
+| | |
+|---|---|
+| `✦` | Claude Code |
+| `◆` | Codex |
+| `▲` | Gemini |
+| `◇` | Antigravity |
+
+It only appears when there is something to tell apart. Inside a single-CLI tab the column
+disappears and the title gets those two back — repeating the same symbol down the whole list only
+says what the active tab already said. The tab itself carries the glyph, so the bar is the legend.
+
 **The title is the last thing to be cut.** Narrow the window and the support columns go first,
 in this order: memory, then the project (which narrows before it goes), then the context bar.
 The title keeps its width down to about 45 columns, because it is the one thing that tells two
@@ -541,13 +554,13 @@ on it first.
 | `ENTER` | open it |
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
 | `r` | open the marked ones, all at once — it asks where, if there is more than one place |
-| `c` | hand the marked ones over to another CLI — see below |
+| `c` | hand the marked ones over to another CLI — it asks which, where to open them, and remembers |
 | `n` | what they are **all** running, in one screen |
 | `x` | close the marked ones — asks first, and warns if any is mid-task; what you close stays closed |
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
 | `y` | copy the session id, the one `claude --resume` takes (or click it — see below) |
 | `/` | filter by title as you type |
-| `TAB` | Claude · resumable history · Codex · Gemini · all |
+| `TAB` | switch CLI: Claude · Codex · Gemini · all — each row carries its CLI's glyph when the list mixes them |
 | `?` | everything else |
 
 **The mouse works.** Click to select, double click to open, right click (or the bar on the
@@ -658,18 +671,32 @@ toggles it for one handover — an environment variable is not a way to offer so
 `c` opens that box rather than launching straight away:
 
 ```
-Hand over 1 session(s) to:
+Hand over 3 sessions to:
 
 · Refactor payment webhooks
+· Fix flaky login test
+· Migrate CI to reusable workflows
 
 [1] codex   [2] claude
+    gemini, antigravity — not checked how to seed it
 [k] include the conversation: no
+[w] open them in: tmux
 
 [1-9] hand over    [any other key] cancel
 ```
 
 The CLI the rows come from is not offered — but only when it is the origin of **every** marked
 row: with a mixed selection both appear, because some row can go to each. Any other key cancels.
+
+`w` cycles where the windows open, the same question `r` asks. The **last destination goes to the
+front and the last place stays put**: whoever hands over to Codex once hands over to Codex always,
+and starting from the top of the list every time is making them type the same thing again.
+
+The CLIs that **cannot** be offered are listed greyed out rather than hidden — with only one
+installed there is otherwise no way to find out this works with more. They are grouped by their
+own reason, and the two are not the same: *not installed* is fixed by installing it, *not checked
+how to seed it* needs someone to confirm in that CLI's `--help` how a starting prompt is passed.
+That is the rule that keeps `gemini` out of the table, not an oversight.
 
 A session whose directory no longer exists is **left out** rather than started in `~`: a handover
 that begins in the wrong place looks like it worked. The check asks for an **absolute** path, not

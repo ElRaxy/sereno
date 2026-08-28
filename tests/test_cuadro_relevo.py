@@ -32,12 +32,21 @@ ESPACIO, C, K, UNO, DOS, Q = 32, ord("c"), ord("k"), ord("1"), ord("2"), ord("q"
 ns["arneses_disponibles"] = lambda: ["codex", "claude"]
 
 
-def corre(teclas, h=30, w=150):
+def corre(teclas, h=30, w=150, conserva=False):
     """Conduce el selector con esas teclas. Devuelve (llamadas a relevo, celdas fuera)."""
+    # Las preferencias van a un temporal y se borran entre casos: si no, la eleccion de
+    # un caso cambia el ORDEN de los destinos del siguiente —que es justo lo que se
+    # acaba de anadir— y los casos se contaminan entre si. Ademas, un test no escribe en
+    # el HOME de nadie.
+    import tempfile
+    if not conserva:
+        ns["PREFS"] = pathlib.Path(tempfile.mkdtemp()) / "prefs.json"
+
     import curses as real
     llamadas, cajon = [], []
-    def espia_relevo(sel, arnes=None, con_conversacion=None):
-        llamadas.append({"n": len(sel), "arnes": arnes, "conv": con_conversacion})
+    def espia_relevo(sel, arnes=None, con_conversacion=None, lanzador=None):
+        llamadas.append({"n": len(sel), "arnes": arnes, "conv": con_conversacion,
+                         "donde": lanzador})
         return arnes, "ok"
     ns["relevo"] = espia_relevo
     sys.modules["curses"] = espia(real, h, w, list(teclas), cajon, ns["ancho"])
@@ -100,7 +109,45 @@ def main():
         if fuera:
             fallos.append(f"[{w}x{h}] el cuadro se sale: {fuera[:2]}")
 
-    # 7. Y quien decide los destinos: el CLI de origen no se ofrece, pero solo si lo es
+    # 7. `w` rota el sitio donde se abren las ventanas, la misma pregunta que hace `r`.
+    #    Solo aparece con dos o mas sitios; con uno, la tecla no hace nada y el cuadro
+    #    no la ofrece. Los sitios se fijan aqui porque en el CI no hay ninguno.
+    real_lanz = ns["lanzadores_disponibles"]
+    ns["lanzadores_disponibles"] = lambda: ["warp", "tmux", "terminal"]
+    llam, _f = corre([ESPACIO, C, UNO, Q])
+    if not llam or llam[0]["donde"] != "warp":
+        fallos.append(f"sin tocar `w` no se usa el primer sitio: {llam}")
+    llam, _f = corre([ESPACIO, C, ord("w"), UNO, Q])
+    if not llam or llam[0]["donde"] != "tmux":
+        fallos.append(f"[w] no rota al segundo sitio: {llam}")
+    llam, _f = corre([ESPACIO, C, ord("w"), ord("w"), ord("w"), UNO, Q])
+    if not llam or llam[0]["donde"] != "warp":
+        fallos.append(f"[w] no vuelve al principio al dar la vuelta: {llam}")
+    # Con un solo sitio la tecla no existe: `w` cae en "cualquier otra tecla" y cancela.
+    ns["lanzadores_disponibles"] = lambda: ["warp"]
+    llam, _f = corre([ESPACIO, C, ord("w"), UNO, Q])
+    if llam:
+        fallos.append(f"con un solo sitio `w` hace algo en vez de cancelar: {llam}")
+    ns["lanzadores_disponibles"] = real_lanz
+
+    # 8. El cuadro RECUERDA. No basta con que el fichero de preferencias funcione —eso
+    #    lo prueba `test_prefs_y_ausentes`—: hay que ver que el cuadro lo lee y lo
+    #    escribe. Se elige el segundo destino y a la vuelta siguiente ese tiene que ser
+    #    el [1]. Y el sitio elegido con `w` tiene que seguir puesto sin volver a tocarlo.
+    ns["destinos_de_relevo"] = lambda sel: ["codex", "claude"]
+    ns["lanzadores_disponibles"] = lambda: ["warp", "tmux", "terminal"]
+    llam, _f = corre([ESPACIO, C, ord("w"), DOS, Q])          # -> claude, en tmux
+    if not llam or llam[0]["arnes"] != "claude" or llam[0]["donde"] != "tmux":
+        fallos.append(f"la primera eleccion no sale como se pidio: {llam}")
+    llam, _f = corre([ESPACIO, C, UNO, Q], conserva=True)     # el [1] ya deberia ser claude
+    if not llam or llam[0]["arnes"] != "claude":
+        fallos.append(f"el cuadro no recuerda el destino: [1] dio {llam}")
+    if not llam or llam[0]["donde"] != "tmux":
+        fallos.append(f"el cuadro no recuerda donde abrirlas: {llam}")
+    ns["destinos_de_relevo"] = real_destinos
+    ns["lanzadores_disponibles"] = real_lanz
+
+    # 9. Y quien decide los destinos: el CLI de origen no se ofrece, pero solo si lo es
     #    de TODAS. Con la seleccion mezclada se ofrecen los dos, porque alguna fila puede
     #    ir a cada uno.
     def fila(fuente):

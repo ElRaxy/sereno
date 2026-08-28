@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.29.0
+
+**Which CLI a session belongs to, and a handover box that remembers.**
+
+### The tab bar was mixing two different things
+
+`claude · historial · codex · gemini · todas`. But **`historial` is not a CLI** — it is Claude
+sessions that stopped, a *state*. Having it as a tab put two axes on one bar, and left the real
+question unanswered: in the `todas` view **no row said whose it was**.
+
+Now each CLI has a glyph, and it appears **only when the list actually mixes them**:
+
+```
+ ✦ claude  ◆ codex  todas    10 en total  ·  ● 1 escribiendo  ·  6 reanudables
+ ─────────────────────────────────────────────────────────────────────────────
+ ▎ ◐⧉ ✦ Refactor payment webhooks              ahora ▰▰▰▰▱  88%
+      ✦ Draft release notes v2.4             hace 7m ▰▰▰▱▱  64%
+      ◆ Shrink the docker image              hace 2d
+      ◆ Name the new billing events          hace 4d
+```
+
+The tab carries its own glyph, so it **is** the legend — no help line nobody reads. In a
+single-CLI tab the column disappears and the title gets its two columns back: repeating the same
+symbol eight times only says what the active tab already said. `historial` folds into `claude`,
+at the bottom, which is where `ordena()` already put it, and its count moved to the header as
+*resumable*.
+
+The four glyphs measure **one column** (`east_asian_width` 'N') and none was already in use —
+`▪`, the obvious pick for codex, is the *has a tab open* marker. An emoji would take two and
+quietly skew the whole table.
+
+**And a copy that had drifted:** the bar computed the CLI list one way and the Tab cycle another —
+one looked at `fuente`, the other at the CLI — so Tab stopped on a tab the bar never drew and the
+list came out empty. One `clis_presentes()` now, and a test that fails if a second copy appears.
+
+### The handover box
+
+- **Where the windows open** is now part of it: `w` cycles it, the same question `r` asks.
+- **It remembers.** Last destination goes to the front, last place stays put. Whoever hands over
+  to Codex once hands over to Codex always; starting from the top of the list every time is making
+  them type the same thing again.
+- **It says what it cannot offer.** With only Codex installed the box showed one option and
+  nothing else — no way to find out this works with more CLIs. The others are listed greyed out,
+  grouped by **their own reason**, which is not the same one: one is fixed by installing it, the
+  other needs checking in its `--help` how a starting prompt is passed, which is why `gemini` is
+  not in `ARNESES` and never was an oversight.
+- And `sesión(es)` is gone: one and many are two strings, in both languages.
+
+Eleven mutants across the two areas, each turning a case red — including two that at first did
+**not**: the box remembering was only tested through its helper, not through the box.
+
 ## 1.28.0
 
 **A session you just closed came back a few seconds later, marked as live.**
