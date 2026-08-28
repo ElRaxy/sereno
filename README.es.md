@@ -392,6 +392,7 @@ sereno --watch    # se queda ahí y te avisa en cuanto una para y te espera
 sereno --find "eso que recuerdas a medias"
 sereno --usage    # añade lo que lleva quemado cada sesión
 sereno --disk     # lo que pesan los transcripts, por proyecto
+sereno --now      # qué está ejecutando cada sesión viva, todas de una vez
 sereno --help
 ```
 
@@ -595,6 +596,43 @@ se puede explicar en una línea. El dinero queda fuera por otra razón: el `tota
 escribe el CLI **al cerrar**, así que estaba en 16 de 40 sesiones y en **ninguna** de las vivas.
 
 Se puede dejar puesto: `SERENO_SORT=spend`, o `-spend` para invertirlo.
+
+### `--now`
+
+El panel ya pinta el recorrido de llamadas de la sesión bajo el cursor — con su cronómetro, sus
+fallos y su detección de atascos. **De la sesión bajo el cursor.** Enterarse de en qué andan
+nueve sesiones costaba bajar el cursor nueve veces, así que en la práctica se acababa entrando
+en cada una. Esto es ese mismo recorrido, el de todas, en una pantalla:
+
+```
+4 vivas · 2 trabajando, 2 te esperan
+
+Refactor payment webhooks  ·  checkout-api                  en un comando
+  ! el mismo comando ha fallado 3 veces
+    ✗  31s  Bash · pytest tests/webhooks -x -q
+    ✗  33s  Bash · pytest tests/webhooks -x -q
+    ◐   1m  Bash · pytest tests/webhooks -x -q
+
+Fix flaky login test  ·  checkout-api                       escribiendo
+  ! 2 búsquedas seguidas sin ningún resultado
+    ·   1s  Edit · tests/test_login.py
+    ✗   1s  Bash · rg -n freeze_time tests/
+    ✗   1s  Bash · rg -n 'clock|monotonic' tests/
+
+Draft release notes v2.4  ·  docs-site                      te espera a ti · hace 7m
+    ·   3s  Bash · git log --oneline v2.3..HEAD
+    ·   1s  Write · NOTES.md
+
+Migrate CI to reusable workflows  ·  infra                  te espera a ti · hace 2h
+  ! el mismo comando ha fallado 3 veces
+    ✗  12s  Bash · act -j build --dryrun
+    ✗  11s  Bash · act -j build --dryrun
+    ✗  12s  Bash · act -j build --dryrun
+```
+
+La misma lectura que el panel, los mismos hechos, y ni un fichero más abierto por fila que la
+cola que cada una ya necesita. La cabecera no puede desmentir a las filas de debajo: se cuenta a
+partir de ellas, y hay un test que falla si alguna vez discrepan.
 
 ### `--disk`
 

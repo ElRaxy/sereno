@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.17.0
+
+**`sereno --now` — what all of them are running, in one screen.**
+
+The panel already drew the trail of tool calls: glyph per call, timer, failures marked, and the
+stuck-detection on top. Of **one** session — the row under the cursor. So finding out what nine
+sessions were doing meant moving the cursor down nine times, and in practice you went back to
+attaching to each one, which is the thing this program exists to avoid.
+
+```
+4 live · 2 working, 2 waiting on you
+
+Refactor payment webhooks  ·  checkout-api                  in a command
+  ! the same command has failed 3 times
+    ✗  31s  Bash · pytest tests/webhooks -x -q
+    ✗  33s  Bash · pytest tests/webhooks -x -q
+    ◐   1m  Bash · pytest tests/webhooks -x -q
+```
+
+No new column and no fight for width: the row layout is untouched. It reads exactly what the
+panel reads — the tail of each transcript — so it opens nothing extra beyond what each row
+already needs, and it is the live sessions only, never the 595 in the history.
+
+The header is counted **from the rows underneath**, not on its own, and a test fails if the two
+ever disagree: a summary nobody recomputes while reading it is a summary that drifts.
+
 ## 1.16.0
 
 **The one that has already finished stops calling itself busy.**

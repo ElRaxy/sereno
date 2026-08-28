@@ -416,6 +416,7 @@ sereno --watch    # sit there and tell you the moment one stops and waits on you
 sereno --find "the thing you half remember"
 sereno --usage    # add what each session has burned
 sereno --disk     # what the transcripts weigh, by project
+sereno --now      # what every live session is running, all of them at once
 sereno --help
 ```
 
@@ -606,6 +607,43 @@ one that fits in a line. Money is out for a different reason: `totalCostUSD` is 
 the CLI **on exit**, so it was present in 16 of 40 sessions and in **none** of the live ones.
 
 You can leave it on: `SERENO_SORT=spend`, or `-spend` to invert it.
+
+### `--now`
+
+The panel already draws the trail of tool calls of the session under the cursor — with its
+timer, its failures and its stuck-detection. **Of the session under the cursor.** Finding out
+what nine sessions are doing meant moving the cursor down nine times, so in practice you went
+back to attaching to each one. This is that same trail, for all of them, in one screen:
+
+```
+4 live · 2 working, 2 waiting on you
+
+Refactor payment webhooks  ·  checkout-api                  in a command
+  ! the same command has failed 3 times
+    ✗  31s  Bash · pytest tests/webhooks -x -q
+    ✗  33s  Bash · pytest tests/webhooks -x -q
+    ◐   1m  Bash · pytest tests/webhooks -x -q
+
+Fix flaky login test  ·  checkout-api                       writing
+  ! 2 searches in a row with no result
+    ·   1s  Edit · tests/test_login.py
+    ✗   1s  Bash · rg -n freeze_time tests/
+    ✗   1s  Bash · rg -n 'clock|monotonic' tests/
+
+Draft release notes v2.4  ·  docs-site                      waiting on you · 7m ago
+    ·   3s  Bash · git log --oneline v2.3..HEAD
+    ·   1s  Write · NOTES.md
+
+Migrate CI to reusable workflows  ·  infra                  waiting on you · 2h ago
+  ! the same command has failed 3 times
+    ✗  12s  Bash · act -j build --dryrun
+    ✗  11s  Bash · act -j build --dryrun
+    ✗  12s  Bash · act -j build --dryrun
+```
+
+Same reading as the panel, same facts, no extra file opened per row beyond the tail each one
+already needs. The header cannot drift from the rows underneath: it is counted from them, and a
+test fails if the two ever disagree.
 
 ### `--disk`
 
