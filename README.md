@@ -543,7 +543,7 @@ on it first.
 | `r` | open the marked ones, all at once — it asks where, if there is more than one place |
 | `c` | hand the marked ones over to another CLI — see below |
 | `n` | what they are **all** running, in one screen |
-| `x` | close the marked ones — asks first, and warns if any is mid-task |
+| `x` | close the marked ones — asks first, and warns if any is mid-task; what you close stays closed |
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
 | `y` | copy the session id, the one `claude --resume` takes (or click it — see below) |
 | `/` | filter by title as you type |

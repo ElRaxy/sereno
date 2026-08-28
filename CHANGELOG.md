@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.28.0
+
+**A session you just closed came back a few seconds later, marked as live.**
+
+Reported by Alex: mark several, close them, they close — and seconds later they are in the list
+again, as if running.
+
+The list has two sources: what tmux shows, and a sweep of `~/.claude/projects` for whatever tmux
+does **not** show. The second one excludes the first. So killing a session took it out of tmux,
+which took it out of that exclusion list, and it **walked straight back in from disk**: its
+transcript had been touched seconds ago, so `idle` was near zero, so it was drawn as alive. With
+the uuid for a name instead of its own, which is why it did not even look like the same row.
+
+What was closed is now written down, and the sweep skips it. Three things about that note:
+
+- **It goes on disk, not in memory.** Reopening the picker is another process, and the fright
+  would repeat there.
+- **It records the id and the transcript's stem.** A resumed session is not named after its id —
+  with only the id, it comes back through the other door. That case is in the test because
+  removing the stem passed everything else: in the straightforward case the two are equal and
+  distinguish nothing.
+- **It expires after `VIVA` seconds**, the same threshold that already drops a quiet session. A
+  note that never expired would hide a session that genuinely came back to life.
+
+`--stop-all` and `--stop` write it too: neither goes through `stop_rows`, and without it the bug
+survived by those two doors.
+
+The test carries a **positive control** — a session nobody closed still comes out of the sweep.
+Without it, breaking the sweep altogether would pass. Four mutants, each turning a case red.
+
 ## 1.27.0
 
 **An orphan that did not open was filed away as resumed — and stopped being offered.**
