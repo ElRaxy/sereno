@@ -29,7 +29,7 @@ One Python file · zero dependencies · Claude Code, Codex, Gemini, Antigravity
 </div>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ElRaxy/sereno/main/install.sh | sh
+brew install elraxy/tap/sereno
 sereno
 ```
 
@@ -291,6 +291,15 @@ reading that line, or a throwaway conversation would talk the ceiling down on it
 There is nothing to install, really. `sereno` is one Python file. Every route below ends with
 that same file sitting somewhere on your `PATH`.
 
+**With Homebrew**
+
+```bash
+brew install elraxy/tap/sereno
+```
+
+The only route that also **updates you**: `brew upgrade` brings the next version without you
+having to hear that it exists.
+
 **The one-liner**
 
 ```bash
@@ -342,9 +351,16 @@ tells you if that directory isn't on your `PATH`. Set `SERENO_BIN` to put it els
 Python 3.8+ is the whole dependency list. No venv, no lock file, no supply chain. `scp` it to a
 server and it runs there too. To uninstall, delete the file.
 
-> **No Homebrew, no package manager, and that's deliberate.** A formula is a second copy of the
-> version number that goes stale the week you forget it. If enough people ask, I'll reconsider —
-> [open an issue](https://github.com/ElRaxy/sereno/issues).
+> **This used to say there would be no Homebrew formula, and the reason was a good one:** a
+> formula is a second copy of the version number, and a copy a person maintains goes stale the
+> week they forget it. What changed is not the opinion — it is that nobody writes that number any
+> more. `release.sh` bumps the formula itself, and only **after** it has downloaded the published
+> asset and checked that it is the program and that it reports the version being released, so the
+> tap cannot point at something that was never verified. It lives at
+> [**ElRaxy/homebrew-tap**](https://github.com/ElRaxy/homebrew-tap), has its own CI on macOS and
+> Linux, and the formula checks the shebang and the version again before installing anything:
+> v1.13.0 shipped an asset that was not the program, and GitHub releases are immutable, so that
+> broken file is downloadable forever.
 
 ---
 

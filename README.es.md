@@ -28,7 +28,7 @@ Un fichero de Python · cero dependencias · Claude Code, Codex, Gemini, Antigra
 </div>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ElRaxy/sereno/main/install.sh | sh
+brew install elraxy/tap/sereno
 sereno
 ```
 
@@ -250,6 +250,15 @@ ignora al leer esa línea: si no, una conversación de nada bajaría el tope por
 En realidad no hay nada que instalar. `sereno` es un fichero de Python. Todas las vías de abajo
 acaban con ese mismo fichero en algún sitio de tu `PATH`.
 
+**Con Homebrew**
+
+```bash
+brew install elraxy/tap/sereno
+```
+
+Es la única vía que además te **actualiza**: `brew upgrade` te trae la siguiente versión sin
+que tengas que enterarte de que existe.
+
 **La de una línea**
 
 ```bash
@@ -302,9 +311,16 @@ Python 3.8 o más nuevo es la lista completa de dependencias. Ni venv, ni lock f
 suministro. Lo mandas por `scp` a un servidor y funciona allí también. Para desinstalarlo,
 borras el fichero.
 
-> **Ni Homebrew ni gestor de paquetes, y es a propósito.** Una fórmula es una segunda copia del
-> número de versión que se queda vieja la semana que se te olvide. Si lo pide bastante gente me
-> lo replanteo: [abre un issue](https://github.com/ElRaxy/sereno/issues).
+> **Aquí ponía que no habría fórmula de Homebrew, y el motivo era bueno:** una fórmula es una
+> segunda copia del número de versión, y una copia que escribe una persona se queda vieja la
+> semana que se te olvide. Lo que cambió no fue la opinión, fue que ese número ya no lo escribe
+> nadie. `release.sh` bumpea la fórmula él mismo, y solo **después** de haberse descargado el
+> asset publicado y haber comprobado que es el programa y que dice ser esa versión — así que el
+> tap no puede apuntar a algo que no se haya verificado. Vive en
+> [**ElRaxy/homebrew-tap**](https://github.com/ElRaxy/homebrew-tap), tiene su propio CI en macOS
+> y en Linux, y la fórmula vuelve a comprobar el shebang y la versión antes de instalar nada:
+> la v1.13.0 se publicó con un asset que no era el programa, y las releases de GitHub son
+> inmutables, así que ese fichero roto sigue ahí para siempre.
 
 ---
 
