@@ -283,10 +283,17 @@ being drawn against the standard one — so the peak is rebuilt from the transcr
 of every reply and the `preTokens` of every compaction, which is context and not a running
 total (checked against the preceding reply: median +0.4%, 165 of 169 within ±5%).
 
-Across the 524 transcripts on the machine this was written on, the peak corrects **30** (5.7%),
-all of them the same way: one read 171k against 200k — an **86%**, "compact now" — when it was
-171k of a million, a **17%**. As coverage, `preTokens` shows up in 107 of 524 transcripts against
-13 for `cost-state`.
+When the peak corrects, it corrects one way: a session read 171k against 200k — an **86%**,
+"compact now" — when it was 171k of a million, a **17%**.
+
+**Re-measured 2026-08-28, on 599 transcripts: it corrects zero.** Not because it broke — 301 of
+those rows peak above 200k — but because step 3 already catches every one of them: this machine's
+`~/.claude/settings.json` says `opus[1m]`, so nothing reaches the guard. It is the last line, not
+a common path, and it only earns its keep on a machine whose settings do not say so. The first
+measurement, on 524 transcripts, found 30 (5.7%).
+
+Coverage on the same 599: `preTokens` in **115**, `cost-state` in **40** — the latter tripled from
+13, so the suffix that names the window now arrives far more often than it used to.
 
 #### The bar remembers where it has been
 
@@ -313,9 +320,14 @@ in the terminal the grey cells are not drawn at all — the only thing separatin
 
 The peak comes from reading the whole transcript, and **the list now does that too**, a chunk per
 refresh: see [Reading without blocking](#reading-without-blocking). And the opposite direction —
-proving a session is *not* on the big window — has no evidence beyond `cost-state`: across those
-524 transcripts there is not one auto-compaction (which would give away the threshold) and not a
-single `message.model` carrying the suffix.
+proving a session is *not* on the big window — has no evidence beyond `cost-state`. Re-checked
+across all 599: **not one auto-compaction**, which would give away the threshold, and **not a
+single `message.model` carrying the suffix**.
+
+That first one is now checked properly rather than inferred: every compaction writes
+`compactMetadata.trigger`, and all **182** of them on this machine say `manual`. A manual compact
+happens whenever you ask for one, so its `preTokens` says what the session was holding — never
+where the ceiling was.
 
 **2 comes before 3, and it goes both ways.** Your global config is the weak one — a session
 launched with a different `--model` does not obey it — so the one fact that describes *this*
