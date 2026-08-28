@@ -86,11 +86,21 @@ and checks whether the last `tool_use` ever got its matching `tool_result`.
 
 That single check is the difference between *"it hung"* and *"it's working, leave it alone"*.
 
+The mtime lies the other way round too. It stays fresh for ninety seconds **after** the session
+answers you — exactly the window in which you want to know which one is now waiting. So the
+transcript is asked a second question: did the CLI close the turn? Measured on 2026-08-28
+against Claude Code's own spinner over nine live sessions, **16 of 48 samples reading `writing`
+were sessions that had already finished** — a third of them. None the other way round, so the
+error had a direction: it hid the ones asking for you. With the turn check, the same bench gives
+4 of 26.
+
 ```mermaid
 flowchart LR
     T["last 80 lines of the transcript"] --> A{"a tool_use still<br>without its tool_result?"}
     A -->|yes| S1["🟠 in a command"]
-    A -->|no| B{"file written to<br>in the last 90 s?"}
+    A -->|no| D{"did the CLI close the turn?<br>(stop_reason = end_turn)"}
+    D -->|yes| C
+    D -->|"no / not stated"| B{"file written to<br>in the last 90 s?"}
     B -->|yes| S2["🟢 writing"]
     B -->|no| C{"idle for<br>under six hours?"}
     C -->|yes| S3["⚪ waiting on you"]
@@ -101,7 +111,7 @@ flowchart LR
     classDef ask fill:#2b3242,stroke:#5c6773,color:#e6e6e6
     classDef out fill:#3a3f4b,stroke:#8a8f99,color:#ffffff
     class T fact
-    class A,B,C ask
+    class A,B,C,D ask
     class S1,S2,S3,S4,S5 out
 ```
 
@@ -109,7 +119,7 @@ To `ps`, all four are the same live process. The order matters too: **the tool c
 "is it writing"**, because a `tool_use` line was itself just written to the file, so both are
 true at once and only the second one tells you anything.
 
-> Every state is composed **in code** from typed facts read off the transcript — two booleans
+> Every state is composed **in code** from typed facts read off the transcript — three booleans
 > and a timestamp. No model is asked to summarise anything, so nothing can confidently tell
 > you a session is fine when it isn't. When the facts are missing the row says `unknown`
 > rather than picking the friendly answer.
@@ -660,7 +670,7 @@ you have ever run.
 
 | what it reads | what it gets out of it |
 |:--|:--|
-| the file's mtime | is it writing right now |
+| the file's mtime, and the turn's `stop_reason` | is it writing right now |
 | the last `tool_use` / `tool_result` pair | is it stuck inside a command |
 | `message.usage` on the last reply | context spent, and the model |
 | `cwd`, `gitBranch` | project and branch |
