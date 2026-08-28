@@ -814,6 +814,11 @@ una **ventana nueva** en vez de quedarse con la que estás mirando.
 Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria — que entonces no
 ocupa nada, en vez de quedarse ahí vacía — y `ENTER` hace `exec` sobre la terminal actual.
 
+Lo que Warp sí condiciona es abrir **varias a la vez**: `r` y `c` abren una ventana por sesión, y
+desde aquí no hay otra forma de hacerlo. Sin él lo dicen y paran, en vez de anunciar pestañas que
+nadie abrió — que es lo que hacían hasta la 1.24.0, cuando no reventaban directamente: `open` es
+un comando de macOS y en Linux la llamada lanzaba excepción.
+
 </details>
 
 ---

@@ -1846,6 +1846,24 @@ def _comando_de(r):
     return None
 
 
+def _abre_en_warp(nombre):
+    """Lanza una launch configuration. Devuelve si se pudo, no si se ve bonita.
+
+    Un solo sitio llama a `open`, y devuelve un HECHO en vez de dar por buena la
+    llamada. Habia tres copias de esta linea y ninguna miraba nada: en una maquina sin
+    `open` —cualquier Linux— `subprocess.run` lanza `FileNotFoundError` y tumbaba el
+    programa entero desde dentro de curses, y en un macOS sin Warp el `open` fallaba en
+    silencio mientras la pantalla anunciaba las pestanas reabiertas.
+    """
+    if not hay_warp():
+        return False
+    try:
+        return subprocess.run(["open", f"warp://launch/{nombre}"],
+                              check=False).returncode == 0
+    except OSError:
+        return False
+
+
 def _dir_util(cwd):
     """True si ahi se puede plantar una sesion: ruta ABSOLUTA que existe.
 
@@ -1892,7 +1910,7 @@ def abrir_sesion(r, callado=False):
         print("\n" + _("Opening: {t}", t=titulo) + "\n")
         os.execvp("/bin/sh", ["/bin/sh", "-c", cmd])
     _escribe_config(ABRIR_CONFIG, [(titulo, cmd, cwd)])
-    subprocess.run(["open", f"warp://launch/{ABRIR_CONFIG}"], check=False)
+    _abre_en_warp(ABRIR_CONFIG)
     if callado:                        # llamado desde el selector: no romper curses
         return titulo
     print("\n" + _("Opening in a new window: {t}", t=titulo))
@@ -2104,7 +2122,8 @@ def relevo(sel, arnes=None, con_conversacion=None):
             return None, _("Those are already {c} sessions.", c=arnes)
         return None, _("None of those has a directory to go back to.")
     _escribe_config(RELEVO_CONFIG, pestanas)
-    subprocess.run(["open", f"warp://launch/{RELEVO_CONFIG}"], check=False)
+    if not _abre_en_warp(RELEVO_CONFIG):
+        return None, _("Several at once needs Warp, which is not here.")
     aviso = _("{n} handed over to {c}", n=len(pestanas), c=arnes)
     if sin_sitio_:
         aviso += " \u00b7 " + _("{n} have nowhere to go back to", n=len(sin_sitio_))
@@ -2119,7 +2138,12 @@ def reopen(sel):
         print(_("None of those can be opened from here."))
         return 1
     path = _escribe_config(CONFIG_NAME, pestanas)
-    subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
+    if not _abre_en_warp(CONFIG_NAME):
+        # Warp es hoy la unica via para abrir VARIAS de golpe. Decirlo, en vez de
+        # anunciar las pestanas que no se han abierto.
+        print("\n" + _("Several at once needs Warp, which is not here."))
+        print(_("One at a time does work: ENTER on each one."))
+        return 1
     print("\n" + _("Reattaching {n} tabs -> {p}", n=len(pestanas), p=path))
     if sin_forma:
         print(_("{n} left out: no idea how to open them.", n=len(sin_forma)))
@@ -4939,6 +4963,10 @@ def _T():
         "[1-9] hand over    [any other key] cancel":
             "[1-9] entregar    [otra tecla] cancelar",
         "Cancelled, nothing was handed over.": "Cancelado, no se ha entregado nada.",
+        "Several at once needs Warp, which is not here.":
+            "Abrir varias a la vez necesita Warp, y aqu\u00ed no est\u00e1.",
+        "One at a time does work: ENTER on each one.":
+            "De una en una s\u00ed: ENTER sobre cada una.",
         "Those are already {c} sessions.": "Esas ya son sesiones de {c}.",
         "You are taking over from a {c} session. You do not have its history: "
         "what follows is everything that is known about it.":
@@ -5199,7 +5227,7 @@ def _T():
 _T()
 
 
-VERSION = "1.23.0"
+VERSION = "1.24.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
