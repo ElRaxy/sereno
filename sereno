@@ -36,6 +36,7 @@ esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
 MIT licence. https://github.com/ElRaxy/sereno
 """
 import base64, os, stat, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib
+import uuid
 import unicodedata
 
 HOME = pathlib.Path.home()
@@ -1846,6 +1847,131 @@ def _comando_de(r):
     return None
 
 
+# Donde se dejan los guiones de un lanzamiento. Fuera de /tmp a proposito: un briefing
+# con conversacion pasa por aqui, y /tmp lo lee cualquier usuario de la maquina.
+RUN = HOME / ".sereno/lanzar"
+
+
+def _guion(cmd, cwd):
+    """Escribe el guion de UNA pestana y devuelve su ruta.
+
+    Existe porque `do script` de Terminal.app y `tmux new-window` reciben la orden como
+    UNA cadena, y el briefing de un relevo lleva saltos de linea y comillas: meterlo
+    inline es el mismo fallo que rompia el YAML de Warp, con otro traje. Con un guion en
+    disco no hay nada que escapar.
+
+    Hace tres cosas y las tres importan:
+
+      · `cd` al directorio de la sesion, y **aborta** si no esta — no sigue en `~`;
+      · `unset TMUX`, porque el reenganche es `tmux attach` y dentro de tmux falla con
+        "sessions should be nested with care" (medido, no supuesto);
+      · se borra a si mismo antes del `exec`. Un fichero borrado sigue siendo legible por
+        el descriptor que `sh` ya tiene abierto, asi que el resto se ejecuta igual
+        (verificado) y el briefing no se queda en el disco.
+    """
+    RUN.mkdir(parents=True, exist_ok=True)
+    os.chmod(RUN, 0o700)
+    ruta = RUN / ("lanza-%s.sh" % uuid.uuid4().hex[:12])
+    ruta.write_text("#!/bin/sh\n"
+                    "cd %s || exit 1\n"
+                    "unset TMUX\n"
+                    "rm -f -- %s\n"
+                    "exec %s\n" % (shlex.quote(cwd), shlex.quote(str(ruta)), cmd))
+    os.chmod(ruta, 0o700)
+    return ruta
+
+
+def _abre_en_tmux(pestanas):
+    """Una ventana de tmux por pestana, en la sesion en la que ya estas.
+
+    Es la unica via de "varias a la vez" que no depende de macOS. Pide estar DENTRO de
+    tmux: fuera habria que elegir a que sesion se le cuelgan las ventanas, y eso es
+    adivinar por el usuario.
+    """
+    hechas = 0
+    for titulo, cmd, cwd in pestanas:
+        try:
+            r = subprocess.run([TMUX_BIN, "new-window", "-c", cwd,
+                                "-n", str(titulo)[:40],
+                                "sh %s" % shlex.quote(str(_guion(cmd, cwd)))],
+                               capture_output=True)
+        except OSError:
+            continue
+        hechas += r.returncode == 0
+    return hechas
+
+
+def _abre_en_terminal(pestanas):
+    """Una ventana de Terminal.app por pestana, via AppleScript.
+
+    Aviso que no es un detalle: macOS **restaura** las ventanas de Terminal al reiniciar,
+    asi que un dia de relevos deja ventanas resucitando al arrancar. Por eso va detras de
+    Warp y de tmux, no delante.
+    """
+    hechas = 0
+    for _titulo, cmd, cwd in pestanas:
+        orden = "sh %s" % shlex.quote(str(_guion(cmd, cwd)))
+        try:
+            r = subprocess.run(
+                ["osascript", "-e",
+                 'tell application "Terminal" to do script %s' % json.dumps(orden)],
+                capture_output=True)
+        except OSError:
+            continue
+        hechas += r.returncode == 0
+    return hechas
+
+
+def hay_tmux_alrededor():
+    """Sereno corre DENTRO de tmux: `$TMUX` lo pone el propio servidor."""
+    return bool(os.environ.get("TMUX")) and bool(shutil.which(TMUX_BIN))
+
+
+def hay_terminal_app():
+    return sys.platform == "darwin" and pathlib.Path(
+        "/System/Applications/Utilities/Terminal.app").is_dir()
+
+
+# Como se abren VARIAS sesiones a la vez, en orden de preferencia. La clave es el nombre
+# que se ensena; el valor es (esta disponible, abrelas y di cuantas salieron).
+#
+# Warp primero porque abre ventanas de verdad sin efectos raros. tmux despues porque es
+# el unico que funciona fuera de macOS. Terminal.app el ultimo, por lo de la restauracion.
+#
+# Anadir iTerm2, kitty o gnome-terminal es una linea AQUI, pero ninguno esta instalado en
+# esta maquina y no se ponen a ojo: la forma exacta de pedirles una ventana con una orden
+# dentro se comprueba antes, como se hizo con estos tres.
+LANZADORES = {
+    "warp": (lambda: hay_warp(), None),          # el suyo va por YAML, no por guion
+    "tmux": (hay_tmux_alrededor, _abre_en_tmux),
+    "terminal": (hay_terminal_app, _abre_en_terminal),
+}
+
+
+def lanzador_disponible():
+    """El primero de `LANZADORES` que existe aqui. `SERENO_LANZADOR` lo fuerza."""
+    forzado = _env("LANZADOR")
+    nombres = [forzado] if forzado in LANZADORES else list(LANZADORES)
+    for n in nombres:
+        if LANZADORES[n][0]():
+            return n
+    return None
+
+
+def abre_varias(pestanas, config):
+    """(lanzador, cuantas) para abrir estas pestanas. (None, 0) si no hay por donde.
+
+    Devuelve HECHOS y no un "ha ido bien": quien llama compone el mensaje a partir de
+    cuantas salieron de verdad, que es lo que antes nadie miraba.
+    """
+    cual = lanzador_disponible()
+    if cual is None:
+        return None, 0
+    if cual == "warp":
+        return ("warp", len(pestanas)) if _abre_en_warp(config) else (None, 0)
+    return cual, LANZADORES[cual][1](pestanas)
+
+
 def _abre_en_warp(nombre):
     """Lanza una launch configuration. Devuelve si se pudo, no si se ve bonita.
 
@@ -2122,9 +2248,11 @@ def relevo(sel, arnes=None, con_conversacion=None):
             return None, _("Those are already {c} sessions.", c=arnes)
         return None, _("None of those has a directory to go back to.")
     _escribe_config(RELEVO_CONFIG, pestanas)
-    if not _abre_en_warp(RELEVO_CONFIG):
-        return None, _("Several at once needs Warp, which is not here.")
-    aviso = _("{n} handed over to {c}", n=len(pestanas), c=arnes)
+    _cual, hechas = abre_varias(pestanas, RELEVO_CONFIG)
+    if not hechas:
+        return None, _("Nothing here can open several at once: "
+                       "no Warp, no tmux around, no Terminal.app.")
+    aviso = _("{n} handed over to {c}", n=hechas, c=arnes)
     if sin_sitio_:
         aviso += " \u00b7 " + _("{n} have nowhere to go back to", n=len(sin_sitio_))
     if mismo_:
@@ -2138,13 +2266,18 @@ def reopen(sel):
         print(_("None of those can be opened from here."))
         return 1
     path = _escribe_config(CONFIG_NAME, pestanas)
-    if not _abre_en_warp(CONFIG_NAME):
-        # Warp es hoy la unica via para abrir VARIAS de golpe. Decirlo, en vez de
-        # anunciar las pestanas que no se han abierto.
-        print("\n" + _("Several at once needs Warp, which is not here."))
+    cual, hechas = abre_varias(pestanas, CONFIG_NAME)
+    if not hechas:
+        # El numero manda sobre la intencion: se anuncian las que salieron, no las que
+        # se pidieron. Antes se imprimia "reenganchando 3" sin mirar si habia ocurrido.
+        print("\n" + _("Nothing here can open several at once: "
+                       "no Warp, no tmux around, no Terminal.app."))
         print(_("One at a time does work: ENTER on each one."))
         return 1
-    print("\n" + _("Reattaching {n} tabs -> {p}", n=len(pestanas), p=path))
+    print("\n" + _("Reattaching {n} tabs with {v} -> {p}",
+                   n=hechas, v=cual, p=path))
+    if hechas < len(pestanas):
+        print(_("{n} did not open.", n=len(pestanas) - hechas))
     if sin_forma:
         print(_("{n} left out: no idea how to open them.", n=len(sin_forma)))
     return 0
@@ -4963,8 +5096,13 @@ def _T():
         "[1-9] hand over    [any other key] cancel":
             "[1-9] entregar    [otra tecla] cancelar",
         "Cancelled, nothing was handed over.": "Cancelado, no se ha entregado nada.",
-        "Several at once needs Warp, which is not here.":
-            "Abrir varias a la vez necesita Warp, y aqu\u00ed no est\u00e1.",
+        "Nothing here can open several at once: "
+        "no Warp, no tmux around, no Terminal.app.":
+            "Aqu\u00ed no hay con qu\u00e9 abrir varias a la vez: "
+            "ni Warp, ni tmux alrededor, ni Terminal.app.",
+        "{n} did not open.": "{n} no se abrieron.",
+        "Reattaching {n} tabs with {v} -> {p}":
+            "Reenganchando {n} pesta\u00f1as con {v} -> {p}",
         "One at a time does work: ENTER on each one.":
             "De una en una s\u00ed: ENTER sobre cada una.",
         "Those are already {c} sessions.": "Esas ya son sesiones de {c}.",
@@ -5086,7 +5224,6 @@ def _T():
         "Opening in a new window: {t}": "Abriendo en una ventana nueva: {t}",
         "Opening {n} tabs -> {p}": "Abriendo {n} pestañas -> {p}",
         "Opening: {t}": "Abriendo: {t}",
-        "Reattaching {n} tabs -> {p}": "Reenganchando {n} pestañas -> {p}",
         "SPACE": "ESPACIO",
         "Sessions that died": "Sesiones que murieron",
         "Stopped {n} sessions.": "Paradas {n} sesiones.",
@@ -5227,7 +5364,7 @@ def _T():
 _T()
 
 
-VERSION = "1.24.0"
+VERSION = "1.25.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

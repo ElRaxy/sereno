@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.25.0
+
+**Opening several at once stops being a Warp thing — and a macOS thing.**
+
+1.24.0 made `r` and `c` admit they could not do it without Warp. This gives them two more ways,
+in preference order:
+
+| | what it opens | needs |
+|---|---|---|
+| **Warp** | a real window per session | macOS with Warp |
+| **tmux** | a tmux window per session, in the session you are already in | being *inside* tmux — **the only one that works off macOS** |
+| **Terminal.app** | a Terminal window per session | macOS |
+
+Terminal.app is last on purpose: macOS **restores** its windows on reboot, so a day of handovers
+leaves windows coming back at startup. `SERENO_LANZADOR` forces one. iTerm2, kitty and
+gnome-terminal are one line each — but none is installed on this machine and none goes in by
+guesswork: how you ask a terminal for a window with an order inside gets checked first, the way
+these three were.
+
+**The order travels in a script on disk, not inline.** `do script` and `tmux new-window` take the
+order as one string, and a handover briefing has newlines, single quotes and double quotes in it:
+inline is the same bug that used to break Warp's YAML, in a different suit. The script does three
+things, each measured rather than assumed:
+
+- `cd` to the session's directory and **abort** if it is gone — not carry on in `~`;
+- `unset TMUX`, because reattaching is `tmux attach`, which inside tmux refuses with *sessions
+  should be nested with care* (verified: with `TMUX` set it fails, empty it works);
+- **delete itself before the `exec`** — a deleted file is still readable through the descriptor
+  `sh` already holds, so everything after the `rm` still runs (verified) and the briefing does not
+  stay on disk. It lives in `~/.sereno/lanzar`, `0700`, deliberately not in `/tmp`, which every
+  user on the machine can read.
+
+**And the count is the truth now.** `reopen` reports how many windows actually opened, not how
+many were asked for, and says so when some did not.
+
+Checked end to end on both new launchers, with a briefing carrying newlines, `it's` and `"raro"`
+and accents: it arrives whole, the working directory is the session's, `TMUX` reaches the child
+empty, and no script is left behind. Five mutants — no `unset`, a `cd` that does not abort, a
+script that does not delete itself, `0755` on the script, and the table reordered — each turn a
+case red.
+
 ## 1.24.0
 
 **On a machine without Warp, `r` and `c` took the whole program down.**
