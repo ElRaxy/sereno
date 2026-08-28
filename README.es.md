@@ -502,6 +502,8 @@ línea de tmux filtra por él antes de dividir.
 | `↑` `↓` / `j` `k` | moverse |
 | `ENTER` | abrirla |
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
+| `r` | abrir las marcadas de una vez, una pestaña cada una |
+| `c` | entregar las marcadas a otro CLI — ver abajo |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
 | `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` (o pincharlo — ver abajo) |
@@ -596,6 +598,44 @@ se puede explicar en una línea. El dinero queda fuera por otra razón: el `tota
 escribe el CLI **al cerrar**, así que estaba en 16 de 40 sesiones y en **ninguna** de las vivas.
 
 Se puede dejar puesto: `SERENO_SORT=spend`, o `-spend` para invertirlo.
+
+### `c` — entregar una sesión a otro CLI
+
+**Es un relevo, no una migración, y no puede ser otra cosa.** El contexto de una sesión de Claude
+vive en su transcript, con sus ids de herramienta; no hay formato que otro CLI pueda recoger y
+continuar. Lo que hace `c` es abrir una sesión **nueva** del otro CLI, plantada en el mismo
+directorio y la misma rama, con un briefing de dónde se quedó la de Claude:
+
+```
+Vienes a relevar a una sesión de Claude Code. No tienes su historial:
+esto es todo lo que se sabe de ella.
+
+  proyecto: /Users/tu/code/checkout-api
+  rama: feat/webhooks
+  título: Refactor payment webhooks
+  estado: en un comando
+
+  sus últimas llamadas a herramienta:
+    ·   2s  Read · tests/webhooks/test_retry.py
+    ✗  34s  Bash · pytest tests/webhooks -x -q
+    ◐   1m  Bash · pytest tests/webhooks -x -q
+
+Oriéntate en ese directorio antes de tocar nada.
+```
+
+Solo hechos. **Ahí no va ningún prompt ni ninguna respuesta tuya**, y no es remilgo: el briefing
+viaja dentro de la launch configuration de Warp, que se queda en el disco en
+`~/.warp/launch_configurations/`. Meter la conversación de un cliente en un fichero es una
+decisión, así que se pide — `SERENO_RELEVO=completo` añade el último prompt y la última
+respuesta — y nunca es lo que pasa por defecto.
+
+Una sesión cuyo directorio ya no existe **se queda fuera** en vez de arrancar en `~`: un relevo
+que empieza en el sitio equivocado parece que ha funcionado.
+
+Solo se ofrecen los CLI que estén de verdad en tu `PATH`. Hoy la tabla tiene `codex`
+(`codex [PROMPT]` abre sesión interactiva con un prompt inicial, comprobado en su `--help`);
+añadir otro es una línea, pero antes hay que verificar su flag en vez de suponerlo — que es por
+lo que `gemini` no está.
 
 ### `--now`
 

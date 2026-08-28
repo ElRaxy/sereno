@@ -1791,6 +1791,7 @@ def stop_rows(rows, forget):
 
 
 ABRIR_CONFIG = "claude-abrir"
+RELEVO_CONFIG = "claude-relevo"
 
 
 def _comando_de(r):
@@ -1841,14 +1842,7 @@ def abrir_sesion(r, callado=False):
         os.chdir(cwd)
         print("\n" + _("Opening: {t}", t=titulo) + "\n")
         os.execvp("/bin/sh", ["/bin/sh", "-c", cmd])
-    LAUNCH.mkdir(parents=True, exist_ok=True)
-    ruta = LAUNCH / f"{ABRIR_CONFIG}.yaml"
-    ruta.write_text("\n".join([
-        "---", f"name: {ABRIR_CONFIG}", "windows:", "  - tabs:",
-        f'      - title: "{titulo}"', "        layout:",
-        f'          cwd: "{cwd}"', "          commands:",
-        f"            - exec: {cmd}",
-    ]) + "\n")
+    _escribe_config(ABRIR_CONFIG, [(titulo, cmd, cwd)])
     subprocess.run(["open", f"warp://launch/{ABRIR_CONFIG}"], check=False)
     if callado:                        # llamado desde el selector: no romper curses
         return titulo
@@ -1856,29 +1850,168 @@ def abrir_sesion(r, callado=False):
     return 0
 
 
+def _escribe_config(nombre, pestanas):
+    """Escribe UNA launch configuration de Warp con una pestana por tupla.
+
+    `pestanas` son (titulo, comando, cwd) ya compuestos. Vive aqui sola porque habia
+    tres copias de este mismo YAML —la de abrir una, la de reabrir varias y la de las
+    huerfanas— y en una de ellas el comando estaba fijo a `tmux attach`: marcabas cinco
+    del historial, se abrian cinco pestanas y fallaban las cinco sin decir por que.
+    Con un solo sitio que compone el YAML, el comando lo decide quien sabe (`_comando_de`).
+    """
+    LAUNCH.mkdir(parents=True, exist_ok=True)
+    lineas = ["---", f"name: {nombre}", "windows:", "  - tabs:"]
+    for titulo, cmd, cwd in pestanas:
+        lineas += [
+            '      - title: "%s"' % str(titulo).replace('"', "'")[:60],
+            "        layout:",
+            '          cwd: "%s"' % cwd,
+            "          commands:",
+        ]
+        if "\n" in cmd:
+            # Una orden de varias lineas —el briefing de un relevo lo es— rompe el YAML
+            # si se escribe suelta detras de `exec:`: el fichero sale invalido y la
+            # ventana no abre. Bloque literal `|-`, que conserva los saltos y la sangria
+            # RELATIVA a la suya, que es lo que alinea la lista de llamadas.
+            lineas.append("            - exec: |-")
+            lineas += ["                " + l for l in cmd.split("\n")]
+        else:
+            lineas.append(f"            - exec: {cmd}")
+    ruta = LAUNCH / f"{nombre}.yaml"
+    ruta.write_text("\n".join(lineas) + "\n")
+    return ruta
+
+
+def pestanas_de(rows):
+    """(pestanas, sin_forma) — las filas que se saben abrir, y las que no.
+
+    El comando sale de `_comando_de()`, que ya distingue los tres casos: una sesion viva
+    se abre con `tmux attach`, una del historial de Claude con `--resume`, y una de otro
+    CLI con lo suyo (`codex resume ...`). Las que no se sepan abrir se DEVUELVEN aparte
+    en vez de colarse con un comando cualquiera: una pestana que falla al abrirse no
+    dice cual era ni por que.
+    """
+    pestanas, sin_forma = [], []
+    for r in rows:
+        par = _comando_de(r)
+        if not par:
+            sin_forma.append(r)
+            continue
+        cmd, cwd = par
+        if not pathlib.Path(cwd or "").is_dir():
+            cwd = str(HOME)
+        pestanas.append((r.get("title_full") or r.get("title") or r.get("name") or "claude",
+                         cmd, cwd))
+    return pestanas, sin_forma
+
+
+# Los CLI a los que se sabe entregar una sesion. La clave es el binario, tal cual se
+# busca en el PATH; el valor compone la orden con el briefing dentro.
+#
+# `codex [OPTIONS] [PROMPT]` -- "Optional user prompt to start the session", verificado
+# contra `codex --help` el 2026-08-28. Anadir otro es una linea AQUI, pero antes hay que
+# comprobar en su `--help` como se le pasa un prompt inicial y que abra sesion
+# INTERACTIVA: `gemini` no esta instalado en esta maquina, asi que no se pone a ojo.
+ARNESES = {
+    "codex": lambda prompt: "codex " + shlex.quote(prompt),
+}
+
+
+def arneses_disponibles():
+    """Los de `ARNESES` que existen en el PATH. Un CLI que no esta no se ofrece."""
+    forzado = _env("SERENO_ARNES")
+    nombres = [forzado] if forzado in ARNESES else list(ARNESES)
+    return [n for n in nombres if shutil.which(n)]
+
+
+def briefing(r, con_conversacion=False):
+    """El texto con el que arranca el relevo. Hechos, no un resumen inventado.
+
+    No es una traduccion de la sesion y no puede serlo: el contexto de Claude vive en su
+    transcript, con sus ids de herramienta, y no hay forma de meterlo en otro CLI. Esto
+    es un RELEVO: una sesion nueva plantada en el mismo sitio con lo que se sabe.
+
+    Por defecto NO lleva conversacion. El briefing acaba dentro del YAML de Warp, que se
+    queda en el disco: meter ahi el prompt y la respuesta es sacar trabajo de un cliente
+    a un fichero, y eso se hace a peticion (`SERENO_RELEVO=completo`), no por defecto.
+    """
+    d = detalles(r)
+    cwd = d.get("cwd") or (r.get("meta") or {}).get("cwd") or ""
+    lineas = [_("You are taking over from a Claude Code session. You do not have its "
+                "history: what follows is everything that is known about it."), ""]
+    campos = [(_("project"), cwd), (_("branch"), d.get("gitBranch") or ""),
+              (_("title"), r.get("title_full") or r.get("title") or ""),
+              (_("state"), ESTADO_LARGO(estado_estable(r)))]
+    lineas += ["  %s: %s" % (k, v) for k, v in campos if v]
+    ruta = (d.get("ruta") or [])[-6:]
+    if ruta:
+        lineas += ["", "  " + _("its last tool calls:")]
+        for e in ruta:
+            glifo, _par, dur, res = linea_ruta(e, 100)
+            lineas.append("    %s %s  %s" % (glifo, dur, res))
+    if con_conversacion:
+        for etiq, txt in ((_("last thing asked of it"), d.get("lastPrompt")),
+                          (_("last thing it said"), d.get("resp"))):
+            if txt:
+                lineas += ["", "  " + etiq + ":", "    " + _clean(txt)[:1200]]
+    lineas += ["", _("Get your bearings in that directory before touching anything.")]
+    return "\n".join(lineas)
+
+
+def pestanas_de_relevo(rows, arnes, con_conversacion=False):
+    """(pestanas, sin_sitio) para entregar estas filas a otro CLI.
+
+    Se cae la fila cuyo directorio ya no existe: un relevo que arranca en `~` porque el
+    proyecto se movio es peor que no arrancar, porque parece que ha funcionado.
+    """
+    compone = ARNESES[arnes]
+    pestanas, sin_sitio_ = [], []
+    for r in rows:
+        cwd = detalles(r).get("cwd") or (r.get("meta") or {}).get("cwd") or ""
+        if not pathlib.Path(cwd or "").is_dir():
+            sin_sitio_.append(r)
+            continue
+        titulo = "%s \u2192 %s" % (r.get("title") or r.get("name") or "", arnes)
+        pestanas.append((titulo, compone(briefing(r, con_conversacion)), cwd))
+    return pestanas, sin_sitio_
+
+
+def relevo(sel, arnes=None):
+    """Abre una sesion NUEVA del otro CLI por cada fila, en su directorio."""
+    disponibles = arneses_disponibles()
+    arnes = arnes or (disponibles[0] if disponibles else None)
+    if not arnes:
+        return None, _("No other CLI found on your PATH.")
+    pestanas, sin_sitio_ = pestanas_de_relevo(
+        sel, arnes, con_conversacion=_env("SERENO_RELEVO") == "completo")
+    if not pestanas:
+        return None, _("None of those has a directory to go back to.")
+    _escribe_config(RELEVO_CONFIG, pestanas)
+    subprocess.run(["open", f"warp://launch/{RELEVO_CONFIG}"], check=False)
+    aviso = _("{n} handed over to {c}", n=len(pestanas), c=arnes)
+    if sin_sitio_:
+        aviso += " \u00b7 " + _("{n} have nowhere to go back to", n=len(sin_sitio_))
+    return arnes, aviso
+
+
 def reopen(sel):
-    path = write_attach_config(sel)
+    pestanas, sin_forma = pestanas_de(sel)
+    if not pestanas:
+        print(_("None of those can be opened from here."))
+        return 1
+    path = _escribe_config(CONFIG_NAME, pestanas)
     subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-    print("\n" + _("Reattaching {n} tabs -> {p}", n=len(sel), p=path))
+    print("\n" + _("Reattaching {n} tabs -> {p}", n=len(pestanas), p=path))
+    if sin_forma:
+        print(_("{n} left out: no idea how to open them.", n=len(sin_forma)))
     return 0
 
 
 def write_attach_config(rows):
-    LAUNCH.mkdir(parents=True, exist_ok=True)
-    lines = ["---", f"name: {CONFIG_NAME}", "windows:", "  - tabs:"]
-    for r in rows:
-        title = r["title"].replace('"', "'")
-        cwd = (r["meta"] or {}).get("cwd") or str(HOME)
-        lines += [
-            f'      - title: "{title}"',
-            "        layout:",
-            f'          cwd: "{cwd}"',
-            "          commands:",
-            f"            - exec: {TMUX_BIN} -L {SOCK} attach -t {shlex.quote(r['name'])}",
-        ]
-    path = LAUNCH / f"{CONFIG_NAME}.yaml"
-    path.write_text("\n".join(lines) + "\n")
-    return path
+    """Se mantiene el nombre porque lo llaman de tres sitios; el YAML ya no se escribe
+    aqui y el comando ya no es `tmux attach` fijo."""
+    pestanas, _sin = pestanas_de(rows)
+    return _escribe_config(CONFIG_NAME, pestanas)
 
 
 def _clean(t):
@@ -4005,6 +4138,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     ("a / i", _("mark all / invert")),
                     ("d", _("mark the ones idle for over an hour")),
                     ("r", _("reopen the marked ones as tabs")),
+                    ("c", _("hand the marked ones to another CLI (codex...)")),
                     ("q", _("quit without touching anything")),
                     ("", ""),
                     (_("mouse"), _("click selects, double click opens")),
@@ -4237,19 +4371,41 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             elif c in (ord("q"), ord("Q")):
                 return          # ESC no vale para salir: llega suelto cuando el
                                 # terminal parte una secuencia de flecha en dos
+            elif c in (ord("c"), ord("C")):
+                if not marcadas:
+                    aviso = _("Mark which ones you want to hand over first.")
+                    continue
+                sel = [r for r in base if r["name"] in marcadas]
+                _arnes, aviso = relevo(sel)
+                marcadas.clear()
+                ancla = None
+                continue
             elif c in (ord("r"), ord("R")):
-                if muertas and not marcadas:
+                # Antes, sin nada marcado, `r` abria TODAS las visibles de una vez. Es
+                # la tecla de al lado de las flechas y el gesto no se puede deshacer:
+                # ahora hay que decir cuales.
+                if not marcadas:
                     aviso = _("Mark which ones you want to resume first.")
                     continue
-                sel = [r for r in base if r["name"] in marcadas] or rows
+                sel = [r for r in base if r["name"] in marcadas]
+                con_pestana = [r for r in sel if r["attached"]]
                 sel = [r for r in sel if not r["attached"]]
                 if not sel:
                     aviso = _("Those already have a tab open.")
                     continue
+                # Las que ya tienen pestana se caen de la lista, y hasta hoy en
+                # silencio: marcabas seis, se abrian cuatro y no habia forma de saber
+                # cuales faltaban ni por que.
+                _sin_forma = pestanas_de(sel)[1]
                 if not ejecutar:
                     res["out"] = ("reopen", sel)
                     return
                 aviso, todas = ejecutar("reopen", sel)
+                fuera = ([_("{n} already had a tab", n=len(con_pestana))] if con_pestana
+                         else []) + ([_("{n} cannot be opened from here",
+                                        n=len(_sin_forma))] if _sin_forma else [])
+                if fuera:
+                    aviso += " \u00b7 " + ", ".join(fuera)
                 res["toco"] = True
                 marcadas.clear()
                 ancla = None
@@ -4473,22 +4629,14 @@ def describe(e):
 
 
 def write_launch_config(items):
-    LAUNCH.mkdir(parents=True, exist_ok=True)
-    lines = ["---", f"name: {CONFIG_NAME}", "windows:", "  - tabs:"]
+    """Las huerfanas son entradas del registro, no filas de la lista: no tienen `meta`
+    ni pasan por `_comando_de()`, asi que su comando se compone aqui. El YAML, no."""
+    pestanas = []
     for e in items:
-        title = label(e).replace('"', "'")
         flags = e.get("resume_flags__list") or []
         cmd = " ".join(["claude", "--resume", e["id"]] + [shlex.quote(f) for f in flags])
-        lines += [
-            f'      - title: "{title}"',
-            "        layout:",
-            f'          cwd: "{e["cwd"]}"',
-            "          commands:",
-            f"            - exec: {cmd}",
-        ]
-    path = LAUNCH / f"{CONFIG_NAME}.yaml"
-    path.write_text("\n".join(lines) + "\n")
-    return path
+        pestanas.append((label(e), cmd, e["cwd"]))
+    return _escribe_config(CONFIG_NAME, pestanas)
 
 
 def archive(items, folder):
@@ -4534,6 +4682,35 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "hand the marked ones to another CLI (codex...)":
+            "entregar las marcadas a otro CLI (codex\u2026)",
+        "Mark which ones you want to hand over first.":
+            "Marca primero cu\u00e1les quieres entregar.",
+        "No other CLI found on your PATH.":
+            "No hay ning\u00fan otro CLI en tu PATH.",
+        "None of those has a directory to go back to.":
+            "Ninguna de esas tiene un directorio al que volver.",
+        "{n} handed over to {c}": "{n} entregadas a {c}",
+        "{n} have nowhere to go back to": "{n} no tienen sitio al que volver",
+        "You are taking over from a Claude Code session. You do not have its "
+        "history: what follows is everything that is known about it.":
+            "Vienes a relevar a una sesi\u00f3n de Claude Code. No tienes su "
+            "historial: esto es todo lo que se sabe de ella.",
+        "project": "proyecto",
+        "branch": "rama",
+        "title": "t\u00edtulo",
+        "state": "estado",
+        "its last tool calls:": "sus \u00faltimas llamadas a herramienta:",
+        "last thing asked of it": "lo \u00faltimo que se le pidi\u00f3",
+        "last thing it said": "lo \u00faltimo que dijo",
+        "Get your bearings in that directory before touching anything.":
+            "Ori\u00e9ntate en ese directorio antes de tocar nada.",
+        "{n} already had a tab": "{n} ya ten\u00edan pesta\u00f1a",
+        "{n} cannot be opened from here": "{n} no se saben abrir desde aqu\u00ed",
+        "None of those can be opened from here.":
+            "Ninguna de esas se sabe abrir desde aqu\u00ed.",
+        "{n} left out: no idea how to open them.":
+            "{n} se quedan fuera: no se sabe c\u00f3mo abrirlas.",
         "{n} live \u00b7 {t} working, {e} waiting on you":
             "{n} vivas \u00b7 {t} trabajando, {e} te esperan",
         "no tool calls in the tail of its transcript":
@@ -4774,7 +4951,7 @@ def _T():
 _T()
 
 
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5243,9 +5420,10 @@ def main():
                 n = stop_rows(sel, forget=True)
                 aviso = _("{n} closed and archived. The history is still on disk.", n=n)
             else:
-                path = write_attach_config(sel)
+                pestanas, _sf = pestanas_de(sel)
+                path = _escribe_config(CONFIG_NAME, pestanas)
                 subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-                aviso = _("{n} reattached as tabs -> {p}", n=len(sel), p=path.name)
+                aviso = _("{n} reattached as tabs -> {p}", n=len(pestanas), p=path.name)
             return aviso, live_sessions(con_ram=True)
 
         accion = pick_ui(rows, ejecutar=ejecutar,
