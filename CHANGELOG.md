@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.14.0
+
+**Sessions you cannot go back to stop competing for the top of the list.**
+
+A session whose working directory no longer exists cannot be resumed in any useful sense: it drops
+you into a `cd` to a place that is not there. Those now sort below everything, print in grey, and
+the header counts them apart — `6 resumable · 40 with nowhere to go back to`.
+
+It is the twin of what 1.12.0 did for sessions that never started, asking the same question from
+the other side. Those never answered; these answered plenty and lost their destination, so the two
+counts never overlap.
+
+On the machine this was written on it was **40 of the 46 history rows**. That number is inflated by
+53 sessions an optimiser had left behind that same morning, so here it is without them: still **28
+of 37**, in two very specific flavours — worktrees already deleted (10 of 15) and temporary
+directories (18 of 18, every single one).
+
+**They are sunk, never hidden.** A directory missing today may be a worktree you recreate or a disk
+you remount. The check is cached per path — not per session, because forty sessions here shared four
+directories — with a 30-second TTL, so a row revives on its own without a restart.
+
+Two guards, both because a missing directory is not always a missing directory: a session with no
+recorded `cwd` is never marked (flagging a row over an absent field is the mistake this fixes), and
+a live session is never marked, since its process is running inside that directory.
+
+The `stat` deliberately does not live in `ordena()`, which is pure and runs four times a second: it
+is resolved once when the row is built. Cheap locally, and not cheap at all on an unmounted network
+volume.
+
+`--json` grows one field, `cwd_exists`, so a statusline can filter for what is genuinely resumable
+instead of guessing from the project name.
+
+Also: the Spanish README was missing the "sessions that never started" section that 1.12.0 added to
+the English one. Both are in now.
+
 ## 1.13.1
 
 **Same program as 1.13.0. Use this one: the file published under 1.13.0 is not the program.**

@@ -211,6 +211,34 @@ Two guards, both because a zero is not always a zero:
 - **Never a live session.** One you just launched has not answered yet, and it is the row you most
   want to see.
 
+### Sessions with nowhere to go back to
+
+A session whose working directory no longer exists cannot be returned to: resuming it drops you
+into a `cd` to a place that is not there. Same treatment as the ones that never started — sorted
+below everything, printed in grey, counted apart in the header.
+
+It is the twin of the case above, asking the same question from the other side. Those never
+answered; these answered plenty, and lost their destination.
+
+On the machine this was written on it was **40 of the 46 history rows**. And that is not the freak
+result of one odd afternoon: drop the 53 sessions an optimiser left behind that morning and it is
+still **28 of 37**, in two very specific flavours — worktrees already deleted (10 of 15) and
+temporary directories (18 of 18, every single one).
+
+They are sunk, never hidden. A directory that is missing today may be a worktree you recreate or a
+disk you remount, and the check is cached per path for 30 seconds, so the row comes back on its
+own. Hiding them would trade one error for its opposite.
+
+Two guards, both because a missing directory is not always a missing directory:
+
+- **No path, no claim.** A session with no recorded `cwd` is never marked — flagging a row over a
+  field that is absent is exactly the mistake this fixes.
+- **Never a live session.** Its process is running inside that directory, so it exists by
+  definition, and asking would spend a `stat` to confirm the obvious.
+
+The fact is in `--json` too, as `cwd_exists`, so a statusline can filter for what is genuinely
+resumable instead of guessing from the project name.
+
 ### About that context bar
 
 It answers the question you currently answer by opening the session: *can this one take

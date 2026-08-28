@@ -891,6 +891,42 @@ _CACHE_DISCO = {}
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
+_CACHE_SITIO = {}
+# 30 s: una worktree que borras deja de existir para la lista en la siguiente media
+# vuelta, y una que recreas revive sola. Sin TTL habria que elegir entre mentir hasta
+# reiniciar o hacer un `stat` por fila cuatro veces por segundo.
+TTL_SITIO = 30.0
+
+
+def hay_sitio(ruta):
+    """Si el directorio de trabajo de una sesion sigue existiendo. Cacheado por RUTA.
+
+    Por ruta y no por sesion a proposito: las 40 sesiones que un optimizador dejo aqui
+    en una tarde comparten cuatro directorios, asi que el cache convierte 40 `stat` en 4.
+
+    Un `stat` es barato en local y NO lo es sobre un volumen de red desmontado, donde
+    puede quedarse colgado. Por eso esto no vive dentro de `ordena()`, que es pura y se
+    llama cuatro veces por segundo: se resuelve una vez al armar la fila.
+
+    Sin ruta devuelve True — "no consta" no es "no existe", y marcar una sesion por un
+    dato que falta seria el error contrario al que esto arregla.
+    """
+    if not ruta:
+        return True
+    ahora = time.time()
+    visto = _CACHE_SITIO.get(ruta)
+    if visto and ahora - visto[0] < TTL_SITIO:
+        return visto[1]
+    try:
+        existe = os.path.isdir(ruta)
+    except OSError:
+        existe = True                     # un error al mirar no es una ausencia
+    if len(_CACHE_SITIO) > 400:
+        _CACHE_SITIO.clear()
+    _CACHE_SITIO[ruta] = (ahora, existe)
+    return existe
+
+
 def _proyecto_de_dir(nombre):
     """`-home-you-code-my-project` -> `/home/you/code/my-project`.
 
@@ -1016,6 +1052,9 @@ def fila_de_transcript(p, mt=None, fino=True):
     fila["working"] = bool(fila["pulso"].get("escribe")
                            or fila["pulso"].get("herramienta")) if viva else False
     fila["fuente"] = "claude" if viva else "historial"
+    # Solo para las del historial: una viva tiene su proceso dentro de ese directorio,
+    # asi que preguntarlo seria gastar un `stat` para confirmar lo obvio.
+    fila["_sitio"] = True if viva else hay_sitio((fila.get("meta") or {}).get("cwd"))
     return fila
 
 
@@ -1290,6 +1329,10 @@ def filas_json(rows):
             "writing": pu.get("escribe"),
             "tool_pending": pu.get("herramienta"),
             "idle_seconds": None if r.get("idle") is None else round(r["idle"]),
+            # El hecho, no el juicio: si su directorio de trabajo sigue existiendo. Una
+            # statusline que solo quiera lo reanudable de verdad filtra por esto sin
+            # tener que adivinar por el nombre del proyecto.
+            "cwd_exists": bool(r.get("_sitio", True)),
             "attached": bool(r.get("attached")),
             "memory_mb": None if r.get("mem_mb") is None else round(r["mem_mb"]),
             "context_tokens": ctx,
@@ -3086,6 +3129,30 @@ def vacia(r):
     return 1 if (u.get("completo") and not u.get("pico")) else 0
 
 
+def sin_sitio(r):
+    """1 si el directorio de trabajo de esa sesion ya no existe.
+
+    Es la gemela de `vacia()` y responde a la misma pregunta —¿se puede volver aqui?—
+    por el otro lado: aquella son sesiones que nunca contestaron, estas contestaron de
+    sobra pero reanudarlas te deja en un `cd` a un sitio que no esta.
+
+    En la maquina donde se escribio esto son **40 de las 46 filas** del historial. Y no
+    es un espejismo de una tarde rara: quitando las 53 sesiones que un optimizador dejo
+    esa manana, siguen siendo **28 de 37**, de dos clases muy concretas — worktrees ya
+    borradas (10 de 15) y directorios temporales (18 de 18, todos).
+
+    **Las vivas no se marcan nunca**, igual que en `vacia()`: su proceso esta corriendo
+    dentro de ese directorio, asi que existe por definicion.
+
+    No se ocultan, se hunden. Un directorio que hoy no esta puede ser una worktree que
+    vuelvas a crear o un disco que vuelvas a montar, y el TTL de `hay_sitio()` hace que
+    la fila reviva sola. Esconderlas seria cambiar un error por el contrario.
+    """
+    if r.get("fuente", "claude") != "historial":
+        return 0
+    return 0 if r.get("_sitio", True) else 1
+
+
 def ordena(rows, modo="activity", invertido=False):
     """Ordena la lista. Pura: ni pinta, ni lee el reloj, ni toca disco.
 
@@ -3102,15 +3169,18 @@ def ordena(rows, modo="activity", invertido=False):
          como parpadeo.
       2. el orden principal del modo, que si respeta `invertido`.
       3. los huecos al fondo, en las dos direcciones.
-      4. y debajo de los huecos, las que nunca arrancaron. Un hueco es una sesion real
-         cuyo dato no consta; una vacia no tiene dato porque no tiene nada. La cuarta
-         pasada va la ultima y por eso manda sobre las tres.
+      4. debajo de los huecos, las que ya no tienen sitio al que volver.
+      5. y debajo de todo, las que nunca arrancaron. Un hueco es una sesion real cuyo
+         dato no consta; una sin sitio tiene el dato pero no el destino; una vacia no
+         tiene nada. Las dos ultimas pasadas van al final y por eso mandan sobre el
+         resto, y en ese orden: no tener nada es peor que no tener donde.
     """
     if modo not in MODOS_ORDEN:
         modo = MODOS_ORDEN[0]
     out = sorted(rows, key=lambda r: r.get("name") or "")
     out.sort(key=lambda r: _clave_orden(r, modo), reverse=invertido)
     out.sort(key=lambda r: _ausente(r, modo))
+    out.sort(key=sin_sitio)
     out.sort(key=vacia)
     return out
 
@@ -3379,8 +3449,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # devuelve su error de arranque y nada mas. Solo se descuentan de ESE rotulo
             # — en "todas" el numero es el total de filas y ahi si es verdad.
             vacias = sum(1 for r in rows if vacia(r))
+            # Las que ya no tienen directorio tampoco son reanudables, y por el mismo
+            # motivo que las vacias: reanudar una te deja en un `cd` a un sitio que no
+            # esta. Se cuentan aparte de aquellas — una sesion sin arrancar Y sin sitio
+            # se contaria dos veces y el rotulo dejaria de sumar.
+            sin_sitios = sum(1 for r in rows if sin_sitio(r) and not vacia(r))
             resumible = (muertas or externa) and vista != "todas"
-            cab_put(str(len(rows) - (vacias if resumible else 0)), 6, curses.A_BOLD)
+            cab_put(str(len(rows) - ((vacias + sin_sitios) if resumible else 0)), 6,
+                    curses.A_BOLD)
             # En "todas" conviven abiertas y reanudables: llamarlas "abiertas" a todas
             # decia que 46 sesiones muertas seguian corriendo.
             cab_put(_(" total") if vista == "todas" else
@@ -3389,6 +3465,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cab_put("  \u00b7  ", 4)
                 cab_put(str(vacias), 4, curses.A_BOLD)
                 cab_put(_(" never started"), 4)
+            if sin_sitios:
+                cab_put("  \u00b7  ", 4)
+                cab_put(str(sin_sitios), 4, curses.A_BOLD)
+                cab_put(_(" with nowhere to go back to"), 4)
             currando = sum(1 for r in rows if (r.get("pulso") or {}).get("herramienta"))
             escriben = sum(1 for r in rows if (r.get("pulso") or {}).get("escribe")
                            and not (r.get("pulso") or {}).get("herramienta"))
@@ -3548,7 +3628,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
                                  anchura_t)
                 put(titulo, 2 if marcada else (5 if sin_rastro else
-                                               4 if vacia(r) else 0),
+                                               4 if (vacia(r) or sin_sitio(r)) else 0),
                     curses.A_BOLD if (marcada or foco) else 0)
                 proy = _proy(r)
                 if ancho_p:
@@ -4422,6 +4502,7 @@ def _T():
         " open": " abiertas",
         " resumable": " reanudables",
         " never started": " sin arrancar",
+        " with nowhere to go back to": " sin sitio al que volver",
         " total": " en total",
         " writing": " escribiendo",
         "(+{n} earlier)": "(+{n} antes)",
@@ -4637,7 +4718,7 @@ def _T():
 _T()
 
 
-VERSION = "1.13.1"
+VERSION = "1.14.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
