@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.18.0
+
+**Open the marked ones at once — and hand them to another CLI.**
+
+`r` ("reopen the marked ones as tabs") already existed and **was broken outside tmux.** There
+were three copies of the same Warp YAML in the file — open one, reopen several, restore the
+orphans — and the middle one had the command hardcoded to `tmux attach`. Marking five history
+sessions and pressing `r` opened five tabs that all failed: `tmux attach -t <uuid>` is not a
+thing. `_comando_de()` already knew the right command for all three cases and nobody asked it.
+
+Now there is **one** writer of that YAML and **one** place that decides the command, so a fourth
+copy cannot bring the bug back. Also in the picker:
+
+- `r` now requires marking. With nothing marked it used to open **every visible row at once**,
+  and it sits next to the arrow keys.
+- The notice says what was left out and why — already had a tab, or cannot be opened from here.
+  They used to be dropped in silence.
+
+**`c` hands the marked sessions over to another CLI.** A handover, not a migration: a Claude
+session's context lives in its own transcript and no other CLI can pick it up. So `c` opens a
+**new** session of the other CLI in the same directory and branch, with a briefing of where the
+Claude one got to — project, branch, title, state and its last tool calls.
+
+Facts only. No prompt and no reply of yours goes in there: the briefing travels inside Warp's
+launch configuration, which stays on disk. `SERENO_RELEVO=completo` adds the conversation, and
+is never the default. A session whose directory no longer exists is left out instead of starting
+in `~`, because a handover that begins in the wrong place looks like it worked.
+
+Only CLIs actually on your `PATH` are offered — today that table holds `codex`, whose
+`codex [PROMPT]` was checked against its `--help`. `gemini` is not in it because it is not
+installed here and its flag would have been a guess.
+
+Found while testing this and worth its own line: **a command with newlines broke the YAML.** The
+briefing has them, `- exec: <command>` spilled them loose, and the file came out invalid — the
+window simply does not open and nothing in the program errors. It is written as a literal block
+now, and a test unwraps it back.
+
 ## 1.17.0
 
 **`sereno --now` — what all of them are running, in one screen.**

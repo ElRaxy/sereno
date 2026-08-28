@@ -526,6 +526,8 @@ on it first.
 | `↑` `↓` / `j` `k` | move |
 | `ENTER` | open it |
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
+| `r` | open the marked ones, all at once, one tab each |
+| `c` | hand the marked ones over to another CLI — see below |
 | `x` | close the marked ones — asks first, and warns if any is mid-task |
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
 | `y` | copy the session id, the one `claude --resume` takes (or click it — see below) |
@@ -607,6 +609,44 @@ one that fits in a line. Money is out for a different reason: `totalCostUSD` is 
 the CLI **on exit**, so it was present in 16 of 40 sessions and in **none** of the live ones.
 
 You can leave it on: `SERENO_SORT=spend`, or `-spend` to invert it.
+
+### `c` — handing a session to another CLI
+
+**This is a handover, not a migration, and it cannot be anything else.** A Claude session's
+context lives in its own transcript, with its own tool-call ids; there is no format that another
+CLI can pick up and continue. What `c` does is open a **new** session of the other CLI, standing
+in the same directory and branch, with a briefing of where the Claude one got to:
+
+```
+You are taking over from a Claude Code session. You do not have its history:
+what follows is everything that is known about it.
+
+  project: /Users/you/code/checkout-api
+  branch: feat/webhooks
+  title: Refactor payment webhooks
+  state: in a command
+
+  its last tool calls:
+    ·   2s  Read · tests/webhooks/test_retry.py
+    ✗  34s  Bash · pytest tests/webhooks -x -q
+    ◐   1m  Bash · pytest tests/webhooks -x -q
+
+Get your bearings in that directory before touching anything.
+```
+
+Facts only. **No prompt and no reply of yours goes in there**, and that is not squeamishness: the
+briefing travels inside Warp's launch configuration, which stays on disk in
+`~/.warp/launch_configurations/`. Putting a client's conversation in a file is a decision, so it
+is asked for — `SERENO_RELEVO=completo` adds the last prompt and the last answer — and never the
+default.
+
+A session whose directory no longer exists is **left out** rather than started in `~`: a handover
+that begins in the wrong place looks like it worked.
+
+Only CLIs that are actually on your `PATH` are offered. Today the table has `codex`
+(`codex [PROMPT]` starts an interactive session with a seed, checked against its `--help`);
+adding another is one line, but its flag has to be verified first rather than guessed — which is
+why `gemini` is not in there.
 
 ### `--now`
 
