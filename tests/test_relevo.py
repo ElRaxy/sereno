@@ -52,7 +52,8 @@ def main():
                           "no estaria probando nada")
 
         # 3. Sin directorio no hay relevo.
-        pest, sin = relevo_pest([fila(vivo), fila(muerto, "cc-x-2222bbbb")], "codex")
+        pest, sin, _mismo = relevo_pest(
+            [fila(vivo), fila(muerto, "cc-x-2222bbbb")], "codex")
         if len(pest) != 1 or len(sin) != 1:
             fallos.append(f"{len(pest)} pestanas y {len(sin)} descartadas, "
                           "se esperaba 1 y 1")
@@ -98,6 +99,60 @@ def main():
         for nombre in ns["arneses_disponibles"]():
             if nombre not in ns["ARNESES"]:
                 fallos.append(f"se ofrece {nombre!r}, que no esta en ARNESES")
+
+        # 7. Un `cwd` vacio NO es un directorio. `Path("").is_dir()` devuelve True
+        #    —Python lee la ruta vacia como `.`— asi que la guarda anterior dejaba pasar
+        #    todas las filas de Codex, que traen "": el relevo arrancaba donde estuviera
+        #    el proceso y lo contaba como entregado. Se prueba con el cwd en los DOS
+        #    sitios de los que se lee, porque `detalles()` y `meta` se consultan en
+        #    cascada y vaciar solo uno no prueba nada.
+        hueca = fila(vivo, "cc-x-3333cccc")
+        hueca["meta"]["cwd"] = ""
+        hueca["_det"]["cwd"] = ""
+        pest_h, sin_h, _m = relevo_pest([hueca], "codex")
+        if pest_h or len(sin_h) != 1:
+            fallos.append("una fila sin cwd se releva igual: arrancaria en el "
+                          "directorio del proceso diciendo que ha funcionado")
+
+        # 8. Una ruta relativa tampoco vale, y por lo mismo: existe respecto al proceso,
+        #    no respecto a la sesion. Sin este caso, el 7 pasaria con un `if cwd:` suelto.
+        rel = fila(vivo, "cc-x-4444dddd")
+        rel["meta"]["cwd"] = rel["_det"]["cwd"] = "tests"
+        pest_r, sin_r, _m = relevo_pest([rel], "codex")
+        if pest_r or len(sin_r) != 1:
+            fallos.append("una ruta relativa pasa la guarda del directorio")
+
+        # 9. Nadie se releva a si mismo. Una fila de Codex entregada a Codex abria una
+        #    sesion en blanco y se contaba como exito.
+        propia = fila(vivo, "cx-1")
+        propia["fuente"] = "codex"
+        pest_p, sin_p, mismo_p = relevo_pest([propia], "codex")
+        if pest_p or len(mismo_p) != 1 or sin_p:
+            fallos.append("una sesion de codex se releva a codex")
+
+        # 10. Y en el otro sentido si va: Codex -> Claude, con el briefing diciendo de
+        #     donde viene. El briefing hablaba SIEMPRE de "una sesion de Claude Code",
+        #     que para una fila de Codex es falso.
+        pest_c, sin_c, mismo_c = relevo_pest([propia], "claude")
+        if len(pest_c) != 1 or mismo_c or sin_c:
+            fallos.append("una sesion de codex no se puede relevar a claude")
+        elif not pest_c[0][1].startswith("claude "):
+            fallos.append(f"la orden no arranca claude: {pest_c[0][1][:40]!r}")
+        brief_cx = briefing(propia)
+        if "Codex" not in brief_cx or "Claude Code" in brief_cx:
+            fallos.append("el briefing de una fila de Codex sigue diciendo que "
+                          "viene de Claude Code")
+        if "Claude Code" not in briefing(fila(vivo)):
+            fallos.append("el briefing de una fila de Claude ya no dice de donde viene")
+
+        # 11. `cli_de`: "historial" es Claude Code parado, no otro programa. Si se
+        #     tratara como CLI ajeno, una sesion cerrada de Claude se ofreceria para
+        #     relevar a Claude.
+        cli_de = ns["cli_de"]
+        for fu, esperado in (("claude", "claude"), ("historial", "claude"),
+                             ("codex", "codex"), ("gemini", "gemini")):
+            if cli_de({"fuente": fu}) != esperado:
+                fallos.append(f"cli_de({fu!r}) no es {esperado!r}")
 
     for f in fallos:
         print("FALLA:", f)

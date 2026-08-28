@@ -647,12 +647,27 @@ decisión, así que se pide — `SERENO_RELEVO=completo` añade el último promp
 respuesta — y nunca es lo que pasa por defecto.
 
 Una sesión cuyo directorio ya no existe **se queda fuera** en vez de arrancar en `~`: un relevo
-que empieza en el sitio equivocado parece que ha funcionado.
+que empieza en el sitio equivocado parece que ha funcionado. La comprobación exige ruta
+**absoluta**, no solo que exista: `Path("").is_dir()` devuelve `True` en Python, porque lee la
+ruta vacía como `.`, así que una fila sin directorio apuntado pasaba entera la guarda y abría el
+CLI donde estuviera el proceso, anunciando una entregada.
+
+**Va en los dos sentidos.** Una sesión de Codex se entrega a Claude igual que una de Claude se
+entrega a Codex, y el briefing dice de cuál de los dos viene en vez de nombrar siempre a Claude.
+Sin elegir nada, el destino es el CLI disponible que **no** sea el de las filas — que es también
+por lo que nada se entrega al programa bajo el que ya corre: Codex a Codex abría una sesión en
+blanco y la contaba como relevo.
+
+Para que eso signifique algo, una fila de Codex tenía que saber dónde vive. Su índice solo trae
+`{id, thread_name, updated_at}`, así que el directorio se lee de la cabecera de su rollout
+(`payload.cwd`) — solo de las filas que se van a pintar, y solo su primera línea. La que no tenga
+rollout legible se queda con el directorio vacío en vez de heredar el de la vecina, y se queda
+fuera del relevo como cualquier otra fila sin sitio donde plantarse.
 
 Solo se ofrecen los CLI que estén de verdad en tu `PATH`. Hoy la tabla tiene `codex`
-(`codex [PROMPT]` abre sesión interactiva con un prompt inicial, comprobado en su `--help`);
-añadir otro es una línea, pero antes hay que verificar su flag en vez de suponerlo — que es por
-lo que `gemini` no está.
+(`codex [PROMPT]`) y `claude` (`claude [PROMPT]`), que abren sesión interactiva con un prompt
+inicial, comprobado en el `--help` de cada uno; añadir otro es una línea, pero antes hay que
+verificar su flag en vez de suponerlo — que es por lo que `gemini` no está.
 
 ### `--now`
 

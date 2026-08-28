@@ -656,12 +656,27 @@ is asked for — `SERENO_RELEVO=completo` adds the last prompt and the last answ
 default.
 
 A session whose directory no longer exists is **left out** rather than started in `~`: a handover
-that begins in the wrong place looks like it worked.
+that begins in the wrong place looks like it worked. The check asks for an **absolute** path, not
+just for one that exists — `Path("").is_dir()` is `True` in Python, because it reads the empty
+path as `.`, so a row with no recorded directory used to sail through the guard and open the CLI
+wherever the process happened to be standing, reporting one handed over.
+
+**It goes both ways.** A Codex session is handed to Claude the same way a Claude one is handed to
+Codex, and the briefing says which of the two it is coming from rather than always naming Claude.
+With nothing chosen, the destination is whichever available CLI is **not** the one the rows came
+from — which is also why nothing hands a session to the program it is already running under:
+Codex to Codex opened a blank session and counted it as a handover.
+
+For that to mean anything, a Codex row had to know where it lives. Its index carries only
+`{id, thread_name, updated_at}`, so the directory is read from the header of its rollout
+(`payload.cwd`) — only for the rows about to be drawn, and only their first line. One without a
+readable rollout keeps an empty directory rather than inheriting a neighbour's, and is left out
+of the handover like any other row with nowhere to stand.
 
 Only CLIs that are actually on your `PATH` are offered. Today the table has `codex`
-(`codex [PROMPT]` starts an interactive session with a seed, checked against its `--help`);
-adding another is one line, but its flag has to be verified first rather than guessed — which is
-why `gemini` is not in there.
+(`codex [PROMPT]`) and `claude` (`claude [PROMPT]`), both of which start an interactive session
+with a seed, checked against their own `--help`; adding another is one line, but its flag has to
+be verified first rather than guessed — which is why `gemini` is not in there.
 
 ### `--now`
 
