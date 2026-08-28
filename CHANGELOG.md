@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.26.0
+
+**`r` asks where to open them.**
+
+1.25.0 gave sereno three ways to open several sessions at once and then picked one for you — the
+first available. The only way to say otherwise was `SERENO_LANZADOR`, an environment variable,
+which is exactly the complaint 1.23.0 made about the handover: *an environment variable is not a
+way to offer something*.
+
+```
+Abrir 2 sesión(es) en:
+
+· Fix flaky login test
+· Migrate CI to reusable workflows
+
+[1] warp  —  una ventana de verdad para cada una
+[2] tmux  —  una ventana de tmux para cada una, donde ya estás
+[3] terminal  —  una ventana de Terminal.app para cada una
+
+[1-9] abrir ahí    [otra tecla] cancelar
+```
+
+Each line says what that launcher actually opens: *tmux* on its own does not tell you whether the
+windows are the system's or tmux's. With only one launcher around there is no box — a box with a
+single option is just one more keypress.
+
+**And the fix in 1.24.0 never reached the key people actually press.** `r` inside the picker had
+its own copy of the raw `open` call — the fourth in the file — so neither the guard that stopped
+the Linux crash nor the launcher table went anywhere near it. It reported the tabs it *asked for*,
+and on any Linux it still took the program down. That copy is gone: it goes through `abre_varias`
+like everything else, and reports what opened.
+
+**One bug caught by the tests, not by reading:** the demo's `ejecutar` is a two-parameter lambda
+and the picker now passes three, so `r` in `--demo` raised. It has a default now, and a test
+watches the signature.
+
+Five mutants — always the first launcher, `donde` not passed through, a box shown for a single
+option, cancel that opens anyway, and the demo lambda back to two parameters — each turn a case
+red. And checked in a real pty: mark, press `r`, and the box comes out with its three lines.
+
 ## 1.25.0
 
 **Opening several at once stops being a Warp thing — and a macOS thing.**

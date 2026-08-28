@@ -518,7 +518,7 @@ línea de tmux filtra por él antes de dividir.
 | `↑` `↓` / `j` `k` | moverse |
 | `ENTER` | abrirla |
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
-| `r` | abrir las marcadas de una vez, una pestaña cada una |
+| `r` | abrir las marcadas de una vez — pregunta dónde, si hay más de un sitio |
 | `c` | entregar las marcadas a otro CLI — ver abajo |
 | `n` | qué están ejecutando **todas**, en una pantalla |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
@@ -814,8 +814,9 @@ una **ventana nueva** en vez de quedarse con la que estás mirando.
 Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria — que entonces no
 ocupa nada, en vez de quedarse ahí vacía — y `ENTER` hace `exec` sobre la terminal actual.
 
-Abrir **varias a la vez** —`r` y `c` abren una ventana por sesión— va por el primero de estos que
-esté a mano, en este orden:
+Abrir **varias a la vez** —`r` y `c` abren una ventana por sesión— va por uno de estos. `r`
+pregunta por cuál, cuando hay más de uno a mano; con uno solo no hay nada que elegir y no aparece
+ningún cuadro. `SERENO_LANZADOR` fija uno:
 
 | | qué abre | necesita |
 |---|---|---|
@@ -824,7 +825,13 @@ esté a mano, en este orden:
 | **Terminal.app** | una ventana de Terminal por sesión | macOS |
 
 Terminal.app va último a propósito: macOS **restaura** sus ventanas al reiniciar, así que un día
-de relevos deja ventanas resucitando al arrancar. `SERENO_LANZADOR=tmux` fuerza uno.
+de relevos deja ventanas resucitando al arrancar.
+
+VS Code **no** está, y no es un olvido sino una decisión medida: no tiene forma de ejecutar un
+comando en su terminal integrada desde fuera. La única vía que existe —una tarea con
+`runOn: folderOpen` en un workspace temporal— no llegó a dispararse, ni con una carpeta nueva ni
+con una que VS Code ya conocía. Abrir la carpeta sin enganchar la sesión sería justo la media
+verdad que este programa existe para no contar.
 
 Sin ninguno de los tres, `r` y `c` lo dicen y paran, en vez de anunciar pestañas que nadie abrió —
 que es lo que hacían hasta la 1.24.0, cuando no reventaban directamente: `open` es un comando de

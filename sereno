@@ -1948,24 +1948,34 @@ LANZADORES = {
 }
 
 
-def lanzador_disponible():
-    """El primero de `LANZADORES` que existe aqui. `SERENO_LANZADOR` lo fuerza."""
+_QUE_ABRE = {
+    "warp": lambda: _("a real window each"),
+    "tmux": lambda: _("a tmux window each, where you already are"),
+    "terminal": lambda: _("a Terminal.app window each"),
+}
+
+
+def lanzadores_disponibles():
+    """Los de `LANZADORES` que existen aqui, en orden. `SERENO_LANZADOR` deja uno."""
     forzado = _env("LANZADOR")
     nombres = [forzado] if forzado in LANZADORES else list(LANZADORES)
-    for n in nombres:
-        if LANZADORES[n][0]():
-            return n
-    return None
+    return [n for n in nombres if LANZADORES[n][0]()]
 
 
-def abre_varias(pestanas, config):
+def lanzador_disponible():
+    """El primero disponible, para cuando no hay nadie a quien preguntar."""
+    hay = lanzadores_disponibles()
+    return hay[0] if hay else None
+
+
+def abre_varias(pestanas, config, cual=None):
     """(lanzador, cuantas) para abrir estas pestanas. (None, 0) si no hay por donde.
 
     Devuelve HECHOS y no un "ha ido bien": quien llama compone el mensaje a partir de
     cuantas salieron de verdad, que es lo que antes nadie miraba.
     """
-    cual = lanzador_disponible()
-    if cual is None:
+    cual = cual or lanzador_disponible()
+    if cual is None or cual not in LANZADORES:
         return None, 0
     if cual == "warp":
         return ("warp", len(pestanas)) if _abre_en_warp(config) else (None, 0)
@@ -2187,6 +2197,53 @@ def pestanas_de_relevo(rows, arnes, con_conversacion=False):
         titulo = "%s \u2192 %s" % (r.get("title") or r.get("name") or "", arnes)
         pestanas.append((titulo, compone(briefing(r, con_conversacion)), cwd))
     return pestanas, sin_sitio_, mismo_
+
+
+def _pide_lanzador(sel, lanzadores, h, w, curses, C, tecla_limpia):
+    """Dibuja el cuadro de "donde" y devuelve el elegido, o None si se cancela.
+
+    Recibe curses y sus dos ayudantes en vez de importarlos: `pick_ui` los tiene ya
+    montados —el modulo falso de los tests entra por ahi— y duplicar ese montaje aqui
+    seria tener dos pantallas que pueden discrepar.
+    """
+    lin = lineas_abrir(sel, lanzadores, min(70, w - 8))
+    alto = min(len(lin) + 2, h)
+    ancho_c = min(max(ancho(t) for t, _p in lin) + 6, w)
+    win = curses.newwin(alto, ancho_c, max(0, (h - alto) // 2),
+                        max(0, (w - ancho_c) // 2))
+    win.box()
+    for k, (txt, par) in enumerate(lin[:alto - 2]):
+        if txt:
+            win.addnstr(1 + k, 3, txt, ancho_c - 6,
+                        (C(par) if par else 0) | curses.A_BOLD)
+    win.refresh()
+    win.timeout(-1)
+    tec = tecla_limpia(win)
+    if ord("1") <= (tec or 0) <= ord("9"):
+        i = tec - ord("1")
+        if i < len(lanzadores):
+            return lanzadores[i]
+    return None
+
+
+def lineas_abrir(sel, lanzadores, ancho, tope=5):
+    """[(texto, par_de_color)] del cuadro que pregunta DONDE se abren estas sesiones.
+
+    Compositor puro y aparte del pintado, igual que `lineas_relevo`: curses no avisa
+    cuando un cuadro no cabe, asi que la geometria se comprueba sobre estas lineas.
+    """
+    out = [(_("Open {n} session(s) in:", n=len(sel)), 6), ("", 0)]
+    for r in sel[:tope]:
+        out.append(("\u00b7 " + recorta(r.get("title_full") or r.get("name") or "",
+                                        ancho - 6), 0))
+    if len(sel) > tope:
+        out.append(("  " + _("and {n} more", n=len(sel) - tope), 4))
+    out.append(("", 0))
+    for i, n in enumerate(lanzadores):
+        out.append(("[%d] %s  \u2014  %s" % (i + 1, n, _QUE_ABRE.get(n, lambda: n)()), 7))
+    out.append(("", 0))
+    out.append((_("[1-9] open there    [any other key] cancel"), 7))
+    return out
 
 
 def destinos_de_relevo(sel):
@@ -4750,7 +4807,17 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 if not ejecutar:
                     res["out"] = ("reopen", sel)
                     return
-                aviso, todas = ejecutar("reopen", sel)
+                # Con dos o mas sitios donde abrirlas, se pregunta. Con uno no hay nada
+                # que elegir y un cuadro de una sola opcion es solo una tecla de mas.
+                donde = lanzadores_disponibles()
+                if len(donde) > 1:
+                    donde = _pide_lanzador(sel, donde, h, w, curses, C, tecla_limpia)
+                    if donde is None:
+                        aviso = _("Cancelled, nothing was opened.")
+                        continue
+                else:
+                    donde = donde[0] if donde else None
+                aviso, todas = ejecutar("reopen", sel, donde)
                 fuera = ([_("{n} already had a tab", n=len(con_pestana))] if con_pestana
                          else []) + ([_("{n} cannot be opened from here",
                                         n=len(_sin_forma))] if _sin_forma else [])
@@ -5101,6 +5168,15 @@ def _T():
             "Aqu\u00ed no hay con qu\u00e9 abrir varias a la vez: "
             "ni Warp, ni tmux alrededor, ni Terminal.app.",
         "{n} did not open.": "{n} no se abrieron.",
+        "Open {n} session(s) in:": "Abrir {n} sesi\u00f3n(es) en:",
+        "[1-9] open there    [any other key] cancel":
+            "[1-9] abrir ah\u00ed    [otra tecla] cancelar",
+        "Cancelled, nothing was opened.": "Cancelado, no se ha abierto nada.",
+        "a real window each": "una ventana de verdad para cada una",
+        "a tmux window each, where you already are":
+            "una ventana de tmux para cada una, donde ya est\u00e1s",
+        "a Terminal.app window each": "una ventana de Terminal.app para cada una",
+        "{n} reattached with {v}": "{n} reenganchadas con {v}",
         "Reattaching {n} tabs with {v} -> {p}":
             "Reenganchando {n} pesta\u00f1as con {v} -> {p}",
         "One at a time does work: ENTER on each one.":
@@ -5345,7 +5421,6 @@ def _T():
         "{n} closed and archived. The history is still on disk.": "{n} cerrada(s) y archivada(s). El historial sigue en disco.",
         "{n} marked to close": "{n} marcada(s) para cerrar",
         "{n} marked to discard": "{n} marcada(s) para descartar",
-        "{n} reattached as tabs -> {p}": "{n} reenganchada(s) en pestañas -> {p}",
         "{n} resumable session(s):": "{n} sesión(es) reanudables:",
         "{n} running something right now": "{n} ejecutando ahora mismo",
         "{n} session(s) closed. Their history is still on disk: `claude-sessions --list` won't list them again, but `claude --resume <id>` brings them back.": "{n} sesión(es) cerradas. Su historial sigue en disco: `claude-sessions --list` no las volverá a listar, pero `claude --resume <id>` las recupera.",
@@ -5364,7 +5439,7 @@ def _T():
 _T()
 
 
-VERSION = "1.25.0"
+VERSION = "1.26.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5782,10 +5857,12 @@ def main():
             return 0
         # Al selector van SOLO las vivas, como en el flujo real: pasarle tambien las
         # reanudables las duplicaba en cuanto TAB cargaba `extra`.
-        pick_ui(live_sessions(), ejecutar=lambda verbo, sel: (
+        # `donde` con valor por defecto: el selector lo pasa desde que `r` pregunta en
+        # que terminal abrir, y un lambda de dos parametros reventaba la demo entera.
+        pick_ui(live_sessions(), ejecutar=lambda verbo, sel, donde=None: (
             _("{n} closed and archived. The history is still on disk.", n=len(sel))
-            if verbo == "close" else _("{n} reattached as tabs -> {p}",
-                                       n=len(sel), p="demo"), live_sessions()),
+            if verbo == "close" else _("{n} reattached with {v}",
+                                       n=len(sel), v=donde or "demo"), live_sessions()),
                 recargar=live_sessions)
         return 0
     rows = live_sessions()
@@ -5859,16 +5936,22 @@ def main():
 
         rows = live_sessions(con_ram=True)      # el TUI si pinta RAM y titulos finos
 
-        def ejecutar(verbo, sel):
+        def ejecutar(verbo, sel, donde=None):
             """Hace el trabajo y devuelve la lista fresca, sin salir del selector."""
             if verbo == "close":
                 n = stop_rows(sel, forget=True)
                 aviso = _("{n} closed and archived. The history is still on disk.", n=n)
             else:
+                # Esta era la CUARTA copia del `open` a pelo, y la mas usada: la tecla
+                # `r` del selector. Por aqui no pasaban ni la guarda de la 1.24.0 ni los
+                # lanzadores de la 1.25.0, asi que seguia reventando fuera de macOS y
+                # anunciando las pestanas pedidas en vez de las abiertas.
                 pestanas, _sf = pestanas_de(sel)
-                path = _escribe_config(CONFIG_NAME, pestanas)
-                subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-                aviso = _("{n} reattached as tabs -> {p}", n=len(pestanas), p=path.name)
+                _escribe_config(CONFIG_NAME, pestanas)
+                cual, hechas = abre_varias(pestanas, CONFIG_NAME, donde)
+                aviso = (_("{n} reattached with {v}", n=hechas, v=cual) if hechas
+                         else _("Nothing here can open several at once: "
+                                "no Warp, no tmux around, no Terminal.app."))
             return aviso, live_sessions(con_ram=True)
 
         accion = pick_ui(rows, ejecutar=ejecutar,
