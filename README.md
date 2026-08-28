@@ -528,6 +528,7 @@ on it first.
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
 | `r` | open the marked ones, all at once, one tab each |
 | `c` | hand the marked ones over to another CLI — see below |
+| `n` | what they are **all** running, in one screen |
 | `x` | close the marked ones — asks first, and warns if any is mid-task |
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
 | `y` | copy the session id, the one `claude --resume` takes (or click it — see below) |
@@ -682,7 +683,7 @@ Migrate CI to reusable workflows  ·  infra                  waiting on you · 2
 ```
 
 Same reading as the panel, same facts, no extra file opened per row beyond the tail each one
-already needs. The header cannot drift from the rows underneath: it is counted from them, and a
+already needs. **`n` shows the same thing without leaving the picker** — one composer builds both, so the screen and the terminal cannot end up saying different things about the same facts. The header cannot drift from the rows underneath: it is counted from them, and a
 test fails if the two ever disagree.
 
 ### `--disk`

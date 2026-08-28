@@ -3530,6 +3530,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
 
         marcadas, cur, top, aviso = set(), 0, 0, ""
         filtro, buscando, extra, ancla, ayuda = "", False, [], None, False
+        vista_now = False
         modo, orden_inv = modo_orden_inicial()
         todas, foco = list(rows), None
         sobre, ultimo_click = None, (None, 0.0)
@@ -4123,6 +4124,41 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 hx2 += ancho(pastilla) + 2
             stdscr.refresh()
 
+            if vista_now:
+                # El panel ya pintaba este recorrido, pero solo el de la fila del
+                # cursor. Las lineas las compone `lineas_now()`, la MISMA que usa
+                # `--now` en la terminal: dos compositores del mismo hecho acaban
+                # diciendo cosas distintas y aqui no se veria hasta compararlos.
+                lineas_v = lineas_now(que_hacen(),
+                                      max(30, min(110, w - 4) - 32))
+                alto_v, ancho_v, y_v, x_v, caben = caja_now(h, w, len(lineas_v))
+                ocultas = max(0, len(lineas_v) - caben)
+                lineas_v = lineas_v[:caben]
+                win = curses.newwin(alto_v, ancho_v, y_v, x_v)
+                win.attrset(C(6))
+                win.box()
+                win.attrset(0)
+                win.addnstr(1, 3, _("What they are all running"), ancho_v - 6,
+                            C(6) | curses.A_BOLD)
+                cierre = " " + _("any key closes") + " "
+                if ancho_v > ancho(cierre) + 6:
+                    win.addnstr(alto_v - 1, ancho_v - ancho(cierre) - 3, cierre,
+                                ancho(cierre), C(4))
+                # Lo que no cabe se CUENTA aunque no se dibuje: media pantalla de
+                # sesiones sin decir que faltan es peor que decir cuantas faltan.
+                if ocultas:
+                    aviso_v = " " + _("{n} lines more", n=ocultas) + " "
+                    if ancho_v > ancho(aviso_v) + 6:
+                        win.addnstr(0, 3, aviso_v, ancho(aviso_v), C(4))
+                for k, (texto, par) in enumerate(lineas_v):
+                    if texto:
+                        win.addnstr(3 + k, 2, texto, max(1, ancho_v - 4), C(par))
+                win.refresh()
+                win.timeout(-1)
+                tecla_limpia(win)
+                vista_now = False
+                continue
+
             if ayuda:
                 teclas = [
                     (_("ENTER"), _("open it (a NEW window when Warp is there)")),
@@ -4139,6 +4175,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     ("d", _("mark the ones idle for over an hour")),
                     ("r", _("reopen the marked ones as tabs")),
                     ("c", _("hand the marked ones to another CLI (codex...)")),
+                    ("n", _("what they are ALL running, in one screen")),
                     ("q", _("quit without touching anything")),
                     ("", ""),
                     (_("mouse"), _("click selects, double click opens")),
@@ -4275,6 +4312,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # movimiento es un evento, y borrarlo arriba hacia que un "Abierta en una
             # ventana nueva" durara lo que tardas en rozar el raton.
             aviso = ""
+            if c in (ord("n"), ord("N")):
+                vista_now = True
+                continue
             if c == ord("?"):
                 ayuda = True
                 continue
@@ -4682,6 +4722,10 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "what they are ALL running, in one screen":
+            "qu\u00e9 est\u00e1n ejecutando TODAS, en una pantalla",
+        "What they are all running": "Qu\u00e9 est\u00e1n ejecutando todas",
+        "{n} lines more": "{n} l\u00edneas m\u00e1s",
         "hand the marked ones to another CLI (codex...)":
             "entregar las marcadas a otro CLI (codex\u2026)",
         "Mark which ones you want to hand over first.":
@@ -4951,7 +4995,7 @@ def _T():
 _T()
 
 
-VERSION = "1.18.0"
+VERSION = "1.19.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5104,20 +5148,39 @@ def que_hacen(tope_eventos=3):
     return filas
 
 
-def cmd_now(cols=None, tope_eventos=3):
-    """Imprime lo que `que_hacen()` observo. Solo formatea: no vuelve a mirar nada."""
-    filas = que_hacen(tope_eventos)
-    if not filas:
-        print(nada_que_ensenar())
-        return 1
-    ancho_t = min(80, max(40, (cols or shutil.get_terminal_size((92, 24)).columns) - 34))
+def caja_now(h, w, n_lineas):
+    """(alto, ancho, y, x, caben) del recuadro de la vista de todas.
+
+    Aparte del pintado a proposito, como `linea_ruta`: asi la geometria se prueba sin
+    curses. Y hace falta, porque ncurses **no avisa**: `newwin` mas ancho que la
+    pantalla no da error y `addnstr` fuera del borde tampoco (medido el 2026-08-28 en un
+    pty de 40 columnas). Un recuadro que se sale no revienta — se come el borde derecho
+    y ya. Un test de pantalla no puede cazarlo; este si.
+    """
+    # El `min(h, ...)` y el `min(w, ...)` de fuera son la garantia, y no sobran: sin
+    # ellos, en una ventana de 4 filas el suelo de 5 ganaba al hueco disponible y el
+    # recuadro se salia por abajo. Que ncurses lo recorte sin rechistar es justo lo que
+    # hace que un fallo asi viva meses.
+    ancho = min(w, max(20, min(110, w - 4)))
+    alto = min(h, max(5, min(h - 2, n_lineas + 4)))
+    return (alto, ancho, max(0, (h - alto) // 2), max(0, (w - ancho) // 2),
+            max(0, alto - 4))
+
+
+def lineas_now(filas, ancho_t):
+    """[(texto, par_de_color)] con la vista de todas. UN solo compositor.
+
+    Lo pinta la terminal (`--now`) y tambien la pantalla del selector (`n`). Si cada una
+    compusiera su texto acabarian diciendo cosas distintas de los mismos hechos, que es
+    justo lo que este programa existe para no hacer.
+    """
     trabajando = sum(1 for f in filas if f["estado"] in TRABAJANDO)
-    print(_("{n} live · {t} working, {e} waiting on you",
-            n=len(filas), t=trabajando, e=len(filas) - trabajando))
+    out = [(_("{n} live \u00b7 {t} working, {e} waiting on you",
+              n=len(filas), t=trabajando, e=len(filas) - trabajando), 6)]
     for f in filas:
-        print()
-        # El estado va en texto y no en color: esto se lee tambien por tuberia, y un
-        # color que se pierde deja las nueve lineas iguales.
+        out.append(("", 0))
+        # El estado va en TEXTO y no solo en color: esto se lee tambien por tuberia, y
+        # un color que se pierde deja las nueve lineas iguales.
         cola = ESTADO_LARGO(f["estado"])
         if f["estado"] not in TRABAJANDO and f["idle"]:
             cola += " \u00b7 " + _hace(f["idle"])
@@ -5126,14 +5189,27 @@ def cmd_now(cols=None, tope_eventos=3):
         cabeza = f["titulo"] or f["id"]
         if f["proyecto"]:
             cabeza += "  \u00b7  " + f["proyecto"]
-        print("%s  %s" % (rellena(recorta(cabeza, ancho_t), ancho_t), cola))
+        out.append(("%s  %s" % (rellena(recorta(cabeza, ancho_t), ancho_t), cola), 0))
         for clave in f["atasco"]:
-            print("  ! %s" % _TEXTO_ALERTA[clave](f["sintomas"]))
+            out.append(("  ! %s" % _TEXTO_ALERTA[clave](f["sintomas"]), 5))
         for e in f["eventos"]:
-            glifo, _par, dur, res = linea_ruta(e, ancho_t + 20)
-            print(_FILA_NOW % (glifo, dur, res))
+            glifo, par, dur, res = linea_ruta(e, ancho_t + 20)
+            out.append((_FILA_NOW % (glifo, dur, res),
+                        par if (e["pend"] or e["err"]) else 4))
         if not f["eventos"]:
-            print("    " + _("no tool calls in the tail of its transcript"))
+            out.append(("    " + _("no tool calls in the tail of its transcript"), 4))
+    return out
+
+
+def cmd_now(cols=None, tope_eventos=3):
+    """Imprime lo que `que_hacen()` observo. Solo formatea: no vuelve a mirar nada."""
+    filas = que_hacen(tope_eventos)
+    if not filas:
+        print(nada_que_ensenar())
+        return 1
+    ancho_t = min(80, max(40, (cols or shutil.get_terminal_size((92, 24)).columns) - 34))
+    for texto, _par in lineas_now(filas, ancho_t):
+        print(texto)
     return 0
 
 

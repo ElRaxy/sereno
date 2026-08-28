@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.19.0
+
+**`n`: the `--now` view, without leaving the picker.**
+
+1.17.0 added `--now` — what every live session is running, in one screen — and left it in the
+shell. The picker is where you actually are, so getting it meant quitting and typing a command.
+Now `n` opens the same screen over the list, and any key closes it.
+
+One composer builds both (`lineas_now()`). Two of them writing the same facts is how a screen and
+a terminal end up disagreeing about the same nine sessions, which is the thing this program
+exists not to do.
+
+**A bug found by testing it, not by reading it:** in a window under six rows tall the box came
+out taller than the screen. It never showed up because **ncurses does not complain** — measured
+in a 40-column pty, a `newwin` wider than the terminal returns fine and an `addnstr` past the
+edge returns fine too. The box just loses its right edge, silently, forever.
+
+So the geometry now lives in its own function with no curses in it (`caja_now`), and a test
+sweeps 9 heights x 8 widths x 5 lengths in milliseconds, checking the box stays inside the screen
+and the last line does not land on the bottom border. The on-screen test could not have caught
+this; that one runs the real TUI in a pty and checks the screen opens, paints and closes — three
+window sizes, because the grid is covered for free by the pure one.
+
 ## 1.18.0
 
 **Open the marked ones at once — and hand them to another CLI.**
