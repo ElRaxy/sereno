@@ -1841,14 +1841,7 @@ def abrir_sesion(r, callado=False):
         os.chdir(cwd)
         print("\n" + _("Opening: {t}", t=titulo) + "\n")
         os.execvp("/bin/sh", ["/bin/sh", "-c", cmd])
-    LAUNCH.mkdir(parents=True, exist_ok=True)
-    ruta = LAUNCH / f"{ABRIR_CONFIG}.yaml"
-    ruta.write_text("\n".join([
-        "---", f"name: {ABRIR_CONFIG}", "windows:", "  - tabs:",
-        f'      - title: "{titulo}"', "        layout:",
-        f'          cwd: "{cwd}"', "          commands:",
-        f"            - exec: {cmd}",
-    ]) + "\n")
+    _escribe_config(ABRIR_CONFIG, [(titulo, cmd, cwd)])
     subprocess.run(["open", f"warp://launch/{ABRIR_CONFIG}"], check=False)
     if callado:                        # llamado desde el selector: no romper curses
         return titulo
@@ -1856,29 +1849,71 @@ def abrir_sesion(r, callado=False):
     return 0
 
 
+def _escribe_config(nombre, pestanas):
+    """Escribe UNA launch configuration de Warp con una pestana por tupla.
+
+    `pestanas` son (titulo, comando, cwd) ya compuestos. Vive aqui sola porque habia
+    tres copias de este mismo YAML —la de abrir una, la de reabrir varias y la de las
+    huerfanas— y en una de ellas el comando estaba fijo a `tmux attach`: marcabas cinco
+    del historial, se abrian cinco pestanas y fallaban las cinco sin decir por que.
+    Con un solo sitio que compone el YAML, el comando lo decide quien sabe (`_comando_de`).
+    """
+    LAUNCH.mkdir(parents=True, exist_ok=True)
+    lineas = ["---", f"name: {nombre}", "windows:", "  - tabs:"]
+    for titulo, cmd, cwd in pestanas:
+        lineas += [
+            '      - title: "%s"' % str(titulo).replace('"', "'")[:60],
+            "        layout:",
+            '          cwd: "%s"' % cwd,
+            "          commands:",
+            f"            - exec: {cmd}",
+        ]
+    ruta = LAUNCH / f"{nombre}.yaml"
+    ruta.write_text("\n".join(lineas) + "\n")
+    return ruta
+
+
+def pestanas_de(rows):
+    """(pestanas, sin_forma) — las filas que se saben abrir, y las que no.
+
+    El comando sale de `_comando_de()`, que ya distingue los tres casos: una sesion viva
+    se abre con `tmux attach`, una del historial de Claude con `--resume`, y una de otro
+    CLI con lo suyo (`codex resume ...`). Las que no se sepan abrir se DEVUELVEN aparte
+    en vez de colarse con un comando cualquiera: una pestana que falla al abrirse no
+    dice cual era ni por que.
+    """
+    pestanas, sin_forma = [], []
+    for r in rows:
+        par = _comando_de(r)
+        if not par:
+            sin_forma.append(r)
+            continue
+        cmd, cwd = par
+        if not pathlib.Path(cwd or "").is_dir():
+            cwd = str(HOME)
+        pestanas.append((r.get("title_full") or r.get("title") or r.get("name") or "claude",
+                         cmd, cwd))
+    return pestanas, sin_forma
+
+
 def reopen(sel):
-    path = write_attach_config(sel)
+    pestanas, sin_forma = pestanas_de(sel)
+    if not pestanas:
+        print(_("None of those can be opened from here."))
+        return 1
+    path = _escribe_config(CONFIG_NAME, pestanas)
     subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-    print("\n" + _("Reattaching {n} tabs -> {p}", n=len(sel), p=path))
+    print("\n" + _("Reattaching {n} tabs -> {p}", n=len(pestanas), p=path))
+    if sin_forma:
+        print(_("{n} left out: no idea how to open them.", n=len(sin_forma)))
     return 0
 
 
 def write_attach_config(rows):
-    LAUNCH.mkdir(parents=True, exist_ok=True)
-    lines = ["---", f"name: {CONFIG_NAME}", "windows:", "  - tabs:"]
-    for r in rows:
-        title = r["title"].replace('"', "'")
-        cwd = (r["meta"] or {}).get("cwd") or str(HOME)
-        lines += [
-            f'      - title: "{title}"',
-            "        layout:",
-            f'          cwd: "{cwd}"',
-            "          commands:",
-            f"            - exec: {TMUX_BIN} -L {SOCK} attach -t {shlex.quote(r['name'])}",
-        ]
-    path = LAUNCH / f"{CONFIG_NAME}.yaml"
-    path.write_text("\n".join(lines) + "\n")
-    return path
+    """Se mantiene el nombre porque lo llaman de tres sitios; el YAML ya no se escribe
+    aqui y el comando ya no es `tmux attach` fijo."""
+    pestanas, _sin = pestanas_de(rows)
+    return _escribe_config(CONFIG_NAME, pestanas)
 
 
 def _clean(t):
@@ -4238,18 +4273,31 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 return          # ESC no vale para salir: llega suelto cuando el
                                 # terminal parte una secuencia de flecha en dos
             elif c in (ord("r"), ord("R")):
-                if muertas and not marcadas:
+                # Antes, sin nada marcado, `r` abria TODAS las visibles de una vez. Es
+                # la tecla de al lado de las flechas y el gesto no se puede deshacer:
+                # ahora hay que decir cuales.
+                if not marcadas:
                     aviso = _("Mark which ones you want to resume first.")
                     continue
-                sel = [r for r in base if r["name"] in marcadas] or rows
+                sel = [r for r in base if r["name"] in marcadas]
+                con_pestana = [r for r in sel if r["attached"]]
                 sel = [r for r in sel if not r["attached"]]
                 if not sel:
                     aviso = _("Those already have a tab open.")
                     continue
+                # Las que ya tienen pestana se caen de la lista, y hasta hoy en
+                # silencio: marcabas seis, se abrian cuatro y no habia forma de saber
+                # cuales faltaban ni por que.
+                _sin_forma = pestanas_de(sel)[1]
                 if not ejecutar:
                     res["out"] = ("reopen", sel)
                     return
                 aviso, todas = ejecutar("reopen", sel)
+                fuera = ([_("{n} already had a tab", n=len(con_pestana))] if con_pestana
+                         else []) + ([_("{n} cannot be opened from here",
+                                        n=len(_sin_forma))] if _sin_forma else [])
+                if fuera:
+                    aviso += " \u00b7 " + ", ".join(fuera)
                 res["toco"] = True
                 marcadas.clear()
                 ancla = None
@@ -4473,22 +4521,14 @@ def describe(e):
 
 
 def write_launch_config(items):
-    LAUNCH.mkdir(parents=True, exist_ok=True)
-    lines = ["---", f"name: {CONFIG_NAME}", "windows:", "  - tabs:"]
+    """Las huerfanas son entradas del registro, no filas de la lista: no tienen `meta`
+    ni pasan por `_comando_de()`, asi que su comando se compone aqui. El YAML, no."""
+    pestanas = []
     for e in items:
-        title = label(e).replace('"', "'")
         flags = e.get("resume_flags__list") or []
         cmd = " ".join(["claude", "--resume", e["id"]] + [shlex.quote(f) for f in flags])
-        lines += [
-            f'      - title: "{title}"',
-            "        layout:",
-            f'          cwd: "{e["cwd"]}"',
-            "          commands:",
-            f"            - exec: {cmd}",
-        ]
-    path = LAUNCH / f"{CONFIG_NAME}.yaml"
-    path.write_text("\n".join(lines) + "\n")
-    return path
+        pestanas.append((label(e), cmd, e["cwd"]))
+    return _escribe_config(CONFIG_NAME, pestanas)
 
 
 def archive(items, folder):
@@ -4534,6 +4574,12 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "{n} already had a tab": "{n} ya ten\u00edan pesta\u00f1a",
+        "{n} cannot be opened from here": "{n} no se saben abrir desde aqu\u00ed",
+        "None of those can be opened from here.":
+            "Ninguna de esas se sabe abrir desde aqu\u00ed.",
+        "{n} left out: no idea how to open them.":
+            "{n} se quedan fuera: no se sabe c\u00f3mo abrirlas.",
         "{n} live \u00b7 {t} working, {e} waiting on you":
             "{n} vivas \u00b7 {t} trabajando, {e} te esperan",
         "no tool calls in the tail of its transcript":
@@ -5243,9 +5289,10 @@ def main():
                 n = stop_rows(sel, forget=True)
                 aviso = _("{n} closed and archived. The history is still on disk.", n=n)
             else:
-                path = write_attach_config(sel)
+                pestanas, _sf = pestanas_de(sel)
+                path = _escribe_config(CONFIG_NAME, pestanas)
                 subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-                aviso = _("{n} reattached as tabs -> {p}", n=len(sel), p=path.name)
+                aviso = _("{n} reattached as tabs -> {p}", n=len(pestanas), p=path.name)
             return aviso, live_sessions(con_ram=True)
 
         accion = pick_ui(rows, ejecutar=ejecutar,
