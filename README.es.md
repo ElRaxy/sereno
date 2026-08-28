@@ -149,6 +149,19 @@ escribiendo en el mismo sitio, y `↻`, esta está dando vueltas. Cuando coincid
 queda la columna — si no lo ves, dos sesiones pueden pisarse el trabajo; si no ves el otro,
 pierdes minutos. Los dos salen enteros en el panel y en `--list`.
 
+Y cuando la lista **mezcla CLIs**, una más: de cuál es la sesión.
+
+| | |
+|---|---|
+| `✦` | Claude Code |
+| `◆` | Codex |
+| `▲` | Gemini |
+| `◇` | Antigravity |
+
+Solo aparece cuando hay algo que distinguir. Dentro de la pestaña de un solo CLI la columna
+desaparece y el título recupera esas dos — repetir el mismo símbolo en toda la lista solo dice lo
+que la pestaña activa ya decía. La pestaña lleva su glifo, así que la barra es la leyenda.
+
 **El título es lo último que se recorta.** Estrecha la ventana y ceden antes las columnas de
 apoyo, en este orden: la memoria, luego el proyecto (que se estrecha antes de irse) y por
 último la barra de contexto. El título aguanta entero hasta unas 45 columnas, porque es lo
@@ -519,13 +532,13 @@ línea de tmux filtra por él antes de dividir.
 | `ENTER` | abrirla |
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
 | `r` | abrir las marcadas de una vez — pregunta dónde, si hay más de un sitio |
-| `c` | entregar las marcadas a otro CLI — ver abajo |
+| `c` | entregar las marcadas a otro CLI — pregunta a cuál, dónde abrirlas, y lo recuerda |
 | `n` | qué están ejecutando **todas**, en una pantalla |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea; lo que cierras se queda cerrado |
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
 | `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` (o pincharlo — ver abajo) |
 | `/` | filtrar por título mientras escribes |
-| `TAB` | Claude · historial reanudable · Codex · Gemini · todas |
+| `TAB` | cambiar de CLI: Claude · Codex · Gemini · todas — cada fila lleva el glifo del suyo cuando la lista los mezcla |
 | `?` | el resto |
 
 **El ratón funciona.** Click para seleccionar, doble click para abrir, click derecho (o en la
@@ -650,12 +663,16 @@ entorno no es una forma de ofrecer algo.
 `c` abre ese cuadro en vez de lanzar de golpe:
 
 ```
-Entregar 1 sesión(es) a:
+Entregar 3 sesiones a:
 
 · Refactor payment webhooks
+· Fix flaky login test
+· Migrate CI to reusable workflows
 
 [1] codex   [2] claude
+    gemini, antigravity — sin comprobar cómo se le pasa un prompt
 [k] incluir la conversación: no
+[w] abrirlas en: tmux
 
 [1-9] entregar    [otra tecla] cancelar
 ```
@@ -663,6 +680,16 @@ Entregar 1 sesión(es) a:
 El CLI del que vienen las filas no se ofrece — pero solo cuando lo es de **todas**: con la
 selección mezclada salen los dos, porque alguna fila puede ir a cada uno. Cualquier otra tecla
 cancela.
+
+`w` rota dónde se abren las ventanas, la misma pregunta que hace `r`. Y **el último destino pasa
+al frente y el último sitio se queda puesto**: quien releva a Codex una vez suele relevar a Codex
+siempre, y empezar cada vez por el primero de la lista es hacerle teclear lo mismo una y otra vez.
+
+Los CLI que **no** se pueden ofrecer salen en gris en vez de esconderse — con uno solo instalado
+no habría forma de enterarse de que esto va con más. Van agrupados por su motivo, y los dos no son
+el mismo: *no instalado* se arregla instalándolo, y *sin comprobar cómo se le pasa un prompt* pide
+que alguien confirme en el `--help` de ese CLI cómo se le da el prompt inicial. Esa es la regla que
+mantiene a `gemini` fuera de la tabla, no un olvido.
 
 Una sesión cuyo directorio ya no existe **se queda fuera** en vez de arrancar en `~`: un relevo
 que empieza en el sitio equivocado parece que ha funcionado. La comprobación exige ruta

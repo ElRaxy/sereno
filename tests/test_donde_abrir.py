@@ -32,6 +32,12 @@ ESPACIO, R, UNO, DOS, TRES, Q = 32, ord("r"), ord("1"), ord("2"), ord("3"), ord(
 
 def corre(teclas, disponibles, h=30, w=150):
     """(llamadas a ejecutar, celdas fuera de marco)."""
+    # Las preferencias a un temporal: recordar la ultima eleccion cambia el ORDEN de los
+    # sitios, asi que sin aislarlas un caso contamina al siguiente. Y un test no escribe
+    # en el HOME de nadie.
+    import tempfile
+    ns["PREFS"] = pathlib.Path(tempfile.mkdtemp()) / "prefs.json"
+
     import curses as real
     llamadas, cajon = [], []
     ns["lanzadores_disponibles"] = lambda: list(disponibles)

@@ -62,10 +62,46 @@ CONFIG_NAME = "claude-restore"
 VIVA = 90
 # Alfabetico ponia "antigravity" delante de "historial" y "codex": el orden util es
 # por cercania a lo que estas mirando, no por la inicial.
-ORDEN_FUENTES = ["claude", "historial", "codex", "gemini", "antigravity"]
+# El orden de las pestanas. Son CLIs: "historial" no esta porque no es uno — son
+# sesiones de Claude paradas, o sea un ESTADO, y tenerlo de pestana mezclaba dos ejes en
+# la misma barra. Ahora caen dentro de `claude`, al fondo, que es donde `ordena()` ya las
+# pone por si sola.
+ORDEN_FUENTES = ["claude", "codex", "gemini", "antigravity"]
 # El valor interno se queda en castellano (es la clave de `fuente` en cada fila); lo
 # que se traduce es la etiqueta que se pinta.
 _ETIQUETAS = {"todas": "all", "historial": "history"}
+
+# Un glifo por CLI, delante del titulo de cada fila. Antes, en la vista mezclada, no
+# habia forma de saber de quien era una sesion: el CLI solo se sabia por la pestana en
+# la que estabas, o sea nunca cuando mirabas "todas".
+#
+# La forma es la senal, no el color: en blanco y negro, o mirando de reojo, el color se
+# pierde y el glifo no. El mismo criterio que ya sigue el estado en `lineas_now`.
+#
+# Se eligieron cuatro que MIDEN UNA COLUMNA (`east_asian_width` 'N') y que no estaban ya
+# usados en la lista: un emoji ocupa dos y descuadra la tabla entera, y `\u25aa` —que
+# parecia el candidato obvio para codex— es la marca de "tiene pestana abierta".
+GLIFO_CLI = {"claude": "\u2726", "codex": "\u25c6", "gemini": "\u25b2",
+             "antigravity": "\u25c7"}
+COLOR_CLI = {"claude": 6, "codex": 8, "gemini": 9, "antigravity": 7}
+
+
+def glifo_cli(r):
+    """(glifo, par_de_color) del CLI de una fila."""
+    c = cli_de(r)
+    return GLIFO_CLI.get(c, "\u00b7"), COLOR_CLI.get(c, 4)
+
+
+def clis_presentes(filas):
+    """Los CLI que hay en estas filas, en el orden de las pestanas.
+
+    Un solo sitio lo calcula porque hacen falta DOS: la barra que se pinta y el ciclo
+    del Tab. Con una copia en cada uno, una miraba `fuente` y la otra `cli_de`, asi que
+    el Tab paraba en una pestana que la barra no dibujaba y la lista salia vacia.
+    """
+    hay = {cli_de(r) for r in filas}
+    return ([f for f in ORDEN_FUENTES if f in hay]
+            + sorted(f for f in hay if f not in ORDEN_FUENTES))
 
 
 def etiqueta_fuente(nombre):
@@ -1849,6 +1885,32 @@ def stop_rows(rows, forget):
 CERRADAS = ROOT / "closed-recientes.txt"
 
 
+# Lo ultimo que se eligio en los cuadros. Un fichero y no una variable de entorno: la
+# gracia es no tener que decirlo cada vez, y una variable hay que ponerla igual.
+PREFS = ROOT / "preferencias.json"
+
+
+def pref(clave, defecto=None):
+    try:
+        return json.loads(PREFS.read_text()).get(clave, defecto)
+    except (OSError, ValueError):
+        return defecto
+
+
+def guarda_pref(**kv):
+    """Guarda sin pisar lo demas. Que falle no puede romper nada: es una comodidad."""
+    try:
+        datos = json.loads(PREFS.read_text())
+    except (OSError, ValueError):
+        datos = {}
+    datos.update({k: v for k, v in kv.items() if v is not None})
+    try:
+        PREFS.parent.mkdir(parents=True, exist_ok=True)
+        PREFS.write_text(json.dumps(datos))
+    except OSError:
+        pass
+
+
 def _claves_de(r):
     """Con que se reconoce una fila en el barrido del disco: su id y el stem de su
     transcript. Los dos, porque una sesion reanudada no se llama como su id."""
@@ -2292,7 +2354,8 @@ def lineas_abrir(sel, lanzadores, ancho, tope=5):
     Compositor puro y aparte del pintado, igual que `lineas_relevo`: curses no avisa
     cuando un cuadro no cabe, asi que la geometria se comprueba sobre estas lineas.
     """
-    out = [(_("Open {n} session(s) in:", n=len(sel)), 6), ("", 0)]
+    out = [(_("Open {n} session in:", n=len(sel)) if len(sel) == 1
+            else _("Open {n} sessions in:", n=len(sel)), 6), ("", 0)]
     for r in sel[:tope]:
         out.append(("\u00b7 " + recorta(r.get("title_full") or r.get("name") or "",
                                         ancho - 6), 0))
@@ -2306,6 +2369,24 @@ def lineas_abrir(sel, lanzadores, ancho, tope=5):
     return out
 
 
+def ausentes_de_relevo(destinos):
+    """[(cli, por que no se ofrece)] de los CLI conocidos que no estan en la lista.
+
+    Dos motivos y no uno solo, porque no se arreglan igual: uno se instala y el otro
+    exige comprobar en su `--help` como se le pasa un prompt inicial — que es la regla
+    por la que `gemini` no esta en `ARNESES`, y no un olvido.
+    """
+    fuera = []
+    for nombre in GLIFO_CLI:
+        if nombre in destinos:
+            continue
+        if nombre not in ARNESES:
+            fuera.append((nombre, _("not checked how to seed it")))
+        elif not shutil.which(nombre):
+            fuera.append((nombre, _("not installed")))
+    return fuera
+
+
 def destinos_de_relevo(sel):
     """Los CLI a los que tiene sentido entregar ESTAS filas.
 
@@ -2315,7 +2396,7 @@ def destinos_de_relevo(sel):
     return [a for a in arneses_disponibles() if any(cli_de(r) != a for r in sel)]
 
 
-def lineas_relevo(sel, destinos, con_conv, ancho, tope=5):
+def lineas_relevo(sel, destinos, con_conv, ancho, tope=5, donde=None, hay_donde=()):
     """[(texto, par_de_color)] del cuadro que pregunta a donde va el relevo.
 
     Compositor puro y aparte del pintado, por lo mismo que `lineas_now`: el cuadro tiene
@@ -2323,7 +2404,8 @@ def lineas_relevo(sel, destinos, con_conv, ancho, tope=5):
     borde devuelve bien y el texto se pierde—, asi que la geometria se comprueba sobre
     estas lineas, sin terminal de por medio.
     """
-    out = [(_("Hand over {n} session(s) to:", n=len(sel)), 6), ("", 0)]
+    out = [(_("Hand over {n} session to:", n=len(sel)) if len(sel) == 1
+            else _("Hand over {n} sessions to:", n=len(sel)), 6), ("", 0)]
     for r in sel[:tope]:
         out.append(("\u00b7 " + recorta(r.get("title_full") or r.get("name") or "",
                                         ancho - 6), 0))
@@ -2331,18 +2413,30 @@ def lineas_relevo(sel, destinos, con_conv, ancho, tope=5):
         out.append(("  " + _("and {n} more", n=len(sel) - tope), 4))
     out.append(("", 0))
     out.append(("   ".join("[%d] %s" % (i + 1, a) for i, a in enumerate(destinos)), 7))
+    # Los que no se pueden ofrecer, dichos y no escondidos: sin esto, quien tenga solo
+    # Codex instalado no llega a saber que esto va con mas CLIs. Cada uno con SU motivo,
+    # que no es el mismo — uno se arregla instalandolo y el otro no.
+    porque = {}
+    for nombre, motivo in ausentes_de_relevo(destinos):
+        porque.setdefault(motivo, []).append(nombre)
+    for motivo, nombres in porque.items():
+        out.append(("    %s \u2014 %s" % (", ".join(nombres), motivo), 4))
     # El toggle esta AQUI y no solo en una variable de entorno: `SERENO_RELEVO=completo`
     # existe desde que existe el relevo y no lo descubre nadie que no lea el README.
     out.append(("[k] " + _("include the conversation: {v}",
                            v=_("yes") if con_conv else _("no")), 7 if con_conv else 4))
     if con_conv:
         out.append(("    " + _("it is written to Warp's config, on disk"), 2))
+    # Donde se abren las ventanas: la misma pregunta que hace `r`, y por las mismas
+    # razones. Solo cuando hay entre que elegir; con un sitio, decirlo seria ruido.
+    if len(hay_donde) > 1:
+        out.append(("[w] " + _("open them in: {v}", v=donde or ""), 7))
     out.append(("", 0))
     out.append((_("[1-9] hand over    [any other key] cancel"), 7))
     return out
 
 
-def relevo(sel, arnes=None, con_conversacion=None):
+def relevo(sel, arnes=None, con_conversacion=None, lanzador=None):
     """Abre una sesion NUEVA del otro CLI por cada fila, en su directorio.
 
     Sin arnes pedido, el destino por defecto es cualquiera MENOS el de las filas: es lo
@@ -2365,7 +2459,7 @@ def relevo(sel, arnes=None, con_conversacion=None):
             return None, _("Those are already {c} sessions.", c=arnes)
         return None, _("None of those has a directory to go back to.")
     _escribe_config(RELEVO_CONFIG, pestanas)
-    _cual, hechas = abre_varias(pestanas, RELEVO_CONFIG)
+    _cual, hechas = abre_varias(pestanas, RELEVO_CONFIG, lanzador)
     if not hechas:
         return None, _("Nothing here can open several at once: "
                        "no Warp, no tmux around, no Terminal.app.")
@@ -3475,6 +3569,7 @@ def barra(valor, tope, celdas=5, pico=0):
 
 
 COL_BASE = 3 + 3 + 9 + 1   # margen+canal+margen, estado+choque, tiempo, marca adjunta
+COL_CLI = 2                # el glifo del CLI y su blanco, solo cuando la lista mezcla
 COL_CTX = 10              # barra de 5 celdas + " 88%"
 COL_RAM = 8               # "  1.6 GB" + el blanco que la separa de la marca
 COL_SEP = 3               # los dos blancos del titulo + el relleno del proyecto
@@ -3482,7 +3577,7 @@ T_COMODO = 44             # mas titulo que esto aporta menos que otra columna
 P_MINIMO = 12             # por debajo, el nombre del proyecto ya no se reconoce
 
 
-def reparto(hueco, largo, ancho_p, hay_ctx, hay_ram):
+def reparto(hueco, largo, ancho_p, hay_ctx, hay_ram, mezcla=False):
     """Que columnas caben en `hueco` y cuanto mide cada una.
 
     Dos reglas, y la segunda no es cosmetica.
@@ -3509,14 +3604,16 @@ def reparto(hueco, largo, ancho_p, hay_ctx, hay_ram):
     Una columna sin nada que decir vale 0 desde el principio: quien no use tmux no
     paga 8 columnas de blanco en cada fila.
     """
-    t = max(12, min(largo, T_COMODO, hueco - COL_BASE))
-    sobra = hueco - COL_BASE - t
+    # Con la lista mezclada, cada fila paga el glifo de su CLI.
+    base = COL_BASE + (COL_CLI if mezcla else 0)
+    t = max(12, min(largo, T_COMODO, hueco - base))
+    sobra = hueco - base - t
     an_ctx = an_ram = 0
 
     if hay_ctx and sobra >= COL_CTX:
         an_ctx, sobra = COL_CTX, sobra - COL_CTX
     elif hay_ctx:
-        return t, 0, 0, 0, COL_BASE
+        return t, 0, 0, 0, base
 
     if ancho_p:
         cabe = sobra - COL_SEP
@@ -3525,7 +3622,7 @@ def reparto(hueco, largo, ancho_p, hay_ctx, hay_ram):
             # significaria apagarla al ensanchar, cuando el proyecto reclamase ese
             # hueco. Cuesta unas columnas en blanco en una franja estrecha de
             # anchos, y a cambio redimensionar nunca quita nada de la fila.
-            return t, 0, an_ctx, 0, COL_BASE + an_ctx
+            return t, 0, an_ctx, 0, base + an_ctx
         # Se ESTRECHA con la ventana en vez de saltar de 30 a nada. Y encoger el
         # proyecto no puede encender la RAM: `sobra` solo crece cuando el proyecto ya
         # esta a su ancho natural, que es lo que mantiene el reparto monotono.
@@ -3536,7 +3633,7 @@ def reparto(hueco, largo, ancho_p, hay_ctx, hay_ram):
         an_ram = COL_RAM
 
     return (t, ancho_p, an_ctx, an_ram,
-            COL_BASE + an_ctx + an_ram + (ancho_p + COL_SEP if ancho_p else 0))
+            base + an_ctx + an_ram + (ancho_p + COL_SEP if ancho_p else 0))
 
 
 def aguja(valor, tope):
@@ -3941,13 +4038,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 foco = rows[cur]["name"] if rows and 0 <= cur < len(rows) else foco
                 todas = recargar()
                 ultima_recarga = time.monotonic()
-            hay = {r.get("fuente", "claude") for r in todas + extra}
-            fuentes = ([f for f in ORDEN_FUENTES if f in hay]
-                       + sorted(f for f in hay if f not in ORDEN_FUENTES))
+            fuentes = clis_presentes(todas + extra)
             base = todas + extra
             candidatas = [r for r in base if casa(r, filtro)
-                          and (vista == "todas"
-                               or r.get("fuente", "claude") == vista)]
+                          and (vista == "todas" or cli_de(r) == vista)]
             # Un trozo de transcript por vuelta, empezando por la fila que se esta
             # mirando —`rows` y `cur` son los de la vuelta anterior, que para elegir a
             # quien adelantar sobra—. De aqui salen tres cosas: el panel deja de dar un
@@ -3972,6 +4066,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             stdscr.erase()
             h, w = stdscr.getmaxyx()
             trab = sum(1 for r in rows if r["working"])
+            # Si lo que se esta mirando tiene sesiones de mas de un CLI. De aqui sale
+            # tanto el glifo de cada fila como las dos columnas que cuesta.
+            mezcla = len({cli_de(r) for r in rows if not r.get("_vacio")}) > 1
 
             cab = (_("Sessions that died") if muertas else
                    _("Claude sessions") if vista == "claude" else
@@ -3996,7 +4093,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 for nom in (["claude"] + [f for f in fuentes if f != "claude"]
                             + ["todas"]):
                     x0, act = hx, nom == vista
-                    cab_put(f" {etiqueta_fuente(nom)} ", 0 if act else 4,
+                    # La pestana lleva SU glifo, que es lo que hace de leyenda: la fila
+                    # marcada con el mismo simbolo se asocia sola, sin una linea de
+                    # ayuda aparte que nadie lee.
+                    gl = GLIFO_CLI.get(nom, "")
+                    cab_put(f" {gl}{' ' if gl else ''}{etiqueta_fuente(nom)} ",
+                            0 if act else 4,
                             (CF(6) | curses.A_BOLD) if act else 0)
                     zonas.append((0, x0, hx - 1, "vista", nom))
                 cab_put("   ")
@@ -4050,20 +4152,23 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cab_put(str(currando), 7, curses.A_BOLD)
                 cab_put(_(" in a command"), 4)
             if not (muertas or externa):
-                # El filtro por fuente ya deja fuera el historial; excluir ademas las
-                # que no tienen proceso conocido contaba 0 en espera con dos delante.
+                # "En espera" son las VIVAS que no estan trabajando. Las paradas no
+                # cuentan aqui: tienen su propio contador debajo. Desde que `historial`
+                # dejo de ser pestana, la vista `claude` trae las dos cosas, asi que
+                # esta cuenta ya no la afina el filtro — la afina este `== "claude"`.
                 quietas = sum(1 for r in rows if not r["working"]
                               and r.get("fuente", "claude") == "claude")
                 if quietas or vista != "todas":
                     cab_put("  \u00b7  ", 4)
                     cab_put(str(quietas), 0)
                     cab_put(_(" idle"), 4)
-            if vista == "todas":
-                reanud = sum(1 for r in rows if r.get("fuente", "claude") != "claude")
-                if reanud:
-                    cab_put("  \u00b7  ", 4)
-                    cab_put(str(reanud), 4, curses.A_BOLD)
-                    cab_put(_(" resumable"), 4)
+            # Y las paradas, que ahora comparten pestana con las vivas: sin este numero
+            # una lista de veinte filas no dice cuantas de ellas siguen ahi de verdad.
+            reanud = sum(1 for r in rows if r.get("fuente", "claude") != "claude")
+            if reanud and not muertas:
+                cab_put("  \u00b7  ", 4)
+                cab_put(str(reanud), 4, curses.A_BOLD)
+                cab_put(_(" resumable"), 4)
             if ram_total:
                 cab_put("  \u00b7  ", 4)
                 cab_put(_mb(ram_total), 8, curses.A_BOLD)
@@ -4103,7 +4208,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             anchura_t, ancho_p, an_ctx, an_ram, fijas = reparto(
                 w - (52 if lateral else 3), largo, ancho_p,
                 any((r.get("pulso") or {}).get("ctx") for r in visibles),
-                any(r.get("mem_mb") for r in visibles))
+                any(r.get("mem_mb") for r in visibles), mezcla)
             ancho_lista = anchura_t + fijas
             ancho_lista += 1              # una columna en blanco para el scrollbar
             # Tope duro contra el borde. `anchura_t` tiene un minimo de 12 columnas, asi
@@ -4192,6 +4297,19 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 put("\u29c9" if col else ("\u21bb" if atasco else " "),
                     5 if (col.get("nivel") or 0) >= 3 else 7, curses.A_BOLD)
                 put(" ")
+                # De que CLI es. Va aqui y no al final porque se lee en vertical con el
+                # estado, de un barrido: al final de la fila habria que buscarlo.
+                #
+                # Y solo cuando la lista MEZCLA CLIs. En la pestana de uno solo, la
+                # columna repetiria ocho veces lo que la pestana activa ya dice, y esas
+                # dos columnas las quiere el titulo.
+                if mezcla:
+                    if not r.get("_vacio"):
+                        gl, par_gl = glifo_cli(r)
+                        put(gl, par_gl, curses.A_BOLD)
+                        put(" ")
+                    else:
+                        put("  ")
                 titulo = rellena(recorta(r.get("title_full") or r["title"], anchura_t),
                                  anchura_t)
                 put(titulo, 2 if marcada else (5 if sin_rastro else
@@ -4747,9 +4865,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # `fuentes` se calculo arriba del bucle, cuando `extra` aun estaba vacio:
                 # usarlo aqui dejaba el ciclo en ["claude", "todas"] y el PRIMER Tab
                 # saltaba al final. Se recalcula con lo que se acaba de cargar.
-                hay = {r.get("fuente", "claude") for r in todas + extra}
-                fuentes = ([f for f in ORDEN_FUENTES if f in hay]
-                           + sorted(f for f in hay if f not in ORDEN_FUENTES))
+                fuentes = clis_presentes(todas + extra)
                 orden = ["claude"] + [f for f in fuentes if f != "claude"] + ["todas"]
                 vista = orden[(orden.index(vista) + 1) % len(orden)] if vista in orden else "claude"
                 cur = 0
@@ -4817,9 +4933,19 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                                     c=arneses_disponibles()[0]))
                     continue
                 con_conv = _env("SERENO_RELEVO") == "completo"
+                hay_donde = lanzadores_disponibles()
+                # Se abre por donde lo dejaste la ultima vez. Quien releva a Codex una
+                # vez suele relevar a Codex siempre, y empezar cada vez por el primero
+                # de la lista es hacerle teclear lo mismo una y otra vez.
+                donde = pref("relevo_donde") if pref("relevo_donde") in hay_donde \
+                    else (hay_donde[0] if hay_donde else None)
+                ultimo = pref("relevo_arnes")
+                if ultimo in destinos:
+                    destinos = [ultimo] + [d for d in destinos if d != ultimo]
                 elegido = None
                 while elegido is None:
-                    lin = lineas_relevo(sel, destinos, con_conv, min(70, w - 8))
+                    lin = lineas_relevo(sel, destinos, con_conv, min(70, w - 8),
+                                        donde=donde, hay_donde=hay_donde)
                     alto_r = min(len(lin) + 2, h)
                     ancho_r = min(max(ancho(t) for t, _p in lin) + 6, w)
                     win = curses.newwin(alto_r, ancho_r, max(0, (h - alto_r) // 2),
@@ -4834,6 +4960,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     tec = tecla_limpia(win)
                     if tec in (ord("k"), ord("K")):
                         con_conv = not con_conv
+                    elif tec in (ord("w"), ord("W")) and len(hay_donde) > 1:
+                        donde = hay_donde[(hay_donde.index(donde) + 1) % len(hay_donde)]
                     elif ord("1") <= (tec or 0) <= ord("9"):
                         i = tec - ord("1")
                         if i < len(destinos):
@@ -4843,7 +4971,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 if not elegido:
                     aviso = _("Cancelled, nothing was handed over.")
                     continue
-                _arnes, aviso = relevo(sel, elegido, con_conversacion=con_conv)
+                guarda_pref(relevo_arnes=elegido, relevo_donde=donde)
+                _arnes, aviso = relevo(sel, elegido, con_conversacion=con_conv,
+                                       lanzador=donde)
                 marcadas.clear()
                 ancla = None
                 continue
@@ -4870,11 +5000,17 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # Con dos o mas sitios donde abrirlas, se pregunta. Con uno no hay nada
                 # que elegir y un cuadro de una sola opcion es solo una tecla de mas.
                 donde = lanzadores_disponibles()
+                # Mismo criterio que el cuadro del relevo: lo ultimo elegido va primero.
+                # Dos cuadros con la misma forma no pueden recordar uno si y otro no.
+                if pref("abrir_donde") in donde:
+                    donde = [pref("abrir_donde")] + [d for d in donde
+                                                     if d != pref("abrir_donde")]
                 if len(donde) > 1:
                     donde = _pide_lanzador(sel, donde, h, w, curses, C, tecla_limpia)
                     if donde is None:
                         aviso = _("Cancelled, nothing was opened.")
                         continue
+                    guarda_pref(abrir_donde=donde)
                 else:
                     donde = donde[0] if donde else None
                 aviso, todas = ejecutar("reopen", sel, donde)
@@ -5214,7 +5350,8 @@ def _T():
         "{n} handed over to {c}": "{n} entregadas a {c}",
         "{n} have nowhere to go back to": "{n} no tienen sitio al que volver",
         "{n} are already {c}": "{n} ya son de {c}",
-        "Hand over {n} session(s) to:": "Entregar {n} sesi\u00f3n(es) a:",
+        "Hand over {n} session to:": "Entregar {n} sesi\u00f3n a:",
+        "Hand over {n} sessions to:": "Entregar {n} sesiones a:",
         "include the conversation: {v}": "incluir la conversaci\u00f3n: {v}",
         "yes": "s\u00ed",
         "no": "no",
@@ -5228,7 +5365,8 @@ def _T():
             "Aqu\u00ed no hay con qu\u00e9 abrir varias a la vez: "
             "ni Warp, ni tmux alrededor, ni Terminal.app.",
         "{n} did not open.": "{n} no se abrieron.",
-        "Open {n} session(s) in:": "Abrir {n} sesi\u00f3n(es) en:",
+        "Open {n} session in:": "Abrir {n} sesi\u00f3n en:",
+        "Open {n} sessions in:": "Abrir {n} sesiones en:",
         "[1-9] open there    [any other key] cancel":
             "[1-9] abrir ah\u00ed    [otra tecla] cancelar",
         "Cancelled, nothing was opened.": "Cancelado, no se ha abierto nada.",
@@ -5238,6 +5376,10 @@ def _T():
         "a Terminal.app window each": "una ventana de Terminal.app para cada una",
         "{n} reattached with {v}": "{n} reenganchadas con {v}",
         "{n} resumed with {v}": "{n} reanudadas con {v}",
+        "open them in: {v}": "abrirlas en: {v}",
+        "not installed": "no instalado",
+        "not checked how to seed it":
+            "sin comprobar c\u00f3mo se le pasa un prompt",
         "Opening {n} tabs with {v} -> {p}": "Abriendo {n} pesta\u00f1as con {v} -> {p}",
         "Reattaching {n} tabs with {v} -> {p}":
             "Reenganchando {n} pesta\u00f1as con {v} -> {p}",
@@ -5499,7 +5641,7 @@ def _T():
 _T()
 
 
-VERSION = "1.28.0"
+VERSION = "1.29.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
