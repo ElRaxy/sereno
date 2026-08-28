@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.24.0
+
+**On a machine without Warp, `r` and `c` took the whole program down.**
+
+`open` is a macOS command. On Linux `subprocess.run(["open", ...])` raises
+`FileNotFoundError` — and it was called with `check=False`, which only ignores the *exit code*,
+not a missing binary. So on any Linux, marking two sessions and pressing `r` crashed sereno from
+inside curses. Sereno is published for anyone; this needed no exotic setup, just not being on a
+Mac with Warp.
+
+The other half is the same failure without the crash: on **macOS without Warp** nothing raised,
+`open warp://…` failed quietly, and the screen still announced *"Reattaching 3 tabs"*. Three tabs
+that do not exist.
+
+One `_abre_en_warp()` now makes that call, in the three places that made it, and returns **a
+fact** — whether it happened — instead of taking the call for granted. Without Warp it says so,
+and says what does work: `ENTER` opens one at a time, on any terminal, and always did.
+
+The test carries a **positive control**: with Warp and with `open`, the same rows *are* reported
+open. Without it a blunt `return 1` would pass both of the cases above.
+
 ## 1.23.0
 
 **`c` pregunta a dónde va, en vez de coger el primero del PATH.**

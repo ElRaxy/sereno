@@ -821,6 +821,11 @@ Both optional. Without them everything works except the memory column — which 
 at all, rather than sitting there empty — and `ENTER` execs into the session in the current
 terminal.
 
+What Warp does gate is **several at once**: `r` and `c` open a window per session, and there is no
+other way to do that from here. Without it they say so and stop, rather than announcing tabs that
+were never opened — which is what they did until 1.24.0, when they did not crash outright: `open`
+is a macOS command, and on Linux the call raised.
+
 </details>
 
 ---
