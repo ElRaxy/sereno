@@ -821,10 +821,30 @@ Both optional. Without them everything works except the memory column — which 
 at all, rather than sitting there empty — and `ENTER` execs into the session in the current
 terminal.
 
-What Warp does gate is **several at once**: `r` and `c` open a window per session, and there is no
-other way to do that from here. Without it they say so and stop, rather than announcing tabs that
-were never opened — which is what they did until 1.24.0, when they did not crash outright: `open`
-is a macOS command, and on Linux the call raised.
+**Several at once** — `r` and `c` open a window per session — goes through whichever of these is
+around, in this order:
+
+| | what it opens | needs |
+|---|---|---|
+| **Warp** | a real window per session | macOS with Warp installed |
+| **tmux** | a tmux window per session, in the session you are already in | being *inside* tmux — the only one that works off macOS |
+| **Terminal.app** | a Terminal window per session | macOS |
+
+Terminal.app goes last on purpose: macOS **restores** its windows on reboot, so a day of
+handovers leaves windows coming back at you at startup. `SERENO_LANZADOR=tmux` forces one.
+
+With none of them, `r` and `c` say so and stop, rather than announcing tabs nobody opened — which
+is what they did until 1.24.0, when they did not crash outright: `open` is a macOS command, and
+on Linux the call raised.
+
+For the two that are not Warp the command travels in a **script on disk** rather than inline:
+`do script` and `tmux new-window` take the order as one string, and a handover briefing has
+newlines and quotes in it — inline is the same bug that used to break Warp's YAML, wearing a
+different suit. The script `cd`s to the session's directory (and **aborts** if it is gone rather
+than carrying on in `~`), unsets `TMUX` (reattaching is `tmux attach`, which inside tmux refuses
+with *sessions should be nested with care*), and **deletes itself before the exec** — a deleted
+file is still readable through the descriptor `sh` already holds, so the rest runs anyway and the
+briefing does not stay on disk. It lives in `~/.sereno/lanzar`, `0700`, not in `/tmp`.
 
 </details>
 
@@ -870,12 +890,13 @@ straight answer, not a promise:
 
 **`sereno` has zero networking code.** No `socket`, no `urllib`, no `requests` — the whole
 import list is `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, unicodedata` and `curses`. Nothing it reads can leave your machine, because there is nothing
+datetime, pathlib, unicodedata, uuid` and `curses`. Nothing it reads can leave your machine, because there is nothing
 in it that can send anything anywhere.
 
-The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions),
-`open` (hand a session to Warp), `defaults` (read your macOS locale) and — only under
-`--watch` — `osascript` / `notify-send` for the desktop alert. No telemetry, no analytics, no
+The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions, and
+open a window per session), `open` (hand a session to Warp), `osascript` (a Terminal.app window
+per session, and — under `--watch` — the desktop alert), `defaults` (read your macOS locale) and
+`notify-send` for that same alert off macOS. No telemetry, no analytics, no
 update check, nothing phoning home.
 
 One thing worth saying plainly: a `--watch` alert puts the **session title** into your system's

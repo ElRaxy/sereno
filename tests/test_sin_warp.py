@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""En una maquina sin Warp, abrir varias no revienta y no miente.
+"""Sin NINGUN lanzador, abrir varias no revienta y no miente.
 
 Sereno se publica para cualquiera, y `open` es un comando de macOS. En Linux
 `subprocess.run(["open", ...])` lanza `FileNotFoundError`, asi que `r` y `c` **tumbaban
@@ -10,7 +10,11 @@ Los dos son el mismo fallo visto desde dos sitios — nadie miraba si la llamada
 hecho algo — y por eso se prueban juntos:
 
   1. sin `open`, ninguna de las dos revienta;
-  2. sin Warp, ninguna de las dos dice que ha abierto nada.
+  2. sin nada con que abrir, ninguna de las dos dice que ha abierto nada.
+
+Desde la 1.25.0 "sin Warp" ya no es "sin nada": tmux y Terminal.app tambien abren varias.
+Asi que aqui se apagan LOS TRES; que cada uno funcione por su cuenta lo prueba
+`test_lanzadores.py`.
 
 El control positivo del final es lo que hace que esto pruebe algo: con Warp y con `open`,
 las mismas filas SI se dan por abiertas. Sin el, un `return 1` puesto a lo bruto pasaria
@@ -27,7 +31,14 @@ def carga(hay_warp, open_revienta, llamadas):
     ns = {"__name__": "sereno_test"}
     exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
     ns["hay_warp"] = lambda: hay_warp
+    # Los otros dos lanzadores se apagan a la vez: este test mide el caso "no hay NADA".
+    ns["hay_tmux_alrededor"] = lambda: False
+    ns["hay_terminal_app"] = lambda: False
+    ns["LANZADORES"] = {"warp": (lambda: hay_warp, None),
+                        "tmux": (lambda: False, ns["_abre_en_tmux"]),
+                        "terminal": (lambda: False, ns["_abre_en_terminal"])}
     ns["LAUNCH"] = pathlib.Path(tempfile.mkdtemp())
+    ns["RUN"] = pathlib.Path(tempfile.mkdtemp()) / "lanzar"
 
     class Falso:
         @staticmethod
@@ -65,7 +76,7 @@ def main():
                 fallos.append(f"[warp={warp}] {nombre} revienta sin `open`: "
                               f"{type(e).__name__}: {e}")
 
-    # 2. Sin Warp, ninguna dice que ha abierto nada.
+    # 2. Sin ningun lanzador, ninguna dice que ha abierto nada.
     llam = []
     ns = carga(False, False, llam)
     salida = io.StringIO()
@@ -73,14 +84,14 @@ def main():
         codigo = ns["reopen"](filas(tmp))
     texto = salida.getvalue()
     if codigo == 0:
-        fallos.append("sin Warp `reopen` devuelve exito")
-    if "Reattaching" in texto or "pesta" in texto.lower():
-        fallos.append(f"sin Warp `reopen` anuncia pestanas: {texto.strip()!r}")
+        fallos.append("sin lanzador `reopen` devuelve exito")
+    if "Reattaching" in texto or "Reenganchando" in texto:
+        fallos.append(f"sin lanzador `reopen` anuncia pestanas: {texto.strip()!r}")
     arnes, aviso = ns["relevo"](filas(tmp), "codex")
     if arnes is not None or "handed over" in aviso or "entregada" in aviso:
-        fallos.append(f"sin Warp `relevo` se da por hecho: {arnes!r} {aviso!r}")
+        fallos.append(f"sin lanzador `relevo` se da por hecho: {arnes!r} {aviso!r}")
     if llam:
-        fallos.append(f"sin Warp se llamo igual a `open`: {llam}")
+        fallos.append(f"sin lanzador se llamo igual a `open`: {llam}")
 
     # 3. Control positivo: con Warp y con `open`, las MISMAS filas si se abren. Sin
     #    esto, un `return 1` a lo bruto pasaria los dos casos de arriba.

@@ -814,10 +814,30 @@ una **ventana nueva** en vez de quedarse con la que estás mirando.
 Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria — que entonces no
 ocupa nada, en vez de quedarse ahí vacía — y `ENTER` hace `exec` sobre la terminal actual.
 
-Lo que Warp sí condiciona es abrir **varias a la vez**: `r` y `c` abren una ventana por sesión, y
-desde aquí no hay otra forma de hacerlo. Sin él lo dicen y paran, en vez de anunciar pestañas que
-nadie abrió — que es lo que hacían hasta la 1.24.0, cuando no reventaban directamente: `open` es
-un comando de macOS y en Linux la llamada lanzaba excepción.
+Abrir **varias a la vez** —`r` y `c` abren una ventana por sesión— va por el primero de estos que
+esté a mano, en este orden:
+
+| | qué abre | necesita |
+|---|---|---|
+| **Warp** | una ventana de verdad por sesión | macOS con Warp instalado |
+| **tmux** | una ventana de tmux por sesión, en la que ya estás | estar *dentro* de tmux — el único que funciona fuera de macOS |
+| **Terminal.app** | una ventana de Terminal por sesión | macOS |
+
+Terminal.app va último a propósito: macOS **restaura** sus ventanas al reiniciar, así que un día
+de relevos deja ventanas resucitando al arrancar. `SERENO_LANZADOR=tmux` fuerza uno.
+
+Sin ninguno de los tres, `r` y `c` lo dicen y paran, en vez de anunciar pestañas que nadie abrió —
+que es lo que hacían hasta la 1.24.0, cuando no reventaban directamente: `open` es un comando de
+macOS y en Linux la llamada lanzaba excepción.
+
+Para los dos que no son Warp, la orden viaja en un **guion en disco** y no inline: `do script` y
+`tmux new-window` reciben la orden como una sola cadena, y el briefing de un relevo lleva saltos
+de línea y comillas — inline es el mismo fallo que rompía el YAML de Warp con otro traje. El guion
+hace `cd` al directorio de la sesión (y **aborta** si ya no está, en vez de seguir en `~`), quita
+`TMUX` del entorno (reenganchar es `tmux attach`, que dentro de tmux se niega con *sessions should
+be nested with care*) y **se borra antes del exec** — un fichero borrado sigue siendo legible por
+el descriptor que `sh` ya tiene abierto, así que el resto corre igual y el briefing no se queda en
+el disco. Vive en `~/.sereno/lanzar`, en `0700`, no en `/tmp`.
 
 </details>
 
@@ -864,12 +884,13 @@ respuesta directa, no una promesa:
 
 **`sereno` no tiene una sola línea de red.** Ni `socket`, ni `urllib`, ni `requests` — la lista
 entera de imports es `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, unicodedata` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
+datetime, pathlib, unicodedata, uuid` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
 nada capaz de mandar nada a ningún sitio.
 
 Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
-sesiones), `open` (pasarle una sesión a Warp), `defaults` (leer tu locale en macOS) y —solo bajo
-`--watch`— `osascript` / `notify-send` para el aviso de escritorio. Sin telemetría, sin
+sesiones, y abrir una ventana por sesión), `open` (pasarle una sesión a Warp), `osascript` (una
+ventana de Terminal.app por sesión, y —bajo `--watch`— el aviso de escritorio), `defaults` (leer
+tu locale en macOS) y `notify-send` para ese mismo aviso fuera de macOS. Sin telemetría, sin
 analíticas, sin comprobación de actualizaciones.
 
 Una cosa que conviene decir clara: un aviso de `--watch` mete el **título de la sesión** en el
