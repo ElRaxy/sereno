@@ -78,7 +78,10 @@ def main():
                       "resume_flags__list": ["--model", "opus"], "title": "una huerfana"},
                      {"id": "bbbb2222", "cwd": "/tmp", "resume_flags__list": [],
                       "title": "otra"}]
-        texto = ns["write_launch_config"](huerfanas).read_text()
+        # Devuelve (ruta, pestanas) desde la 1.27.0: las pestanas hacen falta para
+        # abrir en tmux o Terminal.app, que no leen el YAML de Warp.
+        ruta_cfg, _pest = ns["write_launch_config"](huerfanas)
+        texto = ruta_cfg.read_text()
         ordenes = re.findall(r"^ {12}- exec: (.+)$", texto, re.M)
         if ordenes != ["claude --resume aaaa1111 --model opus",
                        "claude --resume bbbb2222"]:

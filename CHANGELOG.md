@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.27.0
+
+**An orphan that did not open was filed away as resumed — and stopped being offered.**
+
+Found by applying, immediately, the lesson 1.26.0 had just written down: **grep the call, not the
+function.** Two more copies of the raw `open` were left, both in the orphan flow — the sessions
+that survived closing Warp. And in both, the order was backwards:
+
+```
+path = write_launch_config(elegidas)
+archive(elegidas, "restored")          # first
+subprocess.run(["open", ...])          # and then, without looking
+```
+
+Archiving an orphan means *this one is dealt with*, and from then on **it is not offered again**.
+So an `open` that failed — a Mac without Warp, a Linux where that binary does not even exist —
+left them marked as restored without having opened them: not resumed, and gone from the list. Not
+a wrong message. Losing them.
+
+Now they are archived **after** opening and only if something opened, in both the picker and the
+command line. When nothing opens, nothing is filed, and tomorrow the list still has them.
+
+**There is now exactly one `subprocess.run(["open", …])` in the file**, inside `_abre_en_warp` —
+checked with the grep this time, not by eye. The other five have been going one per version since
+1.24.0, which is what happens when you fix the function you have in front of you instead of
+counting the callers first.
+
+The test watches the source order too, not only the behaviour: its behaviour case has to replicate
+the decision, so on its own an inversion in the program would keep it green. Two mutants — filing
+before opening, and never filing — each turn a case red.
+
 ## 1.26.0
 
 **`r` asks where to open them.**

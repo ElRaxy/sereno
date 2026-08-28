@@ -5091,7 +5091,7 @@ def write_launch_config(items):
         flags = e.get("resume_flags__list") or []
         cmd = " ".join(["claude", "--resume", e["id"]] + [shlex.quote(f) for f in flags])
         pestanas.append((label(e), cmd, e["cwd"]))
-    return _escribe_config(CONFIG_NAME, pestanas)
+    return _escribe_config(CONFIG_NAME, pestanas), pestanas
 
 
 def archive(items, folder):
@@ -5177,6 +5177,8 @@ def _T():
             "una ventana de tmux para cada una, donde ya est\u00e1s",
         "a Terminal.app window each": "una ventana de Terminal.app para cada una",
         "{n} reattached with {v}": "{n} reenganchadas con {v}",
+        "{n} resumed with {v}": "{n} reanudadas con {v}",
+        "Opening {n} tabs with {v} -> {p}": "Abriendo {n} pesta\u00f1as con {v} -> {p}",
         "Reattaching {n} tabs with {v} -> {p}":
             "Reenganchando {n} pesta\u00f1as con {v} -> {p}",
         "One at a time does work: ENTER on each one.":
@@ -5298,7 +5300,6 @@ def _T():
         "None has been idle for over an hour.": "Ninguna lleva más de 1h parada.",
         "Opened in a new window: {t}": "Abierta en una ventana nueva: {t}",
         "Opening in a new window: {t}": "Abriendo en una ventana nueva: {t}",
-        "Opening {n} tabs -> {p}": "Abriendo {n} pestañas -> {p}",
         "Opening: {t}": "Abriendo: {t}",
         "SPACE": "ESPACIO",
         "Sessions that died": "Sesiones que murieron",
@@ -5360,7 +5361,6 @@ def _T():
             "Ninguna se puede reanudar (sin id o sin transcript); se descartan.",
         "{n} discarded: they will not be offered again.":
             "{n} descartada(s): no se volverán a ofrecer.",
-        "{n} resumed -> {p}": "{n} reanudada(s) -> {p}",
         "{n} stopped and archived.": "{n} parada(s) y archivada(s).",
         "{n} stopped.": "{n} parada(s).",
         "Run `{p}` to manage them.": "`{p}` para gestionarlas.",
@@ -5439,7 +5439,7 @@ def _T():
 _T()
 
 
-VERSION = "1.26.0"
+VERSION = "1.27.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -6046,10 +6046,17 @@ def main():
                 archive(elegidas, "dismissed")
                 aviso = _("{n} discarded: they will not be offered again.", n=len(elegidas))
             else:
-                path = write_launch_config(elegidas)
-                archive(elegidas, "restored")
-                subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-                aviso = _("{n} resumed -> {p}", n=len(elegidas), p=path.name)
+                _path, pestanas = write_launch_config(elegidas)
+                # Se archiva DESPUES de abrir, y solo si se abrio. Al reves —como estaba—
+                # un `open` que falla dejaba las huerfanas marcadas como restauradas: no
+                # se abrian y ademas dejaban de ofrecerse, que es perderlas.
+                cual, hechas = abre_varias(pestanas, CONFIG_NAME)
+                if hechas:
+                    archive(elegidas, "restored")
+                    aviso = _("{n} resumed with {v}", n=hechas, v=cual)
+                else:
+                    aviso = _("Nothing here can open several at once: "
+                              "no Warp, no tmux around, no Terminal.app.")
             quedan = [e for e in orphans() if e.get("id") and e.get("_transcript")]
             return aviso, [fila_de_huerfana(e) for e in quedan]
 
@@ -6079,10 +6086,17 @@ def main():
         print("\n  " + _("(not a terminal: nothing reopened. `{p} --yes` forces it)", p=PROG))
         return 0
 
-    path = write_launch_config(resumable)
+    path, pestanas = write_launch_config(resumable)
+    cual, hechas = abre_varias(pestanas, CONFIG_NAME)
+    if not hechas:
+        # Sin abrir no se archiva: si se archivara, estas huerfanas no volverian a
+        # ofrecerse y no se habria reanudado ninguna.
+        print("\n" + _("Nothing here can open several at once: "
+                       "no Warp, no tmux around, no Terminal.app."))
+        print(_("One at a time does work: ENTER on each one."))
+        return 1
     archive(resumable + skipped, "restored")
-    subprocess.run(["open", f"warp://launch/{CONFIG_NAME}"], check=False)
-    print("\n" + _("Opening {n} tabs -> {p}", n=len(resumable), p=path))
+    print("\n" + _("Opening {n} tabs with {v} -> {p}", n=hechas, v=cual, p=path))
     return 0
 
 
