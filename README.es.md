@@ -643,8 +643,26 @@ Oriéntate en ese directorio antes de tocar nada.
 Solo hechos. **Ahí no va ningún prompt ni ninguna respuesta tuya**, y no es remilgo: el briefing
 viaja dentro de la launch configuration de Warp, que se queda en el disco en
 `~/.warp/launch_configurations/`. Meter la conversación de un cliente en un fichero es una
-decisión, así que se pide — `SERENO_RELEVO=completo` añade el último prompt y la última
-respuesta — y nunca es lo que pasa por defecto.
+decisión, así que se pide y nunca es lo que pasa por defecto. `SERENO_RELEVO=completo` la deja
+puesta, y la tecla `k` del cuadro de abajo la enciende para un relevo suelto — una variable de
+entorno no es una forma de ofrecer algo.
+
+`c` abre ese cuadro en vez de lanzar de golpe:
+
+```
+Entregar 1 sesión(es) a:
+
+· Refactor payment webhooks
+
+[1] codex   [2] claude
+[k] incluir la conversación: no
+
+[1-9] entregar    [otra tecla] cancelar
+```
+
+El CLI del que vienen las filas no se ofrece — pero solo cuando lo es de **todas**: con la
+selección mezclada salen los dos, porque alguna fila puede ir a cada uno. Cualquier otra tecla
+cancela.
 
 Una sesión cuyo directorio ya no existe **se queda fuera** en vez de arrancar en `~`: un relevo
 que empieza en el sitio equivocado parece que ha funcionado. La comprobación exige ruta

@@ -652,8 +652,24 @@ Get your bearings in that directory before touching anything.
 Facts only. **No prompt and no reply of yours goes in there**, and that is not squeamishness: the
 briefing travels inside Warp's launch configuration, which stays on disk in
 `~/.warp/launch_configurations/`. Putting a client's conversation in a file is a decision, so it
-is asked for — `SERENO_RELEVO=completo` adds the last prompt and the last answer — and never the
-default.
+is asked for and never the default. `SERENO_RELEVO=completo` sets it, and `k` in the box below
+toggles it for one handover — an environment variable is not a way to offer something.
+
+`c` opens that box rather than launching straight away:
+
+```
+Hand over 1 session(s) to:
+
+· Refactor payment webhooks
+
+[1] codex   [2] claude
+[k] include the conversation: no
+
+[1-9] hand over    [any other key] cancel
+```
+
+The CLI the rows come from is not offered — but only when it is the origin of **every** marked
+row: with a mixed selection both appear, because some row can go to each. Any other key cancels.
 
 A session whose directory no longer exists is **left out** rather than started in `~`: a handover
 that begins in the wrong place looks like it worked. The check asks for an **absolute** path, not

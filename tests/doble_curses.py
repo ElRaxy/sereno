@@ -76,6 +76,26 @@ class Pantalla:
     def getch(s):
         return s.teclas.pop(0) if s.teclas else ord("q")
 
+    def newwin(s, h, w, y=0, x=0):
+        """Una subventana: los cuadros de confirmar (cerrar, relevar) son eso.
+
+        Sin esto `curses.newwin` caia en el no-op del modulo falso y devolvia un `0`,
+        asi que ningun test podia pulsar una tecla que abriera un cuadro. Se apuntan las
+        DOS formas en que curses se calla: una ventana mas grande que la pantalla —que
+        `newwin` acepta sin rechistar— y un texto que se sale de ella.
+
+        La matriz del hijo es SUYA: un cuadro modal se pinta encima del panel y contarlo
+        como solape marcaria en rojo el unico caso en que pisar esta bien. Comparten,
+        eso si, la cola de teclas —el cuadro lee de la misma— y la lista de lo que se
+        sale, que es lo que se mide.
+        """
+        if y + h > s.h or x + w > s.w:
+            s.fuera.append((s.fotograma, y, x, "newwin %dx%d en %d,%d" % (w, h, y, x)))
+        hijo = Pantalla(h, w, [], s.ancho)
+        hijo.teclas = s.teclas
+        hijo.fuera = s.fuera
+        return hijo
+
     # ── lo que hay que aceptar y no mide nada ───────────────────────────────
     def __getattr__(s, _n):
         return lambda *a, **k: 0
@@ -98,7 +118,14 @@ def espia(real, h, w, teclas, cajon, ancho):
         def wrapper(s, func, *a, **k):
             pantalla = Pantalla(h, w, list(teclas), ancho)
             cajon.append(pantalla)
+            s._pantalla = pantalla
             return func(pantalla, *a, **k)
+
+        # `curses.newwin` se resuelve en el MODULO, no en la pantalla, asi que sin esto
+        # caia en el no-op de arriba y devolvia un `0`: cualquier tecla que abriera un
+        # cuadro reventaba con "int object has no attribute box".
+        def newwin(s, *a):
+            return s._pantalla.newwin(*a)
 
     # `COLORS` y `has_colors()` solo existen de verdad tras `start_color()` en un
     # terminal real. Se dan a mano y en su valor mas exigente: con 256 colores el
