@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.14.2
+
+**Closes the four minor findings the 1.14.1 audit left open on purpose.**
+
+- **`bump-tap.sh` now checks the fact, not the shape.** It validated that a sha *looked* like a sha
+  and that the formula had exactly one url and one sha256 — never that the release existed. Handed a
+  version that was never published it exited 0 and left the tap pointing at a 404, with only the
+  tap's weekly cron to notice, up to seven days later. It now downloads the asset and compares its
+  sha against the one it was told to write, so the guarantee belongs to the script instead of to the
+  order in which `release.sh` happens to call it.
+- **A formula carrying an explicit `version` stanza is refused.** That stanza is a third copy of the
+  version number this script does not touch: Homebrew would use the old one while downloading the
+  new asset, the `install` guard would `odie`, and `brew install` would be broken for everyone.
+  Reproduced before fixing.
+- **The header arithmetic has a test.** A row that never started *and* lost its directory is counted
+  once, under *never started*, which is what makes the labels add up to the number of rows. Removing
+  that condition used to keep the suite green; now it fails.
+- **`SERENO_SIN_TAP`, `SERENO_TAP_REMOTO` and `SERENO_ASSET_BASE` are documented** in both READMEs.
+
+`test_bump_tap.py` gained three cases — a version that is not published, a sha that is not the
+published asset's, and the `version` stanza — and now serves assets over `file://`, so it exercises
+the network check end to end without a network.
+
 ## 1.14.1
 
 **An audit of 1.14.0 refuted one of its claims and found six mechanisms whose tests passed with the

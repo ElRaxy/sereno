@@ -939,6 +939,11 @@ clones, edits, **pushes and re-reads from the remote**, without touching the net
 step fails, the message says so **without calling it a failure**: the release is published and
 good, and it hands you the exact command to retry that part alone.
 
+Three environment variables steer it, and they exist for testing rather than for daily use:
+`SERENO_SIN_TAP=1` skips the tap step entirely, and `SERENO_TAP_REMOTO` / `SERENO_ASSET_BASE` point
+the bump at a throwaway remote and a local directory of assets — which is how `test_bump_tap.py`
+exercises the whole path, push included, without touching the network.
+
 `release.sh` calls `gh`, so it reaches the network — it is a maintainer tool and **is not part of
 the published program**. The release ships one file, `sereno`, and `test_sin_red.py` covers that
 one.

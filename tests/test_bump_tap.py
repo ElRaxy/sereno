@@ -15,7 +15,7 @@ Los tres casos que abortan valen poco sin el primero, que es el CONTROL POSITIVO
 guion que no hiciera nada nunca pasaria los tres. Y el ultimo mira la otra mitad de lo
 mismo — que un bump repetido no invente un commit vacio.
 """
-import os, pathlib, re, shutil, subprocess, sys, tempfile
+import hashlib, os, pathlib, re, shutil, subprocess, sys, tempfile
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 GUION = RAIZ / "bump-tap.sh"
@@ -31,6 +31,20 @@ end
 ENT = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
            GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t",
            GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
+
+
+def assets(version="2.0.0", cuerpo=b"#!/usr/bin/env python3\n"):
+    """Un 'servidor' de releases que es un directorio, servido por `file://`.
+
+    El guion comprueba contra la red que el asset existe y que su sha es el que se le
+    pide. Probar eso contra GitHub ataria el test a que haya conexion y a que una release
+    concreta siga publicada; `curl` habla `file://` igual de bien, asi que la
+    comprobacion se ejerce ENTERA sin salir de la maquina.
+    """
+    d = pathlib.Path(tempfile.mkdtemp())
+    (d / ("v" + version)).mkdir()
+    (d / ("v" + version) / "sereno").write_bytes(cuerpo)
+    return d, hashlib.sha256(cuerpo).hexdigest()
 
 
 def tap(contenido):
@@ -54,10 +68,12 @@ def publicado(bare):
                           capture_output=True, text=True, env=ENT).stdout
 
 
-def corre(bare, *args):
+def corre(bare, *args, base=None):
+    ent = dict(ENT, SERENO_TAP_REMOTO=str(bare))
+    # Sin base, se apunta a un directorio vacio: cualquier version sale como no publicada.
+    ent["SERENO_ASSET_BASE"] = "file://" + str(base if base else tempfile.mkdtemp())
     r = subprocess.run(["bash", str(GUION), *args], cwd=RAIZ, capture_output=True,
-                       text=True, timeout=120,
-                       env=dict(ENT, SERENO_TAP_REMOTO=str(bare)))
+                       text=True, timeout=120, env=ent)
     return r.returncode, r.stdout + r.stderr
 
 
@@ -65,9 +81,10 @@ def main():
     fallos = []
 
     # ── CONTROL POSITIVO: una formula normal se bumpea y el remoto lo refleja ──────
+    releases, SHA_B = assets("2.0.0")
     d, bare = tap(FORMULA.format(sha=SHA_A))
     try:
-        cod, salida = corre(bare, "2.0.0", SHA_B)
+        cod, salida = corre(bare, "2.0.0", SHA_B, base=releases)
         fin = publicado(bare)
         if cod != 0:
             fallos.append(f"formula buena: salio con {cod}. Dijo: {salida.strip()[:200]!r}")
@@ -79,7 +96,7 @@ def main():
         # ── y un segundo bump igual no inventa un commit ──────────────────────────
         antes = subprocess.run(["git", "rev-parse", "main"], cwd=bare, capture_output=True,
                                text=True, env=ENT).stdout
-        cod2, salida2 = corre(bare, "2.0.0", SHA_B)
+        cod2, salida2 = corre(bare, "2.0.0", SHA_B, base=releases)
         despues = subprocess.run(["git", "rev-parse", "main"], cwd=bare, capture_output=True,
                                  text=True, env=ENT).stdout
         if cod2 != 0 or "ya estaba" not in salida2:
@@ -100,12 +117,23 @@ def main():
          FORMULA.format(sha=SHA_A), "2.0.0", "nosoyunsha", "no es un sha256"),
         ("un sha256 de 63 caracteres",
          FORMULA.format(sha=SHA_A), "2.0.0", "a" * 63, "63 caracteres"),
+        # Estos tres son los que la auditoria echo en falta: el guion validaba la FORMA
+        # y nunca el HECHO, asi que un dedazo en el numero dejaba el tap apuntando a un
+        # 404 y salia con 0. Lo unico que lo tapaba era el orden dentro de `release.sh`.
+        ("una version que no esta publicada",
+         FORMULA.format(sha=SHA_A), "99.99.99", SHA_B, "no esta publicada"),
+        ("un sha que no es el del asset publicado",
+         FORMULA.format(sha=SHA_A), "2.0.0", "c" * 64, "se pidio escribir"),
+        ("una formula con una stanza `version` explicita",
+         FORMULA.format(sha=SHA_A).replace("class Sereno < Formula\n",
+                                           'class Sereno < Formula\n  version "1.0.0"\n'),
+         "2.0.0", SHA_B, "stanza"),
     ]
     for nombre, contenido, ver, sha, esperado in casos:
         d, bare = tap(contenido)
         try:
             antes = publicado(bare)
-            cod, salida = corre(bare, ver, sha)
+            cod, salida = corre(bare, ver, sha, base=releases)
             if cod == 0:
                 fallos.append(f"{nombre}: salio con 0; tenia que abortar")
             if esperado not in salida:
@@ -120,7 +148,7 @@ def main():
     # ── sin argumentos no hace nada y lo dice ─────────────────────────────────────
     d, bare = tap(FORMULA.format(sha=SHA_A))
     try:
-        cod, salida = corre(bare)
+        cod, salida = corre(bare, base=releases)
         if cod == 0 or "uso:" not in salida:
             fallos.append(f"sin argumentos: cod={cod}, salida={salida.strip()[:120]!r}")
     finally:
@@ -148,8 +176,9 @@ def main():
         for f in fallos:
             print("FALLO:", f)
         return 1
-    print("ok: bumpea y el remoto lo refleja, repetirlo no mueve nada, y una formula "
-          "ambigua o un sha256 falso lo paran sin tocar el tap")
+    print("ok: bumpea y el remoto lo refleja, repetirlo no mueve nada, y lo paran sin "
+          "tocar el tap una formula ambigua, un sha falso, una version sin publicar, un "
+          "sha que no es el del asset y una stanza `version` que no bumpea")
     return 0
 
 

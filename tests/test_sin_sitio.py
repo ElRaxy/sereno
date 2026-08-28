@@ -24,7 +24,7 @@ fila sin sitio es la MAS RECIENTE (`idle=0`), asi que el orden por actividad —
 defecto— la pondria la PRIMERA, y su nombre es el primero alfabeticamente, que es el
 desempate. Que salga la ultima solo puede venir de `sin_sitio`.
 """
-import contextlib, io, os, pathlib, shutil, sys, tempfile, time
+import contextlib, io, os, pathlib, re, shutil, sys, tempfile, time
 
 os.environ["SERENO_DEMO"] = "1"
 os.environ["SERENO_DEBUG"] = "1"
@@ -212,6 +212,59 @@ def el_cableado(f):
       "la cabecera tiene que contarlas aparte. Decia: %r" % cab[:120])
 
 
+def la_cabecera(f):
+    """Los tres numeros de la cabecera suman las filas, tambien con una fila que es LAS DOS.
+
+    Una sesion puede no haber arrancado nunca **y** haber perdido su directorio. Si se
+    contara en los dos rotulos, la cabecera diria mas filas de las que hay. Se cuenta solo
+    bajo *sin arrancar*, que es lo que hace que el total cuadre — y hasta ahora eso no lo
+    vigilaba nadie: quitar el `and not vacia(r)` del contador dejaba el test en verde.
+    """
+    import curses as real
+    base = [r for r in ns["sesiones_demo"]() if r.get("fuente", "claude") == "claude"][:4]
+    if len(base) < 4:
+        f(False, "la demo tiene que dar cuatro filas")
+        return
+
+    def hist(r, sitio, vacia_tambien, idle):
+        r = dict(r); r["fuente"] = "historial"; r["idle"] = idle; r["_sitio"] = sitio
+        r["_uso"] = dict(uso(), pico=0, turnos=1) if vacia_tambien else uso()
+        r["pulso"] = dict(r["pulso"], ctx=0 if vacia_tambien else 200_000)
+        return r
+
+    filas = [hist(base[0], True, False, 10),      # normal
+             hist(base[1], False, False, 20),     # solo sin sitio
+             hist(base[2], True, True, 30),       # solo vacia
+             hist(base[3], False, True, 40)]      # LAS DOS
+
+    cajon, guardado = [], ns["uso_de"]
+    ns["uso_de"] = lambda r, tope=None: r.get("_uso")
+    sys.modules["curses"] = espia(real, 32, 170, [Q], cajon, ns["ancho"])
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            ns["pick_ui"](filas, vista_inicial="todas")
+    finally:
+        sys.modules["curses"] = real
+        ns["uso_de"] = guardado
+    pnl = cajon[0]
+    celdas = pnl.celdas or pnl.fotogramas[-1]
+    cab = " ".join("".join(celdas.get((y, x), " ") for x in range(170)) for y in range(3))
+
+    m_sin = re.search(r"(\d+)\s+sin arrancar", cab)
+    m_sitio = re.search(r"(\d+)\s+sin sitio al que volver", cab)
+    m_tot = re.search(r"(\d+)\s+en total", cab)
+    if not (m_sin and m_sitio and m_tot):
+        f(False, "la cabecera no trae los tres numeros. Decia: %r" % cab.strip()[:160])
+        return
+    sin_arrancar, sin_sitio_n, total = (int(m.group(1)) for m in (m_sin, m_sitio, m_tot))
+    f(total == 4, "el total tiene que ser 4 filas, dijo %d" % total)
+    f(sin_arrancar == 2, "sin arrancar son 2 (la vacia y la que es las dos), dijo %d"
+                         % sin_arrancar)
+    f(sin_sitio_n == 1, "sin sitio es 1: la que es LAS DOS ya se conto arriba, y contarla "
+                        "aqui tambien haria que los rotulos sumaran mas filas de las que "
+                        "hay. Dijo %d" % sin_sitio_n)
+
+
 def main():
     fallos = []
 
@@ -223,6 +276,7 @@ def main():
     el_hecho(f)
     el_orden(f)
     el_cableado(f)
+    la_cabecera(f)
     for m in fallos:
         print("FALLO:", m)
     print("%d fallo(s)" % len(fallos) if fallos
