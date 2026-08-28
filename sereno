@@ -1491,7 +1491,9 @@ def buscar(aguja, limite=200, todo=False):
         except OSError:
             pass
     cands.sort(reverse=True)
+    omitidos = 0
     if not todo:
+        omitidos = max(0, len(cands) - limite)
         cands = cands[:limite]
 
     # Cuatro segundos de silencio con `--all` sobre 3,4 GB parecen un cuelgue. El aviso
@@ -1501,6 +1503,13 @@ def buscar(aguja, limite=200, todo=False):
     if peso > 200 * 1024 * 1024:
         print(_("searching {n} transcripts ({g} GB)\u2026",
                 n=len(cands), g=f"{peso / 1e9:.1f}"), file=sys.stderr)
+    # Y las que se quedan fuera, SIEMPRE que las haya: por defecto se miran las 200 mas
+    # recientes de las 599 que hay en esta maquina, y decir solo "200 transcripts" deja
+    # creer que eso es todo. Un "no lo dijiste nunca" que en realidad es "no estaba en el
+    # tercio que mire" es la peor respuesta que puede dar un buscador.
+    if omitidos:
+        print(_("(the {n} most recent; {f} older ones left out \u2014 add --all)",
+                n=len(cands), f=omitidos), file=sys.stderr)
 
     salida = []
     for mt, p in cands:
@@ -1714,7 +1723,11 @@ def print_live(rows):
     for i, r in enumerate(rows, 1):
         est = estado_estable(r)
         att = " " + _("[in a tab]") if r["attached"] else ""
-        edad = _dur(now - r["created"]) if r["created"] else "?"
+        # Sin `created` no se pinta el campo, igual que hace el panel. Antes salia
+        # "abierta hace ?", que afirma el dato y lo rellena con un interrogante — y le
+        # pasa a toda sesion que no arranco por el alias, que son las que el selector
+        # lee de `~/.claude/projects`. Un dato que falta se calla, no se dibuja.
+        edad = ("  " + _("open for {t}", t=_dur(now - r["created"]))) if r["created"] else ""
         pu = r.get("pulso") or {}
         ctx = pu.get("ctx")
         # El tope se saca ANTES del f-string: partir una expresion en dos lineas dentro
@@ -1729,9 +1742,12 @@ def print_live(rows):
         # los dos avisos y no hay razon para elegir.
         atasco = "".join("  \u21bb " + _TEXTO_ATASCO[a]()
                          for a in (pu.get("atasco") or ()))
-        print(f"  {i:>2}. {ICONO.get(est, '?')} {r['title']:<34} "
-              f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}  "
-              + _("open for {t}", t=edad) + att + choque + atasco)
+        # `.rstrip()` porque las columnas van rellenadas a ancho fijo: sin el, una fila
+        # sin hora de apertura ni avisos sale con una cola de espacios que en un pipe es
+        # basura invisible.
+        print((f"  {i:>2}. {ICONO.get(est, '?')} {r['title']:<34} "
+               f"{ESTADO_LARGO(est):<16} {_hace(r.get('idle')):<10}{pct}"
+               + edad + att + choque + atasco).rstrip())
         print(f"         {r['name']}")
         if USO:
             u = uso_de(r)
@@ -4743,6 +4759,8 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "(the {n} most recent; {f} older ones left out \u2014 add --all)":
+            "(las {n} m\u00e1s recientes; quedan {f} m\u00e1s viejas fuera \u2014 a\u00f1ade --all)",
         "what they are ALL running, in one screen":
             "qu\u00e9 est\u00e1n ejecutando TODAS, en una pantalla",
         "What they are all running": "Qu\u00e9 est\u00e1n ejecutando todas",
@@ -5016,7 +5034,7 @@ def _T():
 _T()
 
 
-VERSION = "1.20.0"
+VERSION = "1.21.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
