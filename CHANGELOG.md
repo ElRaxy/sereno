@@ -35,6 +35,13 @@ Ten new cases across `test_relevo.py` and `test_cwd_codex.py`, each checked by m
 guard, the missing same-CLI filter, the fixed briefing, splitting the uuid on hyphens and sharing
 one `cwd` between rows were each put back, and each one turned a case red.
 
+**Checked by opening the window, not by reading the YAML.** A real Codex row was handed over:
+Warp opened, `claude` started in `/Users/alex/Desktop/VanguardIA` — the directory read from that
+session's rollout — and its transcript's first prompt is the briefing, whole, saying it comes
+from a Codex session. Warp reports nothing when a launch does not happen, so the first attempt
+was confirmed against a positive control (a trivial configuration that writes a file) before
+concluding anything about this one.
+
 ## 1.21.0
 
 **Two places where it filled a gap in instead of leaving it empty.**
