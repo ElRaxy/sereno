@@ -618,6 +618,22 @@ def colisiones(rows):
     return rows
 
 
+# Las dos formas de interrumpir que escribe el CLI, medidas sobre los transcripts de esta
+# maquina: 87 interrupciones, 78 con el campo `interruptedMessageId` y 9 sin el. Por eso se
+# miran las dos cosas y no solo una — el campo es el dato bueno (tipado, no cambia con el
+# idioma) y el texto recoge las que no lo traen.
+_INTERRUPCION = ("[Request interrupted by user]",
+                 "[Request interrupted by user for tool use]")
+
+
+def _interrumpida(j, bloques):
+    """Esta linea de usuario es un ESC, no un mensaje."""
+    if j.get("interruptedMessageId"):
+        return True
+    return any(isinstance(b, dict) and b.get("type") == "text"
+               and (b.get("text") or "").strip() in _INTERRUPCION for b in bloques)
+
+
 def pulso(e, secs=90, fino=True):
     """Hechos sobre lo que hace la sesion. El veredicto lo compone quien llame.
 
@@ -734,7 +750,12 @@ def pulso(e, secs=90, fino=True):
             # el resultado del comando que la sesion estaba esperando. Sin esto, los
             # segundos entre que mandas algo y llega la primera linea de la respuesta
             # se leerian como "ya termino".
-            cerrado = False
+            #
+            # Menos una: pulsar ESC no reabre nada, lo CIERRA. Una sesion recien
+            # interrumpida es la que mas claramente te espera —acabas de pararla para
+            # decirle algo— y sin esta rama figuraba como "escribiendo" durante los 90
+            # segundos siguientes, que es justo cuando la miras.
+            cerrado = _interrumpida(j, bloques)
     if toca:
         # Se resuelve al final porque el `cwd` sale de esta misma pasada y las primeras
         # lineas pueden llegar antes que el.
@@ -4995,7 +5016,7 @@ def _T():
 _T()
 
 
-VERSION = "1.19.0"
+VERSION = "1.20.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

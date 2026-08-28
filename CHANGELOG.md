@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.20.0
+
+**A session you just interrupted stops calling itself busy.**
+
+1.16.0 taught the state to read `stop_reason`, and made one rule out of it: any later `user` line
+reopens the turn. Pressing ESC writes a `user` line, so an interrupted session read as `writing`
+for the next ninety seconds — and that is the worst case of the lot, because you interrupt a
+session precisely when you are about to type into it.
+
+The CLI marks it two ways, counted over this machine's transcripts: 87 interruptions, **78 with
+an `interruptedMessageId` field and 9 with only the English text**. Both are read. The field is
+the real signal — typed, and it survives that sentence being reworded or translated; the text
+catches the nine that arrive without it.
+
+The two are tested **apart**, with the field case deliberately carrying a text that is not one of
+the markers. With both signals in one case, turning off either half of the detector still passed
+green — measured, not assumed.
+
+**And `--watch` was verified end to end for the first time**, against real sessions rather than a
+unit test: it fired on `lesbainsdeazahara.net imágenes home`, whose turn closed at 14:51:46, at
+14:51, and on `BioOnline` (14:52:37) at 14:52. Same minute, inside the polling interval — not the
+ninety seconds late it would have been before 1.16.0.
+
 ## 1.19.0
 
 **`n`: the `--now` view, without leaving the picker.**
