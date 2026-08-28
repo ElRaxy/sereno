@@ -126,10 +126,23 @@ def main():
     finally:
         shutil.rmtree(str(d), ignore_errors=True)
 
-    # ── y `release.sh` sigue llamandolo: si se desengancha, esto deja de proteger nada ─
+    # ── y `release.sh` sigue llamandolo, DESPUES de verificar lo publicado ───────────
+    # La garantia entera de este guion es de POSICION: `bump-tap.sh` no comprueba que la
+    # version exista —valida la forma del sha y de la formula, no el hecho— asi que lo
+    # unico que impide apuntar el tap a un asset no verificado es que la llamada vaya
+    # detras de la descarga de comprobacion. Comprobar solo que la llamada EXISTE dejaba
+    # pasar adelantarla: probado moviendola antes de `gh release create`, y el test seguia
+    # verde. Un invariante que nadie vigila deja de ser un invariante.
     rel = (RAIZ / "release.sh").read_text()
-    if not re.search(r'\./bump-tap\.sh "\$VER" "\$esperado"', rel):
+    i_bump = rel.find('./bump-tap.sh "$VER" "$esperado"')
+    i_baja = rel.find("gh release download")
+    i_crea = rel.find("gh release create")
+    if i_bump < 0:
         fallos.append("release.sh ya no llama a ./bump-tap.sh con la version y el sha verificados")
+    elif not (0 < i_crea < i_baja < i_bump):
+        fallos.append("release.sh llama al bump fuera de sitio: create=%d, download=%d, bump=%d. "
+                      "Tiene que ir DESPUES de descargar y verificar lo publicado."
+                      % (i_crea, i_baja, i_bump))
 
     if fallos:
         for f in fallos:

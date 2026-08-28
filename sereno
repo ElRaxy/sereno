@@ -33,7 +33,7 @@ esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
 
 MIT licence. https://github.com/ElRaxy/sereno
 """
-import base64, os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib
+import base64, os, stat, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib
 import unicodedata
 
 HOME = pathlib.Path.home()
@@ -901,12 +901,16 @@ TTL_SITIO = 30.0
 def hay_sitio(ruta):
     """Si el directorio de trabajo de una sesion sigue existiendo. Cacheado por RUTA.
 
-    Por ruta y no por sesion a proposito: las 40 sesiones que un optimizador dejo aqui
-    en una tarde comparten cuatro directorios, asi que el cache convierte 40 `stat` en 4.
+    Por ruta y no por sesion. Lo que ahorra de verdad NO es agrupar filas —medido: 40
+    filas dan 36 rutas distintas, o sea 3 `stat` menos en frio— sino no repetirlas entre
+    refrescos: de 37 `stat` en la primera pasada a 1 en la siguiente.
 
-    Un `stat` es barato en local y NO lo es sobre un volumen de red desmontado, donde
-    puede quedarse colgado. Por eso esto no vive dentro de `ordena()`, que es pura y se
-    llama cuatro veces por segundo: se resuelve una vez al armar la fila.
+    Vive fuera de `ordena()`, que es pura y se llama cuatro veces por segundo, asi que el
+    coste amortizado baja a ~37 `stat` cada 30 s en vez de por refresco. **Eso reduce la
+    repeticion, no el bloqueo**: `recargar()` corre sincrono en el bucle que pinta, asi
+    que sobre un montaje colgado —donde un `stat` no vuelve— el TUI se queda quieto, sin
+    repintar y sin atender teclas. Medido inyectando 1 s de latencia por `stat`: la
+    primera pasada tarda 37,4 s. El cache defiende de repetirse, no de colgarse.
 
     Sin ruta devuelve True — "no consta" no es "no existe", y marcar una sesion por un
     dato que falta seria el error contrario al que esto arregla.
@@ -918,9 +922,16 @@ def hay_sitio(ruta):
     if visto and ahora - visto[0] < TTL_SITIO:
         return visto[1]
     try:
-        existe = os.path.isdir(ruta)
+        # `os.path.isdir` NO sirve aqui, y el `except OSError` que lo envolvia era codigo
+        # muerto: `genericpath.isdir` se traga el error dentro y devuelve False, asi que un
+        # permiso denegado o un bucle de symlinks salian como "no existe" — justo la
+        # ausencia que la guarda decia evitar. Medido: un directorio que existe, con el
+        # padre a 000, daba `hay_sitio` False y hundia la fila.
+        existe = stat.S_ISDIR(os.stat(ruta).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        existe = False                    # esto SI es una ausencia, y es el caso normal
     except OSError:
-        existe = True                     # un error al mirar no es una ausencia
+        existe = True                     # cualquier otro error al mirar no lo es
     if len(_CACHE_SITIO) > 400:
         _CACHE_SITIO.clear()
     _CACHE_SITIO[ruta] = (ahora, existe)
@@ -2066,8 +2077,16 @@ def _uso(path, tope=None):
                 if tipo == "cost-state":
                     # Lo escribe el CLI al cerrar, con SUS precios. `sereno` no calcula
                     # dinero: lo relata. Vale el ultimo, que es el vigente.
+                    #
+                    # Y un 0 con `modelUsage` vacio NO es "esta sesion costo cero": es que
+                    # esa cuenta no lleva la contabilidad, asi que el dato no consta.
+                    # Guardarlo como 0.0 le decia a una statusline que el trabajo salio
+                    # gratis. Medido sobre los 878 transcripts de esta maquina: 40 lineas
+                    # con coste mayor que cero, 8 con ese cero sin desglose, y **ninguna**
+                    # con un cero legitimo (0 y `modelUsage` lleno). O sea que distinguirlos
+                    # no pierde ni un caso real.
                     v = j.get("totalCostUSD")
-                    if isinstance(v, (int, float)):
+                    if isinstance(v, (int, float)) and (v or (j.get("modelUsage") or {})):
                         d["usd"] = float(v)
                     continue
                 if tipo != "assistant":
@@ -4718,7 +4737,7 @@ def _T():
 _T()
 
 
-VERSION = "1.14.0"
+VERSION = "1.14.1"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

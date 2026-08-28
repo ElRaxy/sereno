@@ -227,6 +227,10 @@ Se hunden, no se ocultan. Un directorio que hoy no está puede ser una worktree 
 o un disco que vuelvas a montar, y la comprobación se cachea por ruta durante 30 segundos, así que
 la fila vuelve sola. Esconderlas sería cambiar un error por el contrario.
 
+El caché evita que la comprobación se repita, y eso es todo lo que evita: la recarga corre síncrona
+en el bucle que pinta, así que un montaje de red colgado —donde un `stat` no vuelve nunca— congela
+la lista. Medido inyectando 1 s de latencia por `stat`: 37,4 s la primera pasada.
+
 Dos guardas, las dos porque un directorio ausente no siempre es un directorio ausente:
 
 - **Sin ruta no hay afirmación.** Una sesión sin `cwd` anotado no se marca nunca: señalar una fila
@@ -684,8 +688,8 @@ Lee tus prompts y las respuestas de tu agente para pintarlos en tu pantalla. Eso
 respuesta directa, no una promesa:
 
 **`sereno` no tiene una sola línea de red.** Ni `socket`, ni `urllib`, ni `requests` — la lista
-entera de imports es `os, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib,
-unicodedata` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
+entera de imports es `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
+datetime, pathlib, unicodedata` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
 nada capaz de mandar nada a ningún sitio.
 
 Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
@@ -884,6 +888,39 @@ Dos normas de la casa:
   bueno algo que no lo era.
 - **Las actions van fijadas por SHA** y el repositorio lo exige, así que un cambio de workflow con
   `@v4` se rechaza. Las subidas de versión las abre Dependabot.
+
+### Publicar una versión
+
+```bash
+# 1. subir VERSION en `sereno` y añadir la sección al CHANGELOG.md, en un PR
+# 2. una vez esté en main:
+./release.sh 1.14.0
+```
+
+Ese es el procedimiento entero, y es un guion en vez de una lista de comandos por un motivo.
+Antes era una lista, y una de sus líneas era `git show $SHA:sereno > /tmp/rel/sereno`. **En zsh
+eso no extrae nada**: `$SHA:sereno` empieza por `:s`, el modificador de sustitución, así que el
+shell se come el sufijo y el comando pasa a ser `git show <sha>` — que imprime el log del commit.
+Sin error y con exit 0. **La v1.13.0 publicó ese log como su binario**, y las releases de GitHub
+son inmutables, así que no se pudo reemplazar.
+
+La trampa solo salta cuando la ruta empieza por `s`, y el fichero de aquí se llama `sereno`. Por
+eso el guion hace lo que una lista escrita no puede: **se niega a publicar** si lo que extrajo no
+empieza por el shebang o no dice ser la versión que se publica, y **se vuelve a descargar** el
+asset publicado para compararlo antes de dar el OK. `tests/test_release_guardas.py` lo corre
+contra repos de mentira y comprueba que aborta, que dice por qué, y que no deja ningún tag detrás.
+
+Después de eso, y solo después, `release.sh` llama a `./bump-tap.sh`, que apunta la fórmula de
+Homebrew a la versión recién verificada. Guion aparte por una razón concreta: dentro de
+`release.sh` viviría detrás de `gh release create`, o sea que probarlo exigiría publicar una
+release de verdad. Por su cuenta lo ejerce entero `tests/test_bump_tap.py` contra un remoto de
+mentira: clona, edita, **empuja y relee del remoto**, sin tocar la red. Si el paso del tap falla,
+el mensaje lo dice **sin llamarlo FALLO**: la release está publicada y es buena, y te da el
+comando exacto para reintentar solo esa parte.
+
+`release.sh` llama a `gh`, así que sale a la red — es una herramienta de mantenimiento y **no
+forma parte del programa publicado**. La release lleva un fichero, `sereno`, y `test_sin_red.py`
+cubre ese.
 
 El GIF se regenera con `vhs demo.tape` ([vhs](https://github.com/charmbracelet/vhs)) — y mirando
 los fotogramas antes de commitearlos. Con `SERENO_DEMO=1` delante, siempre: el panel enseña

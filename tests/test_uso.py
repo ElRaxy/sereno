@@ -220,6 +220,31 @@ def main():
         if "total_tokens" in salida:
             fallos.append("hay un total agregado: la cache leida no se suma con la entrada")
 
+        # 11. El cero del coste que no significa cero. El CLI escribe una linea
+        #     `cost-state` al cerrar la sesion, y en una cuenta de suscripcion la escribe
+        #     con `totalCostUSD: 0` y `modelUsage: {}` — que no es "esta sesion costo
+        #     cero", es que ahi no hay contabilidad. Guardarlo como 0.0 le decia a una
+        #     statusline que el trabajo salio gratis.
+        #
+        #     Medido sobre los 878 transcripts de esta maquina antes de tocar nada: 40
+        #     lineas con coste > 0, 8 con ese cero sin desglose, y NINGUNA con un cero
+        #     legitimo (0 y `modelUsage` lleno). Distinguirlos no pierde un solo caso real.
+        def coste(usd, model_usage):
+            return json.dumps({"type": "cost-state", "totalCostUSD": usd,
+                               "modelUsage": model_usage})
+
+        for caso, usd, mu, esperado in (
+            ("cero sin desglose = no consta", 0, {}, None),
+            ("un coste de verdad se relata", 1.23, {"claude-opus-5": {"x": 1}}, 1.23),
+            ("un cero CON desglose es un cero de verdad", 0, {"claude-opus-5": {"x": 1}}, 0.0),
+            ("y sin la clave modelUsage tampoco consta", 0, None, None),
+        ):
+            p = d / ("coste-%d.jsonl" % abs(hash(caso)))
+            linea = (coste(usd, mu) if mu is not None
+                     else json.dumps({"type": "cost-state", "totalCostUSD": usd}))
+            escribe(p, [resp("msg_A", T(0)), linea])
+            igual(caso, (_uso(p) or {}).get("usd"), esperado)
+
     for f in fallos:
         print("FALLO:", f)
     print("ok: se deduplica por respuesta, la cache leida va aparte y lo incremental "
