@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.21.0
+
+**Two places where it filled a gap in instead of leaving it empty.**
+
+`--find` looks at the 200 most recent transcripts. There are 601 on this machine, so a plain
+search reads a third of them and the header said only *"searching 200 transcripts"* — which reads
+as *that is all there is*. It now says how many older ones it skipped and that `--all` includes
+them. A "you never said that" which is really "it wasn't in the third I read" is the worst answer
+a search can give. On stderr, like the size notice, so a piped run stays clean.
+
+`--list` printed `open for ?` for any session with no tmux entry — every session not launched
+through the alias, which the picker reads from `~/.claude/projects`. The panel leaves that field
+blank; the list filled it with a question mark. Same fact, two treatments, and the ugly one
+asserts the field and pads it with a symbol. It is left out now, and the row no longer trails
+whitespace either.
+
+Neither is a crash. Both are the list saying something it does not know.
+
 ## 1.20.0
 
 **A session you just interrupted stops calling itself busy.**
