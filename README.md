@@ -89,8 +89,10 @@ That single check is the difference between *"it hung"* and *"it's working, leav
 The mtime lies the other way round too. It stays fresh for ninety seconds **after** the session
 answers you — exactly the window in which you want to know which one is now waiting. So the
 transcript is asked a second question: did the CLI close the turn? Measured on 2026-08-28
-against Claude Code's own spinner, 10 of 35 samples reading `writing` were sessions that had
-already finished. None the other way round.
+against Claude Code's own spinner over nine live sessions, **16 of 48 samples reading `writing`
+were sessions that had already finished** — a third of them. None the other way round, so the
+error had a direction: it hid the ones asking for you. With the turn check, the same bench gives
+4 of 26.
 
 ```mermaid
 flowchart LR
