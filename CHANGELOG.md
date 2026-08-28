@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.23.0
+
+**`c` pregunta a dónde va, en vez de coger el primero del PATH.**
+
+Handing a session over opened windows of another CLI on a single keypress, with no confirmation
+and without saying which one it was going to: it took whichever came first out of `arneses_disponibles()`.
+With one installed nobody notices; with two it decided for you. And the conversation — the last
+prompt and the last answer — was asked for with an environment variable, `SERENO_RELEVO=completo`,
+which nobody finds without reading the README.
+
+Both now live in the same box, over the list:
+
+```
+Entregar 1 sesión(es) a:
+
+· Refactor payment webhooks
+
+[1] codex   [2] claude
+[k] incluir la conversación: no
+
+[1-9] entregar    [otra tecla] cancelar
+```
+
+The origin CLI is not offered — but only when it is the origin of **every** marked row: with a
+mixed selection both appear, because some row can go to each. `k` toggles the conversation and
+says, while it is on, that it ends up written to Warp's configuration on disk. Any other key
+cancels, which is new: until now `c` had no way back.
+
+The box is composed by `lineas_relevo()`, apart from the drawing, for the reason 1.19.0 learned
+the hard way — **curses does not complain when a box does not fit**, so the geometry is checked
+on the lines, without a terminal in the middle. And the test double grew a `newwin`: it returned
+a plain `0`, so no test could press a key that opened a box. Neither this one nor the close
+confirmation was reachable.
+
+**And the same empty-path guard, deduplicated.** `abrir_sesion` had its own copy of the check
+1.22.0 fixed — the version that lets `""` through. One `_dir_util()` now decides it in both
+places: it does not survive as two.
+
 ## 1.22.0
 
 **The handover went one way, and its guard did not hold.**

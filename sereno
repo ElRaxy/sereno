@@ -1846,6 +1846,18 @@ def _comando_de(r):
     return None
 
 
+def _dir_util(cwd):
+    """True si ahi se puede plantar una sesion: ruta ABSOLUTA que existe.
+
+    No basta con `Path(cwd).is_dir()`. `Path("").is_dir()` devuelve **True** —Python lee
+    la ruta vacia como `.`— asi que una comprobacion de existencia a secas deja pasar el
+    vacio y planta la sesion donde este el proceso, que es el sitio equivocado con pinta
+    de haber funcionado. La relativa cae por lo mismo: existe respecto al proceso, no
+    respecto a la sesion.
+    """
+    return bool(cwd) and pathlib.Path(cwd).is_absolute() and pathlib.Path(cwd).is_dir()
+
+
 def hay_warp():
     """Warp es la unica via que tenemos para abrir en una ventana NUEVA (`warpctrl`
     no existe en esta version, verificado 2026-08-25). Sin el se reemplaza la terminal
@@ -1870,7 +1882,7 @@ def abrir_sesion(r, callado=False):
         print(_("Don't know how to open {s}.", s=r.get('name')))
         return 1
     cmd, cwd = par
-    if not pathlib.Path(cwd or "").is_dir():
+    if not _dir_util(cwd):
         cwd = str(HOME)
     titulo = (r.get("title_full") or r.get("name") or "claude").replace('"', "'")[:60]
     if not hay_warp():
@@ -2025,12 +2037,7 @@ def pestanas_de_relevo(rows, arnes, con_conversacion=False):
             mismo_.append(r)
             continue
         cwd = detalles(r).get("cwd") or (r.get("meta") or {}).get("cwd") or ""
-        # La guarda pide ruta ABSOLUTA, no solo que exista: `Path("").is_dir()` devuelve
-        # True porque Python lee la ruta vacia como `.`, asi que una fila sin `cwd` —las
-        # de Codex traen ""— la pasaba entera y el relevo arrancaba en el directorio del
-        # proceso, anunciando exito. Es justo lo que la guarda existia para impedir.
-        ruta_cwd = pathlib.Path(cwd) if cwd else None
-        if ruta_cwd is None or not ruta_cwd.is_absolute() or not ruta_cwd.is_dir():
+        if not _dir_util(cwd):
             sin_sitio_.append(r)
             continue
         titulo = "%s \u2192 %s" % (r.get("title") or r.get("name") or "", arnes)
@@ -2038,7 +2045,43 @@ def pestanas_de_relevo(rows, arnes, con_conversacion=False):
     return pestanas, sin_sitio_, mismo_
 
 
-def relevo(sel, arnes=None):
+def destinos_de_relevo(sel):
+    """Los CLI a los que tiene sentido entregar ESTAS filas.
+
+    Un destino se ofrece si al menos una de las filas puede ir a el. El que es el origen
+    de todas se cae: relevar Codex a Codex abre una sesion en blanco y la cuenta.
+    """
+    return [a for a in arneses_disponibles() if any(cli_de(r) != a for r in sel)]
+
+
+def lineas_relevo(sel, destinos, con_conv, ancho, tope=5):
+    """[(texto, par_de_color)] del cuadro que pregunta a donde va el relevo.
+
+    Compositor puro y aparte del pintado, por lo mismo que `lineas_now`: el cuadro tiene
+    que caber en la pantalla y curses **no avisa cuando no cabe** —un `addnstr` fuera del
+    borde devuelve bien y el texto se pierde—, asi que la geometria se comprueba sobre
+    estas lineas, sin terminal de por medio.
+    """
+    out = [(_("Hand over {n} session(s) to:", n=len(sel)), 6), ("", 0)]
+    for r in sel[:tope]:
+        out.append(("\u00b7 " + recorta(r.get("title_full") or r.get("name") or "",
+                                        ancho - 6), 0))
+    if len(sel) > tope:
+        out.append(("  " + _("and {n} more", n=len(sel) - tope), 4))
+    out.append(("", 0))
+    out.append(("   ".join("[%d] %s" % (i + 1, a) for i, a in enumerate(destinos)), 7))
+    # El toggle esta AQUI y no solo en una variable de entorno: `SERENO_RELEVO=completo`
+    # existe desde que existe el relevo y no lo descubre nadie que no lea el README.
+    out.append(("[k] " + _("include the conversation: {v}",
+                           v=_("yes") if con_conv else _("no")), 7 if con_conv else 4))
+    if con_conv:
+        out.append(("    " + _("it is written to Warp's config, on disk"), 2))
+    out.append(("", 0))
+    out.append((_("[1-9] hand over    [any other key] cancel"), 7))
+    return out
+
+
+def relevo(sel, arnes=None, con_conversacion=None):
     """Abre una sesion NUEVA del otro CLI por cada fila, en su directorio.
 
     Sin arnes pedido, el destino por defecto es cualquiera MENOS el de las filas: es lo
@@ -2052,8 +2095,10 @@ def relevo(sel, arnes=None):
         arnes = (otros or disponibles or [None])[0]
     if not arnes:
         return None, _("No other CLI found on your PATH.")
+    if con_conversacion is None:
+        con_conversacion = _env("SERENO_RELEVO") == "completo"
     pestanas, sin_sitio_, mismo_ = pestanas_de_relevo(
-        sel, arnes, con_conversacion=_env("SERENO_RELEVO") == "completo")
+        sel, arnes, con_conversacion=con_conversacion)
     if not pestanas:
         if mismo_ and not sin_sitio_:
             return None, _("Those are already {c} sessions.", c=arnes)
@@ -4490,7 +4535,41 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     aviso = _("Mark which ones you want to hand over first.")
                     continue
                 sel = [r for r in base if r["name"] in marcadas]
-                _arnes, aviso = relevo(sel)
+                destinos = destinos_de_relevo(sel)
+                if not destinos:
+                    aviso = (_("No other CLI found on your PATH.")
+                             if not arneses_disponibles()
+                             else _("Those are already {c} sessions.",
+                                    c=arneses_disponibles()[0]))
+                    continue
+                con_conv = _env("SERENO_RELEVO") == "completo"
+                elegido = None
+                while elegido is None:
+                    lin = lineas_relevo(sel, destinos, con_conv, min(70, w - 8))
+                    alto_r = min(len(lin) + 2, h)
+                    ancho_r = min(max(ancho(t) for t, _p in lin) + 6, w)
+                    win = curses.newwin(alto_r, ancho_r, max(0, (h - alto_r) // 2),
+                                        max(0, (w - ancho_r) // 2))
+                    win.box()
+                    for k, (txt, par) in enumerate(lin[:alto_r - 2]):
+                        if txt:
+                            win.addnstr(1 + k, 3, txt, ancho_r - 6,
+                                        (C(par) if par else 0) | curses.A_BOLD)
+                    win.refresh()
+                    win.timeout(-1)
+                    tec = tecla_limpia(win)
+                    if tec in (ord("k"), ord("K")):
+                        con_conv = not con_conv
+                    elif ord("1") <= (tec or 0) <= ord("9"):
+                        i = tec - ord("1")
+                        if i < len(destinos):
+                            elegido = destinos[i]
+                    else:
+                        elegido = ""          # cualquier otra tecla cancela
+                if not elegido:
+                    aviso = _("Cancelled, nothing was handed over.")
+                    continue
+                _arnes, aviso = relevo(sel, elegido, con_conversacion=con_conv)
                 marcadas.clear()
                 ancla = None
                 continue
@@ -4851,6 +4930,15 @@ def _T():
         "{n} handed over to {c}": "{n} entregadas a {c}",
         "{n} have nowhere to go back to": "{n} no tienen sitio al que volver",
         "{n} are already {c}": "{n} ya son de {c}",
+        "Hand over {n} session(s) to:": "Entregar {n} sesi\u00f3n(es) a:",
+        "include the conversation: {v}": "incluir la conversaci\u00f3n: {v}",
+        "yes": "s\u00ed",
+        "no": "no",
+        "it is written to Warp's config, on disk":
+            "queda escrita en la config de Warp, en el disco",
+        "[1-9] hand over    [any other key] cancel":
+            "[1-9] entregar    [otra tecla] cancelar",
+        "Cancelled, nothing was handed over.": "Cancelado, no se ha entregado nada.",
         "Those are already {c} sessions.": "Esas ya son sesiones de {c}.",
         "You are taking over from a {c} session. You do not have its history: "
         "what follows is everything that is known about it.":
@@ -5111,7 +5199,7 @@ def _T():
 _T()
 
 
-VERSION = "1.22.0"
+VERSION = "1.23.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
