@@ -540,7 +540,7 @@ on it first.
 | `↑` `↓` / `j` `k` | move |
 | `ENTER` | open it |
 | `SPACE` | mark · `v` a range · `a` all · `i` invert · `d` everything idle over an hour |
-| `r` | open the marked ones, all at once, one tab each |
+| `r` | open the marked ones, all at once — it asks where, if there is more than one place |
 | `c` | hand the marked ones over to another CLI — see below |
 | `n` | what they are **all** running, in one screen |
 | `x` | close the marked ones — asks first, and warns if any is mid-task |
@@ -821,8 +821,9 @@ Both optional. Without them everything works except the memory column — which 
 at all, rather than sitting there empty — and `ENTER` execs into the session in the current
 terminal.
 
-**Several at once** — `r` and `c` open a window per session — goes through whichever of these is
-around, in this order:
+**Several at once** — `r` and `c` open a window per session — goes through one of these. `r`
+asks which, when more than one is around; with a single one there is nothing to choose and no box
+appears. `SERENO_LANZADOR` pins one:
 
 | | what it opens | needs |
 |---|---|---|
@@ -831,7 +832,13 @@ around, in this order:
 | **Terminal.app** | a Terminal window per session | macOS |
 
 Terminal.app goes last on purpose: macOS **restores** its windows on reboot, so a day of
-handovers leaves windows coming back at you at startup. `SERENO_LANZADOR=tmux` forces one.
+handovers leaves windows coming back at you at startup.
+
+VS Code is **not** in there, and that is a measured decision rather than an oversight: it has no
+way to run a command in its integrated terminal from outside. The one route that exists — a task
+with `runOn: folderOpen` in a temporary workspace — did not fire, with a fresh folder or with one
+VS Code already knew. Opening the folder without attaching the session would be the kind of half
+truth this program exists not to tell.
 
 With none of them, `r` and `c` say so and stop, rather than announcing tabs nobody opened — which
 is what they did until 1.24.0, when they did not crash outright: `open` is a macOS command, and
