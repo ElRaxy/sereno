@@ -88,7 +88,10 @@ Esa comprobación es toda la diferencia entre *«se ha colgado»* y *«está tra
 La fecha de modificación miente también al revés: sigue fresca durante los noventa segundos
 **posteriores** a que la sesión te conteste, que es justo la ventana en la que quieres saber cuál
 te está esperando ya. Así que al transcript se le hace una segunda pregunta: ¿cerró el turno el
-CLI? Medido el 2026-08-28 contra el propio spinner de Claude Code sobre nueve sesiones vivas,
+CLI? Pulsar ESC cuenta como cerrarlo: una sesión que acabas de interrumpir es la que más
+claramente te espera.
+
+Medido el 2026-08-28 contra el propio spinner de Claude Code sobre nueve sesiones vivas,
 **16 de 48 muestras que decían `escribiendo` eran sesiones ya paradas** — un tercio. Ninguna al
 revés, así que el error tenía dirección: escondía justo las que te reclamaban. Con la
 comprobación del turno, el mismo banco da 4 de 26.

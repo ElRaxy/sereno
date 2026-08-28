@@ -20,6 +20,24 @@ UUID = "0123abcd-4567-89ef-0123-456789abcdef"
 PROMPT = {"type": "user", "cwd": "/tmp/proyecto", "gitBranch": "main",
           "message": {"role": "user", "content": "haz algo que se vea"}}
 
+# Las dos formas reales, medidas sobre los transcripts de esta maquina: de 87
+# interrupciones, 78 traen el campo `interruptedMessageId` y 9 solo el texto. Se prueban
+# por separado y no juntas: con las dos senales en el mismo caso, apagar media funcion
+# seguia dando verde — comprobado.
+#
+# Por eso el caso del campo lleva un texto que NO es ninguna de las marcas. Ademas dice
+# por que el campo es el dato bueno: si el CLI traduce o reescribe esa frase, es lo unico
+# que queda.
+INTERRUPCION_CAMPO = {"type": "user", "interruptedMessageId": "msg_x",
+                      "message": {"role": "user", "content": [
+                          {"type": "text",
+                           "text": "[Solicitud interrumpida por el usuario]"}]}}
+INTERRUPCION_TEXTO = {"type": "user",
+                      "message": {"role": "user", "content": [
+                          {"type": "text",
+                           "text": "[Request interrupted by user for tool use]"}]}}
+
+
 
 def respuesta(stop):
     m = {"role": "assistant", "model": "claude-opus-5",
@@ -43,6 +61,12 @@ def main():
          [PROMPT, respuesta(None)], "writing"),
         ("un turno cortado por longitud no es un turno cerrado",
          [PROMPT, respuesta("max_tokens")], "writing"),
+        # Pulsar ESC no reabre el turno, lo CIERRA: la sesion te espera a ti. Sin esto
+        # figuraba como "escribiendo" los 90 s siguientes, que es cuando la miras.
+        ("un ESC con su campo tipado cierra el turno",
+         [PROMPT, respuesta("tool_use"), INTERRUPCION_CAMPO], "waiting"),
+        ("un ESC sin el campo, solo con su texto, tambien",
+         [PROMPT, respuesta("tool_use"), INTERRUPCION_TEXTO], "waiting"),
     ]
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
@@ -74,7 +98,9 @@ def main():
             esperado = {"turno cerrado y transcript caliente": True,
                         "un prompt nuevo reabre el turno": False,
                         "sin stop_reason se decide como siempre": None,
-                        "un turno cortado por longitud no es un turno cerrado": False}[nombre]
+                        "un turno cortado por longitud no es un turno cerrado": False,
+                        "un ESC con su campo tipado cierra el turno": True,
+                        "un ESC sin el campo, solo con su texto, tambien": True}[nombre]
             if v[0]["turn_closed"] is not esperado:
                 fallos.append(f"{nombre}: turn_closed={v[0]['turn_closed']!r}, "
                               f"se esperaba {esperado!r}")
