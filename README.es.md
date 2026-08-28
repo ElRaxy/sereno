@@ -504,6 +504,7 @@ línea de tmux filtra por él antes de dividir.
 | `SPACE` | marcar · `v` un rango · `a` todas · `i` invertir · `d` las paradas más de una hora |
 | `r` | abrir las marcadas de una vez, una pestaña cada una |
 | `c` | entregar las marcadas a otro CLI — ver abajo |
+| `n` | qué están ejecutando **todas**, en una pantalla |
 | `x` | cerrar las marcadas — pregunta antes, y avisa si alguna está a media tarea |
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
 | `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` (o pincharlo — ver abajo) |
@@ -671,7 +672,7 @@ Migrate CI to reusable workflows  ·  infra                  te espera a ti · h
 ```
 
 La misma lectura que el panel, los mismos hechos, y ni un fichero más abierto por fila que la
-cola que cada una ya necesita. La cabecera no puede desmentir a las filas de debajo: se cuenta a
+cola que cada una ya necesita. **La tecla `n` enseña lo mismo sin salir del selector** — lo compone una sola función, así que la pantalla y la terminal no pueden acabar diciendo cosas distintas de los mismos hechos. La cabecera no puede desmentir a las filas de debajo: se cuenta a
 partir de ellas, y hay un test que falla si alguna vez discrepan.
 
 ### `--disk`

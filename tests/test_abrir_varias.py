@@ -71,6 +71,19 @@ def main():
         if "4444dddd" in ruta.read_text():
             fallos.append("la fila sin forma de abrirse ha acabado en el YAML")
 
+        # El tercer sitio que escribe ese YAML: las huerfanas del registro. No son filas
+        # de la lista —no tienen `meta` ni pasan por `_comando_de`— asi que componen su
+        # orden aparte, y al unificar el escritor se quedaron sin nadie que las mirara.
+        huerfanas = [{"id": "aaaa1111", "cwd": "/tmp",
+                      "resume_flags__list": ["--model", "opus"], "title": "una huerfana"},
+                     {"id": "bbbb2222", "cwd": "/tmp", "resume_flags__list": [],
+                      "title": "otra"}]
+        texto = ns["write_launch_config"](huerfanas).read_text()
+        ordenes = re.findall(r"^ {12}- exec: (.+)$", texto, re.M)
+        if ordenes != ["claude --resume aaaa1111 --model opus",
+                       "claude --resume bbbb2222"]:
+            fallos.append(f"las huerfanas ya no se restauran bien: {ordenes}")
+
     for f in fallos:
         print("FALLA:", f)
     print("OK: test_abrir_varias" if not fallos else f"{len(fallos)} fallos")
