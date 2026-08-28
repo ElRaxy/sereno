@@ -193,6 +193,50 @@ Veinte minutos colgada de una llamada **no** se lleva una línea propia — eso 
 `estado`, y el mismo hecho dos veces no es una segunda opinión. El rastro lo enseña como lo que
 es: un glifo y un reloj.
 
+### Las que nunca arrancaron
+
+Una sesión cuyas respuestas no consumieron ni un token nunca recibió una contestación, y reanudarla
+te devuelve su error de arranque y nada más. Esas ordenan por debajo de todo, se pintan en gris y
+la cabecera las cuenta aparte — `3 reanudables · 1 sin arrancar`, no `4 reanudables`.
+
+El caso especial se gana el sitio. En la máquina donde se escribió esto eran 21 de 39 filas del
+historial, y 16 de ellas la misma sesión relanzada en bucle y muerta en el acto con `API Error: 401
+· Please run /login`. Como acababan de morir, eran las filas más recientes, así que el orden por
+defecto las ponía arriba de una lista cuyo único trabajo es decirte a cuál volver.
+
+Dos guardas, las dos porque un cero no siempre es un cero:
+
+- Solo con el transcript leído entero. A medias, un cero significa *todavía no se sabe*.
+- **Nunca una sesión viva.** Una que acabas de lanzar aún no ha contestado, y es justo la fila que
+  más quieres ver.
+
+### Las que ya no tienen sitio al que volver
+
+Una sesión cuyo directorio de trabajo ya no existe no admite vuelta: reanudarla te deja en un `cd`
+a un sitio que no está. Mismo trato que las de arriba — al fondo, en gris y contadas aparte.
+
+Es la gemela del caso anterior y hace la misma pregunta por el otro lado. Aquellas nunca
+contestaron; estas contestaron de sobra y perdieron el destino.
+
+En la máquina donde se escribió esto eran **40 de las 46 filas** del historial. Y no es el
+resultado raro de una tarde: quitando las 53 sesiones que un optimizador dejó esa mañana, siguen
+siendo **28 de 37**, de dos clases muy concretas — worktrees ya borradas (10 de 15) y directorios
+temporales (18 de 18, todos).
+
+Se hunden, no se ocultan. Un directorio que hoy no está puede ser una worktree que vuelvas a crear
+o un disco que vuelvas a montar, y la comprobación se cachea por ruta durante 30 segundos, así que
+la fila vuelve sola. Esconderlas sería cambiar un error por el contrario.
+
+Dos guardas, las dos porque un directorio ausente no siempre es un directorio ausente:
+
+- **Sin ruta no hay afirmación.** Una sesión sin `cwd` anotado no se marca nunca: señalar una fila
+  por un dato que falta es justo el error que esto arregla.
+- **Nunca una sesión viva.** Su proceso corre dentro de ese directorio, así que existe por
+  definición, y preguntarlo sería gastar un `stat` para confirmar lo obvio.
+
+El hecho también sale en `--json`, como `cwd_exists`, para que una statusline filtre lo reanudable
+de verdad en vez de adivinarlo por el nombre del proyecto.
+
 ### Sobre la barra de contexto
 
 Contesta lo que hoy contestas abriendo la sesión: *¿le cabe otra tarea, o toca compactar?* El

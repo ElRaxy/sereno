@@ -21,7 +21,8 @@ CAMPOS = {
     "id": str, "session_id": str,
     "title": str, "project": str, "branch": str, "source": str,
     "state": str, "writing": bool, "tool_pending": bool, "idle_seconds": int,
-    "attached": bool, "memory_mb": int, "context_tokens": int, "context_max": int,
+    "attached": bool, "cwd_exists": bool,
+    "memory_mb": int, "context_tokens": int, "context_max": int,
     "model": str, "pid": str,
     # El acumulado. `null` sin `--usage`, que es como corre este test.
     "input_tokens": int, "output_tokens": int, "cache_write_tokens": int,

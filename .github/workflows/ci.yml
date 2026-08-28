@@ -82,5 +82,7 @@ jobs:
         run: python tests/test_release_guardas.py
       - name: el tap de Homebrew se bumpea solo, o no se toca
         run: python tests/test_bump_tap.py
+      - name: las que ya no tienen directorio caen al fondo
+        run: python tests/test_sin_sitio.py
       - name: nada usa sintaxis posterior a 3.8, que es el suelo del repo
         run: python tests/test_suelo_38.py
