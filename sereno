@@ -27,7 +27,8 @@ optional and only add live process control; without them everything is read from
   sereno --stop-sel  "idle"    stop them but leave them resumable
 
 Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
-SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_SORT=activity|context|project|memory
+SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_CTX_AVISO=80,90 (the context thresholds
+--watch alerts on; 0 turns it off), SERENO_SORT=activity|context|project|memory
 (prefix with `-` to invert: SERENO_SORT=-activity).
 
 Los comentarios de este fichero estan en castellano a proposito: explican POR QUE
@@ -1642,6 +1643,63 @@ def choques_nuevos(antes, ahora):
     return salen
 
 
+# El cuarto flanco, y el unico que no mira lo que la sesion HACE sino lo que le queda:
+# la ventana de contexto llenandose. Se avisa al CRUZAR un escalon, no mientras se esta
+# por encima — igual que los otros tres, y por lo mismo: una sesion al 92% durante media
+# hora avisaria noventa veces y se dejaria de leer. Y si compacta, el nivel baja solo y
+# el siguiente cruce vuelve a ser noticia.
+ESCALONES_CTX = (80, 90)
+
+
+def escalones_ctx():
+    """Los porcentajes a los que avisar. `SERENO_CTX_AVISO=70,85` los cambia; un valor
+    sin ningun numero valido (`0`, `off`, `no`) apaga el aviso entero.
+
+    Una vez por proceso: es config, no un dato que cambie entre vueltas del bucle.
+    """
+    if "_v" not in escalones_ctx.__dict__:
+        crudo = _env("CTX_AVISO")
+        if not crudo:
+            escalones_ctx._v = ESCALONES_CTX
+        else:
+            vistos = sorted({int(x) for x in re.findall(r"\d+", crudo)
+                             if 0 < int(x) <= 100})
+            escalones_ctx._v = tuple(vistos)
+    return escalones_ctx._v
+
+
+def nivel_ctx(r, escalones=None):
+    """El escalon que esta fila ya ha pasado, o 0. Un hecho, no un juicio: quien decide
+    si eso merece un aviso es `contextos_nuevos`, comparandolo con la vuelta anterior.
+
+    `context_max` a `None` es "no se midio" y NO cero: una sesion cuyo tope no consta no
+    avisa, en vez de avisar del 100% de una ventana inventada.
+    """
+    esc = escalones_ctx() if escalones is None else escalones
+    ctx, tope = r.get("context_tokens"), r.get("context_max")
+    if not ctx or not tope or not esc:
+        return 0
+    lleno = 100.0 * ctx / tope
+    pasados = [e for e in esc if lleno >= e]
+    return max(pasados) if pasados else 0
+
+
+def contextos_nuevos(antes, ahora, escalones=None):
+    """Filas que ACABAN de cruzar un escalon de contexto, con el escalon cruzado. Pura,
+    como las tres de arriba y por lo mismo: el bucle no se puede probar y esto si.
+
+    Se compara escalon a escalon y no "iba justa / va justa": pasar del 80 al 90 es
+    noticia nueva, seguir en el 80 no. Y como el nivel se recalcula cada vuelta, una
+    sesion que compacta cae a 0 sola y puede volver a avisar mas tarde.
+    """
+    salen = []
+    for r in ahora:
+        n = nivel_ctx(r, escalones)
+        if n and n > antes.get(r["id"], 0):
+            salen.append((r, n))
+    return salen
+
+
 def notifica(titulo, cuerpo):
     """Aviso del escritorio si el sistema tiene con que; si no, la campana del terminal.
 
@@ -1692,7 +1750,7 @@ _AVISO_WATCH = {
 
 def watch(cada=20):
     print(_("Watching. Nothing is reported until a session stops working. Ctrl-C to quit."), flush=True)
-    antes, pares, atascados = {}, {}, {}
+    antes, pares, atascados, ctxs = {}, {}, {}, {}
     primera = True
     try:
         while True:
@@ -1726,9 +1784,22 @@ def watch(cada=20):
                 sys.stdout.flush()
                 notifica(_("going in circles"), que + (f" \u00b7 {r['project']}"
                                                       if r["project"] else ""))
+            # Y el cuarto: el contexto que se acaba. Va el ultimo porque es el unico
+            # que no habla de lo que la sesion hace, sino de lo que le queda para
+            # seguir haciendolo — y el unico que se atiende compactando, no mirando.
+            for r, pct in (() if primera else contextos_nuevos(ctxs, filas)):
+                que = r["title"] or r["id"]
+                donde = f"  ({r['project']})" if r["project"] else ""
+                sys.stdout.write("\a" + _(
+                    "{hora}  \u25b0 {t} is at {p}% of its context{d}",
+                    hora=time.strftime("%H:%M"), t=que, p=pct, d=donde) + "\n")
+                sys.stdout.flush()
+                notifica(_("context running out"),
+                         _("{t} \u00b7 {p}% used", t=que, p=pct))
             antes = {r["id"]: r["state"] for r in filas}
             pares = pares_choque(filas)
             atascados = {r["id"]: r.get("stuck") or [] for r in filas}
+            ctxs = {r["id"]: nivel_ctx(r) for r in filas}
             primera = False
             time.sleep(cada)
     except KeyboardInterrupt:
@@ -5586,6 +5657,10 @@ def _T():
         "Watching. Nothing is reported until a session stops working. Ctrl-C to quit.":
             "Vigilando. No dice nada hasta que una sesión deje de trabajar. Ctrl-C para salir.",
         "{hora}  {t} \u2014 waiting on you{d}": "{hora}  {t} \u2014 te espera a ti{d}",
+        "{hora}  \u25b0 {t} is at {p}% of its context{d}":
+            "{hora}  \u25b0 {t} va por el {p}% de su contexto{d}",
+        "context running out": "el contexto se acaba",
+        "{t} \u00b7 {p}% used": "{t} \u00b7 {p}% gastado",
         "--every takes a number of seconds, 2 or more.":
             "--every quiere un número de segundos, 2 o más.",
         "context": "contexto",
@@ -5641,7 +5716,7 @@ def _T():
 _T()
 
 
-VERSION = "1.29.0"
+VERSION = "1.30.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

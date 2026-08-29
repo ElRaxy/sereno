@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.30.0
+
+**`--watch` now also tells you when a session is running out of context.**
+
+The watcher reported three transitions: a session stopping, two sessions starting to write in
+the same place, and one starting to go in circles. All three are about what a session **does**.
+The fourth is about what it has left to keep doing it — and it is the only one you answer by
+compacting rather than by looking.
+
+```
+22:03  ▰ Refactor payment webhooks is at 90% of its context  (strev-api)
+```
+
+It fires at **80%** and again at **90%**, and — like the other three — **on the crossing, not on
+the state**: half an hour sitting at 92% is one line, not one per poll. If the session compacts,
+the level drops on its own and the next climb is news again. A session whose ceiling is not known
+says nothing at all: `null` there means *not measured*, and treating it as full would invent an
+alert out of a missing number.
+
+```bash
+SERENO_CTX_AVISO=70,85 sereno --watch   # your own thresholds
+SERENO_CTX_AVISO=0 sereno --watch       # no context alerts at all
+```
+
+The decision is a pure function (`contextos_nuevos`), like the other three, for the same reason:
+the loop cannot be tested and this can. Six mutants, each turning the case red — including one
+that at first did **not**: storing the highest level ever seen instead of the current one would
+have silently killed the second alert of any session that compacts and fills up again. It only
+showed up once the test ran the actual loop.
+
 ## 1.29.0
 
 **Which CLI a session belongs to, and a handover box that remembers.**
