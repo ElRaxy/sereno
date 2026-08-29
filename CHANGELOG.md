@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.30.1
+
+**An adversarial audit of 1.22.0 → 1.29.0 found three things the tests were not holding.**
+
+Nothing user-visible changed. What changed is that three claims made by earlier releases are now
+actually defended, and one latent crash is closed.
+
+### The CI ran 27 of 44 test files
+
+`ci.yml` listed each test by hand, one `run:` per file — and **not one of the eleven files written
+between 1.22.0 and 1.29.0 was ever added**. Seventeen of forty-four never ran, and the twelve
+checks per PR were six jobs × two triggers over the same subset. Green the whole time.
+
+A hand-written list is a list you forget. `tests/todos.py` now collects the folder, runs each file
+in its own process (they all move `HOME` around) and prints the sentence from each docstring —
+which is exactly what the step names used to say. The workflow calls it once and cannot drift.
+
+### A session archived without being opened
+
+*"An orphan that doesn't open is no longer archived as resumed"* (1.27.0) could be undone by
+flipping one `if`, with every test green. The decision lived **twice** — once in the picker, once
+on the command line — and the test replicated it in its own body rather than calling it, so both
+`if True:` and `if False:` survived. The compensating source check anchored on the wrong lines.
+
+There is one copy now, `reanuda()`, and both routes call it. The test calls it too, instead of
+reimplementing it, and a case fails if a second copy ever appears.
+
+### The screen could go back to lying about how many tabs opened
+
+`abre_varias` returning the real count is the whole of 1.24.0. Replacing it with `len(pestanas)` —
+the bug it fixed — passed all 44 tests: one test measures "no launcher at all", another measures
+the opener, nobody measured the link in between propagating the zero. It does now, and `reopen`
+is checked to exit 1 without announcing anything.
+
+### And the last binary called bare
+
+`tmux_kill` had `check=False`, which ignores an exit code but does **not** protect against the
+binary being absent — that is a `FileNotFoundError`, and inside curses it takes the program with
+it. It was the twin of the crash fixed across 1.24–1.27, still standing, protected only by the
+fact that without tmux there are no rows to kill. Two lines, and a case that fails without them.
+
 ## 1.30.0
 
 **`--watch` now also tells you when a session is running out of context.**

@@ -1140,11 +1140,14 @@ Most guard against something that fails **silently**, which is why they exist at
 - Plus the TUI booting in a pty, `--watch` firing on the edge, `--find` reading only speech,
   unknown flags being reported, and a resumed session being followed to its live transcript.
 
-Two house rules:
+House rules:
 
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have.
+- **A test that isn't wired in doesn't count either.** The CI runs `tests/todos.py`, which
+  collects the whole folder — there is no hand-written list to forget. There used to be one, and
+  an audit found seventeen of forty-four files never ran while the checks stayed green.
 - **GitHub Actions are pinned by commit SHA**, and the repository enforces it, so a workflow
   edit using `@v4` will be rejected. Dependabot raises the bumps.
 - **Releases go through `./release.sh <version>`, never by hand** — see below.
