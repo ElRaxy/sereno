@@ -454,10 +454,22 @@ sereno --watch              # cada 20s
 sereno --watch --every 60
 ```
 
-Avisa de tres cambios, y solo de cambios: que una sesión **pare**, que dos **empiecen** a
-escribir en el mismo sitio, y que una **empiece** a dar vueltas. Veinte minutos del mismo bucle
-son una línea, no una por vuelta — y una sesión que ya estaba dando vueltas cuando arrancaste
-`--watch` es parte de la línea base, no una novedad.
+Avisa de cuatro cambios, y solo de cambios: que una sesión **pare**, que dos **empiecen** a
+escribir en el mismo sitio, que una **empiece** a dar vueltas, y que una **cruce** un escalón de
+contexto. Veinte minutos del mismo bucle son una línea, no una por vuelta — y una sesión que ya
+estaba dando vueltas cuando arrancaste `--watch` es parte de la línea base, no una novedad.
+
+El cuarto es el único aviso que no habla de lo que la sesión hace, sino de lo que le queda para
+seguir haciéndolo, y el único que se atiende compactando en vez de mirando. Salta cuando una
+sesión cruza el **80%** y otra vez al **90%** de su ventana de contexto — al cruzarlo, no
+mientras sigue por encima, así que media hora al 92% es una línea. Si compacta, el nivel baja
+solo y la siguiente subida vuelve a ser noticia. Una sesión cuyo tope no consta no dice nada:
+ahí un `null` es "no se midió", nunca "llena".
+
+```bash
+SERENO_CTX_AVISO=70,85 sereno --watch   # tus escalones
+SERENO_CTX_AVISO=0 sereno --watch       # sin avisos de contexto
+```
 
 Te llega un aviso de escritorio (`osascript` en macOS, `notify-send` en Linux — los dos ya
 están en tu sistema) y una línea por stdout, así que funciona por SSH y se puede canalizar. La
@@ -1027,6 +1039,7 @@ tu máquina si borras el script.
 | `SERENO_LANG` | tu locale | `en` o `es`. En macOS lee `AppleLocale` |
 | `SERENO_DEMO` | apagado | `1` para sesiones inventadas. Ponla antes de cualquier captura |
 | `SERENO_CTX_MAX` | deducido | tope de contexto en tokens, cuando la cascada falla |
+| `SERENO_CTX_AVISO` | `80,90` | los porcentajes a los que avisa `--watch`. Un `0` apaga el aviso de contexto |
 | `SERENO_SORT` | `activity` | con qué orden abre el selector: `context`, `project`, `memory`, `spend`. Un `-` delante lo invierte |
 | `SERENO_TMUX_SOCK` | `claude-code` | qué socket de tmux se lee |
 | `SERENO_REGISTRY` | `~/.claude/warp-sessions` | dónde vive el registro opcional del lanzador |

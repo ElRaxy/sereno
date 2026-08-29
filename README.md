@@ -476,10 +476,22 @@ sereno --watch              # every 20s
 sereno --watch --every 60
 ```
 
-It reports three transitions, and only transitions: a session **stopping**, two sessions
-**starting** to write in the same place, and one **starting** to go in circles. Twenty minutes
-of the same loop is one line, not one per poll — and a session that is already looping when you
-start `--watch` is part of the baseline, not news.
+It reports four transitions, and only transitions: a session **stopping**, two sessions
+**starting** to write in the same place, one **starting** to go in circles, and one **crossing**
+a context threshold. Twenty minutes of the same loop is one line, not one per poll — and a
+session that is already looping when you start `--watch` is part of the baseline, not news.
+
+The fourth one is the only alert that is not about what a session is doing but about how much
+room it has left to keep doing it, and the only one you answer by compacting rather than by
+looking. It fires when a session crosses **80%** and again at **90%** of its context window —
+at the crossing, not while it sits above it, so half an hour at 92% is one line. If the session
+compacts, the level drops on its own and the next climb is news again. A session whose ceiling
+is not known says nothing: `null` there means "not measured", never "full".
+
+```bash
+SERENO_CTX_AVISO=70,85 sereno --watch   # your own thresholds
+SERENO_CTX_AVISO=0 sereno --watch       # no context alerts at all
+```
 
 You get a desktop notification (`osascript` on macOS, `notify-send` on Linux — both already on
 your system) and a line on stdout, so it works over SSH and pipes fine. The first pass is
@@ -1033,6 +1045,7 @@ you deleting the script.
 | `SERENO_LANG` | your locale | `en` or `es`. On macOS it reads `AppleLocale` |
 | `SERENO_DEMO` | off | `1` for invented sessions. Set it before any screenshot |
 | `SERENO_CTX_MAX` | worked out | context ceiling in tokens, when the cascade gets it wrong |
+| `SERENO_CTX_AVISO` | `80,90` | the percentages `--watch` alerts on. `0` turns the context alert off |
 | `SERENO_SORT` | `activity` | which sort the picker opens on: `context`, `project`, `memory`, `spend`. A `-` in front inverts it |
 | `SERENO_TMUX_SOCK` | `claude-code` | which tmux socket to read |
 | `SERENO_REGISTRY` | `~/.claude/warp-sessions` | where the optional launcher registry lives |
