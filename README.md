@@ -801,6 +801,25 @@ header of each, and the title only of the handful it prints.
 Subagent transcripts (`agent-*.jsonl`) are counted apart: 285 files and 436 KB here, so folding
 them into the per-project split would have moved the file count without moving a megabyte.
 
+### `--dismiss` — empty the registry of what no longer runs
+
+The launcher registry (`~/.claude/warp-sessions/live/`) keeps one entry per session, and the ones
+whose process died stay there: those are the **orphans** the picker offers to resume. When you no
+longer want them offered, `--dismiss` archives every entry **whose process is gone** in one go,
+without touching a live one.
+
+```bash
+sereno --dismiss
+# Discarded 11 entries.
+```
+
+**It doesn't delete: it moves.** Entries go to `~/.claude/warp-sessions/dismissed/<date>/`, so
+undoing it is an `mv`. And it never touches the transcript: the conversation stays in
+`~/.claude/projects` and the session is still resumable from the history (TAB in the picker, or
+`claude --resume <id>`). All you lose is being offered it again when you open a terminal.
+
+Until 1.30.2 this flag did nothing if you had a session open — see the CHANGELOG.
+
 ### 🎭 Try it without touching your data
 
 ```bash

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.30.2
+
+**`--dismiss` did nothing on any machine that had a session open.**
+
+The flag is in `--help` and it discards the registry entries whose process is gone. It lived
+**after** the fork in `main()`, so with one session running — which is to say, always — the
+program printed the list of live sessions and exited **0 without discarding anything**.
+
+An option that doesn't exist gets reported (`test_flags.py`). This one existed and was
+swallowed in silence, which is worse: you have no reason to check.
+
+Discarding an orphan has nothing to do with whether other sessions are alive — an orphan is an
+entry whose process is dead — so the flag now answers before the fork, and it says so when
+there is nothing to discard instead of announcing that it discarded zero.
+
+The test calls `main()`, not `orphans()`: what was broken was not the function but where it was
+written, and a case against the function would have stayed green the whole time the bug was
+live. It also runs a real live process whose command line mentions `claude`, because
+`alive()` requires that on top of the pid — parking the guard would have tested nothing.
+
 ## 1.30.1
 
 **An adversarial audit of 1.22.0 → 1.29.0 found three things the tests were not holding.**

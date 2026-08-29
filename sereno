@@ -5678,6 +5678,9 @@ def _T():
             "--find quiere algo que buscar, de 2 caracteres o más.",
         "Nothing said about \u201c{q}\u201d in the transcripts searched.":
             "Nada dicho sobre \u201c{q}\u201d en los transcripts mirados.",
+        "Discarded one entry.": "Descartada una entrada.",
+        "Nothing to discard: no entry has lost its process.":
+            "Nada que descartar: ninguna entrada ha perdido su proceso.",
         "Watching. Nothing is reported until a session stops working. Ctrl-C to quit.":
             "Vigilando. No dice nada hasta que una sesión deje de trabajar. Ctrl-C para salir.",
         "{hora}  {t} \u2014 waiting on you{d}": "{hora}  {t} \u2014 te espera a ti{d}",
@@ -5740,7 +5743,7 @@ def _T():
 _T()
 
 
-VERSION = "1.30.1"
+VERSION = "1.30.2"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -6107,6 +6110,24 @@ def main():
     if argv and argv[0] == "--add":
         return cmd_add(argv[1:])
 
+    if "--dismiss" in argv:
+        # Aqui arriba y no abajo con el resto de lo que hace el registro: descartar
+        # huerfanas es tirar entradas cuyo PROCESO ESTA MUERTO, y eso no depende de que
+        # ademas haya sesiones vivas. Cuando vivia abajo, la rama de las vivas se comia
+        # el flag: con una sola sesion abierta —o sea, siempre— `--dismiss` imprimia la
+        # lista de vivas y salia con 0 **sin descartar nada**. Un flag que se traga en
+        # silencio es peor que uno que no existe: el que no existe se dice.
+        muertas = orphans()
+        if not muertas:
+            print(_("Nothing to discard: no entry has lost its process."))
+            return 0
+        archive(muertas, "dismissed")
+        # Una y muchas son dos cadenas, como en el resto de la interfaz desde la 1.29.0:
+        # "Descartadas 1 entradas" delata que nadie lo leyo.
+        print(_("Discarded one entry.") if len(muertas) == 1
+              else _("Discarded {n} entries.", n=len(muertas)))
+        return 0
+
     if "--disk" in argv:
         return cmd_disk()
 
@@ -6322,11 +6343,6 @@ def main():
 
     if hook:
         hook_line(None, items)
-        return 0
-
-    if "--dismiss" in argv:
-        archive(items, "dismissed")
-        print(_("Discarded {n} entries.", n=len(items)))
         return 0
 
     cabecera = ("\n\033[1m" + _("{n} session(s) died without leaving a process "

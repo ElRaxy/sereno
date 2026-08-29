@@ -794,6 +794,25 @@ título solo de las pocas que imprime.
 Los transcripts de subagentes (`agent-*.jsonl`) se cuentan aparte: aquí son 285 ficheros y 436 KB,
 así que meterlos en el reparto por proyecto habría movido el número de ficheros sin mover un MB.
 
+### `--dismiss` — vaciar el registro de lo que ya no corre
+
+El registro del lanzador (`~/.claude/warp-sessions/live/`) guarda una entrada por sesión, y las de
+las que murieron se quedan ahí: son las **huérfanas** que el selector ofrece para reanudar. Cuando
+ya no las quieres ofrecidas, `--dismiss` archiva de una vez todas las entradas **cuyo proceso está
+muerto**, sin tocar ninguna viva.
+
+```bash
+sereno --dismiss
+# Descartadas 11 entradas.
+```
+
+**No borra: mueve.** Las entradas van a `~/.claude/warp-sessions/dismissed/<fecha>/`, así que
+volver atrás es un `mv`. Y no toca el transcript: la conversación sigue en `~/.claude/projects` y
+la sesión se sigue pudiendo reanudar desde el historial (TAB en el selector, o
+`claude --resume <id>`). Lo único que se pierde es que te la vuelvan a ofrecer al abrir la terminal.
+
+Hasta la 1.30.2 este flag no hacía nada si tenías una sesión abierta — ver el CHANGELOG.
+
 ### 🎭 Probarlo sin tocar tus datos
 
 ```bash
