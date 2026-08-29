@@ -321,10 +321,16 @@ def tmux_list():
 
 
 def tmux_kill(name=None):
-    if name:
-        subprocess.run([TMUX_BIN, "-L", SOCK, "kill-session", "-t", name], check=False)
-    else:
-        subprocess.run([TMUX_BIN, "-L", SOCK, "kill-server"], check=False)
+    # El `check=False` ignora el codigo de salida, pero NO protege de que el binario no
+    # exista: eso es un `FileNotFoundError` que se lleva el programa por delante, y aqui
+    # dentro de curses se lo lleva sin dejar rastro en la pantalla. Es el mismo fallo que
+    # cazamos en las cuatro copias del `open` en 1.24-1.27; este era el ultimo que
+    # quedaba, protegido solo por que sin tmux no hay filas que matar.
+    orden = ["kill-session", "-t", name] if name else ["kill-server"]
+    try:
+        subprocess.run([TMUX_BIN, "-L", SOCK] + orden, check=False)
+    except OSError:
+        pass
 
 
 def meta_by_tmux():
@@ -2540,6 +2546,24 @@ def relevo(sel, arnes=None, con_conversacion=None, lanzador=None):
     if mismo_:
         aviso += " \u00b7 " + _("{n} are already {c}", n=len(mismo_), c=arnes)
     return arnes, aviso
+
+
+def reanuda(pestanas, config, archivar):
+    """Abre estas pestanas y archiva `archivar` SOLO si alguna se abrio. (cual, cuantas).
+
+    Vive aqui fuera porque la usan las DOS rutas que reanudan huerfanas —el selector y la
+    linea de comandos— y hasta ahora la decision estaba escrita dos veces. Dos copias de
+    un `if` son dos sitios donde invertirlo, y ninguna de las dos se podia llamar desde un
+    test sin montar la interfaz entera: la mitad que decide se acababa replicando en el
+    cuerpo del caso, que es como no probar nada.
+
+    Archivar es decir "esta ya esta resuelta", y a partir de ahi la lista no la vuelve a
+    ofrecer. Sin abrir, archivar es perderla.
+    """
+    cual, hechas = abre_varias(pestanas, config)
+    if hechas:
+        archive(archivar, "restored")
+    return cual, hechas
 
 
 def reopen(sel):
@@ -5716,7 +5740,7 @@ def _T():
 _T()
 
 
-VERSION = "1.30.0"
+VERSION = "1.30.1"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -6331,9 +6355,8 @@ def main():
                 # Se archiva DESPUES de abrir, y solo si se abrio. Al reves —como estaba—
                 # un `open` que falla dejaba las huerfanas marcadas como restauradas: no
                 # se abrian y ademas dejaban de ofrecerse, que es perderlas.
-                cual, hechas = abre_varias(pestanas, CONFIG_NAME)
+                cual, hechas = reanuda(pestanas, CONFIG_NAME, elegidas)
                 if hechas:
-                    archive(elegidas, "restored")
                     aviso = _("{n} resumed with {v}", n=hechas, v=cual)
                 else:
                     aviso = _("Nothing here can open several at once: "
@@ -6368,7 +6391,7 @@ def main():
         return 0
 
     path, pestanas = write_launch_config(resumable)
-    cual, hechas = abre_varias(pestanas, CONFIG_NAME)
+    cual, hechas = reanuda(pestanas, CONFIG_NAME, resumable + skipped)
     if not hechas:
         # Sin abrir no se archiva: si se archivara, estas huerfanas no volverian a
         # ofrecerse y no se habria reanudado ninguna.
@@ -6376,7 +6399,6 @@ def main():
                        "no Warp, no tmux around, no Terminal.app."))
         print(_("One at a time does work: ENTER on each one."))
         return 1
-    archive(resumable + skipped, "restored")
     print("\n" + _("Opening {n} tabs with {v} -> {p}", n=hechas, v=cual, p=path))
     return 0
 

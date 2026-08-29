@@ -1124,11 +1124,14 @@ algo que falla **en silencio**, que es justo por lo que existen:
 - Y el TUI arrancando en un pty, `--watch` avisando en el flanco, `--find` leyendo solo lo dicho,
   los flags desconocidos diciéndose, y una sesión reanudada seguida hasta el fichero que escribe.
 
-Dos normas de la casa:
+Normas de la casa:
 
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era.
+- **Un test que no está cableado tampoco vale.** El CI corre `tests/todos.py`, que recoge la
+  carpeta entera: no hay lista escrita a mano que se pueda olvidar. La había, y una auditoría
+  encontró diecisiete de cuarenta y cuatro ficheros que no corrían nunca con los checks en verde.
 - **Las actions van fijadas por SHA** y el repositorio lo exige, así que un cambio de workflow con
   `@v4` se rechaza. Las subidas de versión las abre Dependabot.
 

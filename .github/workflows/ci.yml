@@ -36,59 +36,10 @@ jobs:
           SERENO_DEMO=1 python sereno --json | python -c "import json,sys; assert json.load(sys.stdin)['sessions']"
           python sereno --demo --list
           python sereno --jsonn && exit 1 || test $? -eq 2
-      - name: el modo demo no toca datos reales
-        run: python tests/test_demo_aislado.py
-      - name: los textos traducidos casan con las claves
-        run: python tests/test_i18n.py
-      - name: el TUI arranca en un pty, pinta y sale
-        run: python tests/test_tui_arranca.py
-      - name: no abre conexiones ni lanza binarios sin declarar
-        run: python tests/test_sin_red.py
-      - name: el tope de contexto sale de la cascada, no de una conjetura
-        run: python tests/test_contexto.py
-      - name: --json no saca conversacion y sus campos son tipados
-        run: python tests/test_json_sin_conversacion.py
-      - name: --watch avisa en el flanco y no repite
-        run: python tests/test_watch_flanco.py
-      - name: --watch avisa al cruzar un escalon de contexto, y solo al cruzarlo
-        run: python tests/test_watch_contexto.py
-      - name: --find busca en lo dicho, no en el fichero
-        run: python tests/test_find_solo_lo_dicho.py
-      - name: un flag que no existe se dice, no se traga
-        run: python tests/test_flags.py
-      - name: una sesion reanudada se sigue hasta el fichero que escribe ahora
-        run: python tests/test_sesion_reanudada.py
-      - name: el titulo es lo ultimo que se recorta al estrechar la ventana
-        run: python tests/test_reparto_columnas.py
-      - name: el orden no baraja la lista y el filtro mira lo que se ve
-        run: python tests/test_orden.py
-      - name: dos sesiones en el mismo sitio se ven, y una sola no inventa nada
-        run: python tests/test_colisiones.py
-      - name: el consumo no cuenta dos veces la misma respuesta
-        run: python tests/test_uso.py
-      - name: el recorrido cuenta bucles y barridos, y ninguna fila se sale
-        run: python tests/test_recorrido.py
-      - name: ninguna celda del panel se pinta dos veces ni se sale del marco
-        run: python tests/test_panel_geometria.py
-      - name: la tecla del orden llega a gasto y la lista se pinta por lo consumido
-        run: python tests/test_orden_en_pantalla.py
-      - name: el titulo cabe en una linea y el id es el de la sesion
-        run: python tests/test_nombre_e_id.py
-      - name: la barra recuerda el pico y no lo cuela en el porcentaje
-        run: python tests/test_barra_pico.py
-      - name: una sesion que nunca contesto cae al fondo y no cuenta como reanudable
-        run: python tests/test_sesion_vacia.py
-      - name: los valores del panel se copian al pincharlos, y copian lo que toca
-        run: python tests/test_copiar_del_panel.py
-      - name: release.sh se niega a publicar algo que no es el programa
-        run: python tests/test_release_guardas.py
-      - name: el tap de Homebrew se bumpea solo, o no se toca
-        run: python tests/test_bump_tap.py
-      - name: las que ya no tienen directorio caen al fondo
-        run: python tests/test_sin_sitio.py
-      - name: los dos README cuentan lo mismo
-        run: python tests/test_readmes_a_la_par.py
-      - name: --disk cuenta lo que hay y no toca nada
-        run: python tests/test_disk.py
-      - name: nada usa sintaxis posterior a 3.8, que es el suelo del repo
-        run: python tests/test_suelo_38.py
+      # Toda la bateria, sin lista que mantener. Antes cada test era un `run:` escrito
+      # a mano y de los once escritos entre la 1.22.0 y la 1.29.0 no se cableo ninguno:
+      # diecisiete de cuarenta y cuatro no corrian nunca y los checks salian verdes.
+      # Lo que hay en `tests/` es lo que corre, y `todos.py` imprime la frase de cada
+      # fichero, que es lo que decia el `name:` de cada paso.
+      - name: toda la bateria de tests
+        run: python tests/todos.py

@@ -53,10 +53,11 @@ def main():
         ns["archive"] = lambda items, folder: (archivadas.extend(items)
                                                or real_archive(items, folder))
         _path, pestanas = ns["write_launch_config"](elegidas)
-        cual, hechas = ns["abre_varias"](pestanas, ns["CONFIG_NAME"])
-        # Se replica la decision tal cual la toma el programa: archivar SOLO si hechas.
-        if hechas:
-            ns["archive"](elegidas, "restored")
+        # La decision la toma el PROGRAMA, no este fichero: `reanuda` es la que abre y
+        # archiva, y es la que usan las dos rutas de verdad. Replicar aqui el `if hechas`
+        # —como hacia la primera version de este test— dejaba pasar invertirlo en el
+        # codigo: los dos mutantes (`if True:` y `if False:`) sobrevivian en verde.
+        cual, hechas = ns["reanuda"](pestanas, ns["CONFIG_NAME"], elegidas)
         if bool(archivadas) != deberia_archivar:
             fallos.append(f"con abre={abre} se archivaron {len(archivadas)}: "
                           f"se esperaba {'archivar' if deberia_archivar else 'NO archivar'}")
@@ -68,18 +69,21 @@ def main():
         if not abre and not sigue:
             fallos.append("sin abrir, el fichero de la huerfana ya no esta: perdida")
 
-    # Y la fuente no puede volver al orden de antes. Esto mira el CODIGO porque el caso
-    # de arriba replica la decision: si alguien la invierte en el programa, el test
-    # seguiria verde sin esto.
+    # Y la decision sigue estando en UN solo sitio. Cuando estaba escrita dos veces —una
+    # en el selector y otra en la linea de comandos— arreglarla en una copia dejaba la
+    # otra invertida, que es exactamente como se colo el fallo que esta release arregla.
     fuente = (RAIZ / "sereno").read_text()
-    for trozo, que in (
-        ('archive(elegidas, "restored")\n                    aviso = _("{n} resumed with',
-         "el selector de huerfanas archiva dentro del `if hechas`"),
-        ('    archive(resumable + skipped, "restored")\n    print("\\n" + _("Opening {n} tabs with',
-         "la ruta de linea de comandos archiva despues de abrir"),
-    ):
-        if trozo not in fuente:
-            fallos.append(f"cambio el orden: ya no se cumple que {que}")
+    restaurados = fuente.count('"restored")')
+    if restaurados != 1:
+        fallos.append(f"la decision de archivar como restaurada esta en {restaurados} "
+                      "sitios: vuelve a haber copias que se pueden invertir por separado")
+    if "def reanuda(" not in fuente:
+        fallos.append("ya no existe `reanuda`: la decision volvio a las rutas")
+    # Las dos rutas la llaman a ella, y ninguna abre por su cuenta.
+    for ruta in ('reanuda(pestanas, CONFIG_NAME, elegidas)',
+                 'reanuda(pestanas, CONFIG_NAME, resumable + skipped)'):
+        if ruta not in fuente:
+            fallos.append(f"una ruta dejo de pasar por `reanuda`: falta {ruta}")
 
     for f in fallos:
         print("FALLA:", f)

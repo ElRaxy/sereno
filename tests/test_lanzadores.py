@@ -18,7 +18,7 @@ las tres se comprueban una por una:
 Los dos ultimos se prueban EJECUTANDO un guion de verdad, no leyendolo: que el texto
 ponga `rm` no dice que lo que viene detras llegue a correr.
 """
-import os, pathlib, shlex, subprocess, sys, tempfile
+import contextlib, io, os, pathlib, shlex, subprocess, sys, tempfile
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
@@ -127,6 +127,46 @@ def main():
             continue
         if n != 0:
             fallos.append(f"{nombre} dice haber abierto {n} sin binario")
+
+    # 8. El eslabon de en medio: `abre_varias` PROPAGA lo que cuenta el abridor, no el
+    #    numero de pestanas que le pidieron. Es la pieza entera de la 1.24.0 —que la
+    #    pantalla no mienta— y sustituirla por `len(pestanas)`, o sea el bug de antes,
+    #    pasaba los 44 tests: el caso 7 mide el abridor y el 6 la eleccion, pero nadie
+    #    miraba que el 0 llegara hasta arriba.
+    ns3 = carga(tmp / "lanzar3")
+    tres = [("a", "echo 1", str(tmp)), ("b", "echo 2", str(tmp)), ("c", "echo 3", str(tmp))]
+    for cuantas, espera in ((0, 0), (2, 2), (3, 3)):
+        ns3["LANZADORES"] = {"tmux": (lambda: True, lambda pest, n=cuantas: n)}
+        cual, hechas = ns3["abre_varias"](tres, "cfg")
+        if (cual, hechas) != ("tmux", espera):
+            fallos.append(f"el abridor cuenta {cuantas} y abre_varias dice "
+                          f"{(cual, hechas)}: se esperaba ('tmux', {espera})")
+    # Y el 0 llega hasta la pantalla: `reopen` sale con 1 y NO anuncia haber abierto nada.
+    ns3["LANZADORES"] = {"tmux": (lambda: True, lambda pest: 0)}
+    ns3["_escribe_config"] = lambda nombre, pestanas: "/tmp/cfg.yaml"
+    ns3["pestanas_de"] = lambda sel: (tres, [])
+    salida = io.StringIO()
+    with contextlib.redirect_stdout(salida):
+        codigo = ns3["reopen"]([{"id": "x"}])
+    dicho = salida.getvalue()
+    if codigo != 1:
+        fallos.append(f"sin abrir ninguna, reopen sale con {codigo}: se esperaba 1")
+    if "3" in dicho or "tabs with" in dicho or "pestanas con" in dicho:
+        fallos.append(f"sin abrir ninguna, reopen anuncia haberlas abierto: {dicho!r}")
+
+    # 9. Y el ultimo binario que se llamaba a pelo: `tmux_kill`. Llevaba `check=False`,
+    #    que ignora el codigo de salida pero NO protege de que el binario no exista —eso
+    #    es un FileNotFoundError, y dentro de curses se lleva el programa sin dejar
+    #    rastro. Hoy no es alcanzable (sin tmux no hay filas que matar), pero eso es una
+    #    invariante de otro sitio, no una proteccion suya.
+    ns4 = carga(tmp / "lanzar4")
+    ns4["subprocess"] = SinBinario
+    for arg in (None, "una-sesion"):
+        try:
+            ns4["tmux_kill"](arg) if arg else ns4["tmux_kill"]()
+        except Exception as e:
+            fallos.append(f"tmux_kill({arg!r}) revienta sin su binario: "
+                          f"{type(e).__name__}: {e}")
 
     for f in fallos:
         print("FALLA:", f)
