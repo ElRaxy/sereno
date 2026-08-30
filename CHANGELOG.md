@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.33.3
+
+**La cola del transcript deja de releerse a si misma.** `ultimas_lineas` retrocedia en
+bloques de 256 KB, pero cada vuelta volvia a leer desde el nuevo tope **hasta el final**
+del fichero, asi que lo ya leido se leia otra vez. En un transcript de 8 MB con lineas
+enormes eso son **135 MB de disco por 8 MB de fichero, dieciseis veces**, y no en un
+sitio cualquiera: `pulso()` la llama con 80 lineas por CADA sesion en CADA refresco de la
+lista. Leyendo solo el trozo nuevo y uniendo al final: **de 44,7 ms a 5,8 ms, y de x16,5
+a x1,00** — ningun byte se lee dos veces. En un transcript normal no cambia nada (ya
+leia 256 KB de 4 MB); el caso malo es justo el que la funcion existe para cubrir.
+
+**Y devolvia una linea menos de las pedidas.** El filtro de blancos corria *despues* del
+corte, asi que el hueco que deja el salto de linea final del fichero —que estos
+transcripts siempre traen— se comia una plaza: `pulso()` pedia 80 y recibia 79. Con
+lineas en blanco por medio se comia una por cada una. Comprobado sobre 1.500
+combinaciones de fichero y numero de lineas: **cero discrepancias**, lo que devolvia
+antes es siempre el final de lo que devuelve ahora, y en 1.022 de las 1.500 ahora
+devuelve la linea que faltaba.
+
+- **`tests/test_ultimas_lineas.py`** — la funcion no tenia ni un caso propio, y de siete
+  cambios minimos aplicados a ella **los cuatro probados pasaban los 52 tests en verde**,
+  incluido volver al bug que le dio origen: una linea de `tool_result` de 96 KB dejaba al
+  lector sin nada que mirar y la sesion figuraba como parada. Fija que las lineas son las
+  ultimas y estan completas, que la primera no se pierde cuando el fichero cabe entero,
+  que un transcript que desaparece entre el `stat` y el `open` —la carrera de verdad con
+  una sesion viva— no tumba el repintado, y **mide el coste ademas del resultado**.
+
+- **`tests/test_hechos_colision.py`** — los ocho hechos que se le ensenan a una sesion
+  sobre la de al lado, uno a uno. Estaban cubiertos solo por los dos mas gruesos: de diez
+  cambios minimos a la funcion, **siete pasaban en verde**. Dos sesiones fuera de todo
+  repo pasaban a compartirlo —y con el, las ordenes anchas de cualquiera—; un `rm -r`
+  sobre una carpeta que no toca nadie mas gritaba igual; un tiempo que no se pudo medir
+  se leia como "hace cero segundos"; y la lista de ficheros del aviso podia sacar a
+  pantalla rutas de la sesion de al lado, que ademas de falso es trabajo de otro cliente.
+
+- **Catorce mutantes nuevos** en el catalogo (25 -> 39).
+
 ## 1.33.2
 
 **Un rango absurdo en el cuadro de cerrar ya no se come la RAM.** `parse_sel` recortaba
