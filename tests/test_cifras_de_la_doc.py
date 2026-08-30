@@ -60,7 +60,7 @@ AFIRMACIONES = [
      "CONTRIBUTING anuncia cuantos tests hay"),
     ("README.md", r"breaks ([\w-]+) real guards", "mutantes",
      "el README ingles anuncia cuantos mutantes rompe el catalogo"),
-    ("README.es.md", r"rompe ([\w-]+) guardas", "mutantes",
+    ("README.es.md", r"rompe ((?:\w+ y \w+|\w+)) guardas", "mutantes",
      "el README castellano anuncia cuantos mutantes rompe el catalogo"),
     ("CONTRIBUTING.md", r"breaks ([\w-]+) real guards", "mutantes",
      "CONTRIBUTING anuncia cuantos mutantes rompe el catalogo"),
