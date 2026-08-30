@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.33.0
+
+**The mutation ritual is now a test.**
+
+A green test doesn't say the guard works. It says nobody broke it today. The way to know is to
+break it on purpose and see whether anything complains — and doing that by hand over two days
+found eight guards with no net at all, every one of them behind a suite that was fully green:
+
+- a decision written **twice**, with the test replicating it in its own body instead of calling
+  it, so inverting it in the code passed;
+- a real count replaced by `len(list)` — the exact bug the previous release had fixed — passing
+  all forty-four tests;
+- a level stored as the highest ever seen instead of the current one, silently killing the second
+  alert of any session that compacts and fills up again.
+
+`tests/test_mutantes.py` holds twenty of those breakages as a catalogue: the guard, the minimal
+change that breaks it, and the test that has to catch it. Each one runs against a **copy** of the
+tree in a temp dir, never the real file — an interrupted run once left the program mutated on
+disk, and that is not a thing you want to discover later.
+
+It fails two ways, and both matter. **A mutant survives**: some guard has no net, either the case
+is missing or the one that exists measures something else. **An anchor no longer exists**: the
+code moved and the entry went stale — it is not skipped quietly, because a catalogue that ignores
+itself protects nothing.
+
+Twenty out of twenty die, in two seconds, so it runs in CI with everything else.
+
 ## 1.32.0
 
 **46 of the 200 rows in the history were nobody's sessions.**
