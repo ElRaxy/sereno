@@ -21,8 +21,12 @@ Lo que este test vigila, y por que cada cosa:
    escribir".
 4. **El formateo no dice 0.** `_mb` redondea a entero y todo lo pequeno salia como "0 MB",
    que es justo lo que se lee como "no ocupa" mientras se esta contando peso.
+5. **Lo que se recuperaria, por antiguedad.** El total dice lo que OCUPA; la pregunta de
+   quien mira este comando es cuanto ganaria. Los tramos son ANIDADOS —lo de mas de 90
+   dias esta dentro de lo de mas de 30— y esto lo comprueba envejeciendo ficheros a mano,
+   porque sumarlos seria contar dos veces la misma sesion.
 """
-import contextlib, io, json, os, pathlib, shutil, sys, tempfile
+import contextlib, io, json, os, pathlib, shutil, sys, tempfile, time
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ns = {"__name__": "sereno_test"}
@@ -81,6 +85,16 @@ def main():
         ns["PROJECTS"] = proyectos
         ns["_CACHE_SITIO"].clear()
         try:
+            # Envejecidas a mano: la maquina donde se escribio esto no tiene un solo
+            # transcript de mas de 28 dias, asi que sin esto los tramos salen a cero y
+            # el test aprobaria una funcion que no se ejecuta.
+            ahora = time.time()
+            edades = {UUIDS[0]: 400, UUIDS[1]: 60, UUIDS[2]: 2}
+            for jl in proyectos.rglob("*.jsonl"):
+                dias = edades.get(jl.stem)
+                if dias:
+                    os.utime(str(jl), (ahora - dias * 86400, ahora - dias * 86400))
+
             antes = foto(proyectos)
             h = ns["peso_historial"]()
 
@@ -101,6 +115,60 @@ def main():
             f(h["mayores"][0].get("titulo"), "la mas gorda tiene que decir cual es")
             f(all("_path" not in e for e in h["mayores"]),
               "no se filtran objetos internos en los hechos")
+
+            # 5. lo que se recuperaria, por antiguedad
+            por_edad = {e["dias"]: e for e in h["por_edad"]}
+            f(sorted(por_edad) == list(ns["_CORTES_EDAD"]),
+              "los tramos son %r y el programa dice %r"
+              % (list(ns["_CORTES_EDAD"]), sorted(por_edad)))
+            esperado_edad = {7: (2, tam["grande"] + tam["mediana"]),
+                             30: (2, tam["grande"] + tam["mediana"]),
+                             90: (1, tam["grande"]),
+                             365: (1, tam["grande"])}
+            for dias, (n_ses, n_bytes) in esperado_edad.items():
+                e = por_edad.get(dias) or {}
+                f(e.get("sesiones") == n_ses,
+                  "mas de %dd: %r sesiones, se esperaban %d"
+                  % (dias, e.get("sesiones"), n_ses))
+                f(e.get("bytes") == n_bytes,
+                  "mas de %dd: %r bytes, se esperaban %d"
+                  % (dias, e.get("bytes"), n_bytes))
+            # Anidados: apurar mas nunca puede devolver MAS. Si esto falla, las cifras se
+            # estarian pudiendo sumar, y sumarlas cuenta dos veces la misma sesion.
+            serie = [por_edad[d] for d in sorted(por_edad)]
+            f(all(a["sesiones"] >= b["sesiones"] and a["bytes"] >= b["bytes"]
+                  for a, b in zip(serie, serie[1:])),
+              "los tramos no van de mas a menos: %r"
+              % [(e["dias"], e["sesiones"]) for e in serie])
+            # La de dos dias no entra en ninguno: el corte mas bajo son siete.
+            f(por_edad[min(por_edad)]["bytes"] < h["bytes"],
+              "el tramo mas bajo se lleva TODO el historial, incluida la de anteayer")
+
+            # Una edad que no se pudo medir NO es una sesion vieja. Pasa de verdad:
+            # el fichero se lee dos veces —tamano y fecha— y entre las dos puede
+            # desaparecer. Contarla como vieja la mete en la lista de lo borrable por
+            # no haber podido mirarla, que es lo contrario de lo que hay que hacer con
+            # un dato que falta.
+            real = pathlib.Path.stat
+            visto = {}
+
+            def stat_que_se_va(self, *a, **kw):
+                if str(self) == str(sin_fecha):
+                    visto[str(self)] = visto.get(str(self), 0) + 1
+                    if visto[str(self)] > 1:
+                        raise OSError("desaparecio entre un stat y el siguiente")
+                return real(self, *a, **kw)
+
+            sin_fecha = proyectos / "-vivo" / (UUIDS[1] + ".jsonl")
+            pathlib.Path.stat = stat_que_se_va
+            try:
+                h2 = ns["peso_historial"]()
+            finally:
+                pathlib.Path.stat = real
+            por_edad2 = {e["dias"]: e for e in h2["por_edad"]}
+            f(por_edad2[7]["sesiones"] == 1,
+              "una sesion cuya fecha no se pudo leer cuenta como vieja: mas de 7d dice "
+              "%r sesiones y solo deberia quedar una" % por_edad2[7]["sesiones"])
 
             # 3. NO ESCRIBE. Ni un mtime, ni un byte.
             f(foto(proyectos) == antes,

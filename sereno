@@ -5606,6 +5606,15 @@ def _T():
         "{n} of them ({mb}) have no place to go back to.":
             "{n} de ellas ({mb}) ya no tienen sitio al que volver.",
         "No transcripts in {d}": "No hay transcripts en {d}",
+        "what you would get back, by how long untouched":
+            "lo que recuperar\u00edas, seg\u00fan lo que lleve sin tocarse",
+        "over {n}d": "m\u00e1s de {n}d",
+        "each tier includes the ones below \u00b7 deleting a transcript "
+        "takes that session out of --resume for good":
+            "cada tramo incluye los de abajo \u00b7 borrar un transcript deja esa "
+            "sesi\u00f3n fuera de --resume para siempre",
+        "deleting a transcript takes that session out of --resume for good":
+            "borrar un transcript deja esa sesi\u00f3n fuera de --resume para siempre",
         " with nowhere to go back to": " sin sitio al que volver",
         " total": " en total",
         " writing": " escribiendo",
@@ -5847,7 +5856,7 @@ def _T():
 _T()
 
 
-VERSION = "1.34.0"
+VERSION = "1.35.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5906,6 +5915,7 @@ def peso_historial(tope=20):
     inflado el numero de ficheros sin mover un MB.
     """
     por_proyecto, mayores = {}, []
+    cortes = {d: [0, 0] for d in _CORTES_EDAD}
     n = n_sub = n_tirar = 0
     bytes_tot = bytes_sub = bytes_sin_sitio = bytes_tirar = 0
     n_sin_sitio = 0
@@ -5946,6 +5956,10 @@ def peso_historial(tope=20):
                 edad = time.time() - jl.stat().st_mtime
             except OSError:
                 edad = None
+            for dias in _CORTES_EDAD:
+                if edad is not None and edad >= dias * 86400:
+                    cortes[dias][0] += 1
+                    cortes[dias][1] += tam
             mayores.append({"bytes": tam, "proyecto": clave, "id": jl.stem,
                             "sin_sitio": sin_sitio, "idle": edad, "_path": jl})
     mayores.sort(key=lambda x: -x["bytes"])
@@ -5968,9 +5982,22 @@ def peso_historial(tope=20):
         "proyectos": len(por_proyecto),
         "por_proyecto": sorted(por_proyecto.values(), key=lambda x: -x["bytes"]),
         "mayores": mayores[:tope],
+        # Cuanto pesa lo que lleva tiempo sin tocarse. Son tramos ANIDADOS —lo de mas
+        # de 90 dias esta dentro de lo de mas de 30—, que es lo que hace que se lean
+        # como "y si apuro un poco mas, cuanto mas": la pregunta que se hace quien mira
+        # este comando. Sumarlos seria contar dos veces.
+        "por_edad": [{"dias": d, "sesiones": cortes[d][0], "bytes": cortes[d][1]}
+                     for d in _CORTES_EDAD],
     }
 
 
+# Los cortes de "cuanto llevas sin tocar esto", y son cuatro por una razon medida: en
+# esta maquina hay 3,2 GB de historial y NADA pasa de 30 dias —lo mas viejo son 28—, asi
+# que unos cortes que empezaran en el mes dejaban el bloque vacio justo donde mas pesa.
+# La semana entra por eso. Se pintan solo los tramos con algo dentro, de manera que una
+# maquina con anos de historial ve los cuatro y esta ve uno.
+_CORTES_EDAD = (7, 30, 90, 365)
+_FILA_EDAD = "  %-14s %5d  %10s"
 _FILA_PROY = "  %-30s %5d  %10s%s"
 _FILA_NOW = "    %s %s  %s"
 _FILA_SES = "  %10s  %8s  %-46s %s%s"
@@ -6300,6 +6327,23 @@ def cmd_disk(tope=8):
         print()
         print(_("{n} of them ({mb}) have no place to go back to.",
                 n=h["sin_sitio"], mb=_peso(h["bytes_sin_sitio"])))
+    # Lo que faltaba: el numero de arriba dice lo que OCUPA, no lo que ganarias. Los
+    # tramos van anidados y de mas reciente a mas viejo, que es como se lee la pregunta
+    # de verdad — "y si apuro un poco mas, cuanto mas".
+    hay = [e for e in h["por_edad"] if e["sesiones"]]
+    if hay:
+        print()
+        print(_("what you would get back, by how long untouched"))
+        for e in hay:
+            print(_FILA_EDAD % (_("over {n}d", n=e["dias"]), e["sesiones"],
+                                _peso(e["bytes"])))
+        # Dicho una vez y sin adornos: este comando informa y no borra nada, pero quien
+        # lo lee esta a punto de borrar a mano, y una sesion sin transcript no vuelve.
+        print("  " + (_("each tier includes the ones below \u00b7 deleting a "
+                        "transcript takes that session out of --resume for good")
+                      if len(hay) > 1 else
+                      _("deleting a transcript takes that session out of --resume "
+                        "for good")))
     return 0
 
 

@@ -880,7 +880,21 @@ the heaviest sessions
      …
 
 102 of them (2.9 MB) have no place to go back to.
+
+what you would get back, by how long untouched
+  over 7d          337      2.5 GB
+  over 30d         210      1.9 GB
+  over 90d          95    788.0 MB
+  each tier includes the ones below · deleting a transcript takes that session out of --resume for good
 ```
+
+**The total tells you what it occupies; the last block tells you what you would get back.** Those
+are different questions, and only the second one is ever the reason you ran this. The tiers are
+nested — what is over 90 days is inside what is over 30 — so they read as "and if I push a little
+further, how much more", and adding them up would count the same session twice. Only tiers with
+something in them are printed: a machine with years of history sees four lines, a fresh one sees
+one. A session whose date could not be read counts in **none** of them; a file that vanished
+between two `stat` calls is not evidence that it is old.
 
 It **does not delete anything, does not offer to, and calls nothing garbage.** `sereno` writes to
 nothing that belongs to a session, and a heavy history is not a problem — it is a fact you decide
@@ -1256,7 +1270,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks sixty-seven real guards, one at a time, on a copy of the tree, and
+  `tests/test_mutantes.py` breaks seventy-three real guards, one at a time, on a copy of the tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.
 - **A test that isn't wired in doesn't count either.** The CI runs `tests/todos.py`, which

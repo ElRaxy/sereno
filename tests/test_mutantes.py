@@ -291,6 +291,26 @@ MUTANTES = [
      '        for linea in _tail(CODEX_INDEX, 512 * 1024).decode("utf-8", "replace").splitlines():',
      '        for linea in CODEX_INDEX.read_bytes().decode("utf-8", "replace").splitlines():',
      "test_sesiones_codex.py"),
+
+    # ── --disk: lo que recuperarias, no solo lo que ocupa ────────────────────
+    ("los tramos de antiguedad no acumulan y solo cuenta el mas alto",
+     "            for dias in _CORTES_EDAD:\n                if edad is not None and edad >= dias * 86400:",
+     "            for dias in _CORTES_EDAD[-1:]:\n                if edad is not None and edad >= dias * 86400:",
+     "test_disk.py"),
+    ("una fecha que no se pudo leer cuenta como sesion vieja",
+     "                if edad is not None and edad >= dias * 86400:",
+     "                if edad is None or edad >= dias * 86400:", "test_disk.py"),
+    ("el corte de antiguedad compara segundos contra dias",
+     "                if edad is not None and edad >= dias * 86400:",
+     "                if edad is not None and edad >= dias:", "test_disk.py"),
+    ("los tramos se invierten y sale lo RECIENTE en vez de lo viejo",
+     "                if edad is not None and edad >= dias * 86400:",
+     "                if edad is not None and edad <= dias * 86400:", "test_disk.py"),
+    ("el tramo cuenta sesiones pero no suma su peso",
+     "                    cortes[dias][1] += tam", "                    cortes[dias][1] += 0",
+     "test_disk.py"),
+    ("los cortes de antiguedad se quedan en uno solo",
+     "_CORTES_EDAD = (7, 30, 90, 365)", "_CORTES_EDAD = (7,)", "test_disk.py"),
 ]
 
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera

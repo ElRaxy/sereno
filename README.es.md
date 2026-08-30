@@ -855,7 +855,21 @@ las que más pesan
      …
 
 102 de ellas (2,9 MB) ya no tienen sitio al que volver.
+
+lo que recuperarías, según lo que lleve sin tocarse
+  más de 7d        337      2.5 GB
+  más de 30d       210      1.9 GB
+  más de 90d        95    788.0 MB
+  cada tramo incluye los de abajo · borrar un transcript deja esa sesión fuera de --resume para siempre
 ```
+
+**El total dice lo que OCUPA; el último bloque dice lo que recuperarías.** Son preguntas distintas,
+y solo la segunda es la razón por la que uno lanza esto alguna vez. Los tramos van anidados —lo de
+más de 90 días está dentro de lo de más de 30—, así que se leen como «y si apuro un poco más,
+cuánto más», y sumarlos contaría dos veces la misma sesión. Solo se pintan los tramos con algo
+dentro: una máquina con años de historial ve cuatro líneas y una recién estrenada ve una. Una
+sesión cuya fecha no se pudo leer no entra en **ninguno**: un fichero que desapareció entre dos
+`stat` no es prueba de que sea viejo.
 
 **No borra nada, no se ofrece a hacerlo y no llama basura a nada.** `sereno` no escribe en nada que
 sea de una sesión, y un historial gordo no es un problema: es un hecho con el que tú decides qué
@@ -1222,7 +1236,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe sesenta y siete guardas de verdad, una a una, sobre una copia del árbol, y
+  `tests/test_mutantes.py` rompe setenta y tres guardas de verdad, una a una, sobre una copia del árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.
 - **Un test que no está cableado tampoco vale.** El CI corre `tests/todos.py`, que recoge la
