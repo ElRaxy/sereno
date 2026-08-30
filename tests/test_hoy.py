@@ -115,7 +115,38 @@ def main():
                 fallos.append(f"parada hace {horas}h "
                               f"{'no sale' if deberia else 'sale'} como 'a medias'")
 
-        # ── 5. y el comando pinta sin reventar, en los dos idiomas ───────────
+        # ── 5. el orden de "a medias": lo que trabaja arriba, luego lo reciente ──
+        # Sin orden, la lista sale en el del `mtime` y mezcla lo que sigue en marcha con
+        # lo que te espera desde hace media hora. Al cerrar el dia se mira lo primero.
+        # `hoy` pasa a estar CORRIENDO un comando (un tool_use sin su tool_result) y
+        # ademas se toco antes que la otra: por mtime saldria segunda, y el orden bueno
+        # la pone primera. Si el caso no cruzara las dos cosas, no distinguiria nada —
+        # el barrido ya devuelve por mtime descendente y cualquier orden pasaria.
+        hoy.write_text("\n".join(json.dumps(x) for x in [
+            {"type": "user", "cwd": "/home/u/proyecto", "gitBranch": "main",
+             "message": {"role": "user", "content": "haz algo"}},
+            {"type": "assistant", "message": {
+                "role": "assistant", "model": "claude-opus-5",
+                "usage": {"cache_read_input_tokens": 1000, "input_tokens": 20},
+                "content": [{"type": "tool_use", "id": "tu_1", "name": "Bash",
+                             "input": {"command": "pytest"}}]}}]) + "\n")
+        os.utime(hoy, (ahora - 1800,) * 2)          # corriendo, tocada hace media hora
+        # Cinco minutos y no uno: por debajo de 90 segundos el transcript esta "caliente"
+        # y `escribe` la da por trabajando, asi que las dos serian de las que trabajan y
+        # el caso no separaria nada.
+        os.utime(lejana, (ahora - 300,) * 2)        # te espera, tocada hace cinco minutos
+        ns["_CACHE_DISCO"].clear()
+        j3 = ns["jornada"](corte=0, ahora=ahora)
+        orden = [(s["estado"], s["idle"]) for s in j3["a_medias"]]
+        if len(orden) != 2:
+            fallos.append(f"el caso del orden no monta dos filas: {orden!r}")
+        elif orden[0][0] == "waiting":
+            fallos.append(f"lo que esta corriendo no va primero: {orden!r}")
+        esperando = [i for e, i in orden if e == "waiting"]
+        if esperando != sorted(esperando):
+            fallos.append(f"entre las que esperan no manda lo mas reciente: {esperando!r}")
+
+        # ── 6. y el comando pinta sin reventar, en los dos idiomas ───────────
         import contextlib, io
         for lang in ("en", "es"):
             ns["LANG_UI"] = lang

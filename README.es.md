@@ -796,15 +796,13 @@ Hoy · desde las 05:00 · 5 sesiones en 4 proyectos
   la primera a las 10:07, la última a las 10:42
 
 por proyecto
-  VanguardIA                         2    hace 18m
-  anuubis-deploy                     1       ahora
-  sereno                             1       ahora
-  shopify-dropshipping               1     hace 6m
+  VanguardIA                   4       ahora
+  sereno                       1       ahora
 
 a medias
-  ● SEO maratelierdeestilo.com y Treatwell escribiendo          ahora   35%
-  ○ Tienda de Shopify                      te espera a ti     hace 6m   16%
-  ○ Warp error review                      te espera a ti    hace 35m   14%
+  ● Mejora continua de Sereno              sereno          escribiendo          ahora   47%
+  ● Tienda de Shopify                      VanguardIA      escribiendo          ahora   33%
+  ○ Warp error review                      VanguardIA      te espera a ti    hace 37m   14%
 ```
 
 **El día empieza a las cinco de la mañana, no a medianoche.** Quien cierra a la una y media
@@ -820,6 +818,10 @@ tiempo activo— y eso sí lee los transcripts enteros:
   VanguardIA                         2       ahora   89 respuestas · 37m
   sereno                             1       ahora   177 respuestas · 1h 01m
 ```
+
+En *a medias* manda el orden, no el reloj del disco: primero lo que sigue corriendo, debajo lo
+que te espera y por lo más reciente. La columna del proyecto solo aparece si la jornada tocó más
+de uno, y el ancho del título sale del más largo que se vaya a pintar.
 
 Sin `--usage` esos campos van a `null` y **no a cero**: nadie los ha medido, y un cero ahí se
 leería como "no trabajó". *A medias* usa el mismo corte que la lista (`estado_estable`: te espera
