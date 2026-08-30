@@ -18,6 +18,7 @@ optional and only add live process control; without them everything is read from
   sereno --usage         add what each session has burned (reads whole transcripts)
   sereno --disk          what the transcripts weigh, by project. Reads nothing else
   sereno --now           what every live session is running, all of them at once
+  sereno --hoy           what today added up to, by project (--today works too)
   sereno --watch         sit there and tell you when a session stops and waits on you
   sereno --find "text"   search every transcript for something that was actually said
   sereno --hook          one line if there is anything (for your shell rc)
@@ -5515,7 +5516,6 @@ def _T():
         "{mb} in {n} sessions \u00b7 {d}": "{mb} en {n} sesiones \u00b7 {d}",
         "  plus {n} subagent transcripts, {mb}":
             "  y {n} transcripts de subagentes, {mb}",
-        "by project": "por proyecto",
         "and {n} more projects, {mb} between them":
             "y {n} proyectos m\u00e1s, {mb} entre todos",
         "the heaviest sessions": "las que m\u00e1s pesan",
@@ -5679,6 +5679,20 @@ def _T():
         "Nothing said about \u201c{q}\u201d in the transcripts searched.":
             "Nada dicho sobre \u201c{q}\u201d en los transcripts mirados.",
         "Discarded one entry.": "Descartada una entrada.",
+        "Today \u00b7 since {h} \u00b7 {s} in {p}":
+            "Hoy \u00b7 desde las {h} \u00b7 {s} en {p}",
+        "one session": "una sesi\u00f3n",
+        "{n} sessions": "{n} sesiones",
+        "one project": "un proyecto",
+        "{n} projects": "{n} proyectos",
+        "Nothing touched since {h}.": "Nada tocado desde las {h}.",
+        "first at {a}, last at {b}": "la primera a las {a}, la \u00faltima a las {b}",
+        "by project": "por proyecto",
+        "{n} replies": "{n} respuestas",
+        "and {n} more projects": "y {n} proyectos m\u00e1s",
+        "still open": "a medias",
+        "`{p} --hoy --usage` adds what each project burned (reads whole transcripts)":
+            "`{p} --hoy --usage` a\u00f1ade lo que gast\u00f3 cada proyecto (lee los transcripts enteros)",
         "Nothing to discard: no entry has lost its process.":
             "Nada que descartar: ninguna entrada ha perdido su proceso.",
         "Watching. Nothing is reported until a session stops working. Ctrl-C to quit.":
@@ -5743,7 +5757,7 @@ def _T():
 _T()
 
 
-VERSION = "1.30.2"
+VERSION = "1.31.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5751,7 +5765,7 @@ VERSION = "1.30.2"
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
-    "--usage": 0, "--disk": 0, "--now": 0,
+    "--usage": 0, "--disk": 0, "--now": 0, "--hoy": 0, "--today": 0,
     "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
@@ -5961,6 +5975,152 @@ def cmd_now(cols=None, tope_eventos=3):
     return 0
 
 
+# ───────────────────── --hoy: el cierre de la jornada ─────────────────────
+# `--now` es la foto del instante y `--disk` el peso acumulado; ninguno contesta "que he
+# hecho hoy", que es la pregunta de las nueve de la noche. Esto la contesta con lo unico
+# que consta sin abrir nada caro: que transcripts se han TOCADO desde que empezo el dia.
+#
+# El dia empieza a las cinco de la manana y no a medianoche, a proposito: quien cierra a
+# la una y media pregunta por el trabajo que acaba de hacer, y un corte a las 00:00 le
+# contestaria con una jornada vacia justo cuando mas la mira.
+HORA_JORNADA = 5
+# Las columnas, aqui arriba: son formato y no frase, y en el cuerpo las confundiria con
+# texto que deberia pasar por `_()` — lo vigila `tests/test_i18n.py`.
+_FILA_ABIERTA = "  %s %-38s %-16s %9s%s"
+
+
+def corte_jornada(ahora=None):
+    """El epoch en que empezo la jornada de `ahora`. `SERENO_JORNADA=7` mueve la hora."""
+    crudo = _env("JORNADA")
+    hora = int(crudo) if crudo.isdigit() and 0 <= int(crudo) <= 23 else HORA_JORNADA
+    t = datetime.datetime.fromtimestamp(ahora if ahora is not None else time.time())
+    inicio = t.replace(hour=hora, minute=0, second=0, microsecond=0)
+    if t < inicio:                      # antes de la hora de corte, el dia es el de ayer
+        inicio -= datetime.timedelta(days=1)
+    return inicio.timestamp()
+
+
+def jornada(corte=None, ahora=None):
+    """Hechos de lo tocado desde que empezo el dia. Observa; no juzga y no formatea.
+
+    Igual que `peso_historial`, y por lo mismo (`.claude/rules/llm-decision-boundary`):
+    aqui solo salen cifras y enums, y quien decide que pintar es `cmd_hoy`. El filtro por
+    mtime va ANTES de abrir nada: de 877 transcripts, un dia normal toca menos de veinte,
+    y leer la cola de los otros 857 para tirarla seria el barrido que `sesiones_de_disco`
+    ya evita.
+    """
+    corte = corte_jornada(ahora) if corte is None else corte
+    fuera = {"corte": corte, "sesiones": [], "por_proyecto": [], "a_medias": [],
+             "n_sesiones": 0, "n_proyectos": 0, "primera": None, "ultima": None}
+    if DEMO or not PROJECTS.is_dir():
+        return fuera
+    cands = []
+    for p in PROJECTS.glob("*/*.jsonl"):        # sin `**`: los subagentes no son sesiones
+        if not _UUID.match(p.stem):
+            continue
+        try:
+            mt = p.stat().st_mtime
+        except OSError:
+            continue
+        if mt >= corte:
+            cands.append((mt, p))
+    cands.sort(reverse=True)
+    por_proy = {}
+    for mt, p in cands:
+        r = fila_de_transcript(p, mt)
+        pu = r.get("pulso") or {}
+        ctx = pu.get("ctx")
+        u = uso_de(r) if USO else None
+        s = {
+            "id": p.stem,
+            "titulo": r.get("title_full") or "",
+            "proyecto": r.get("proyecto") or "",
+            "estado": estado_estable(r),
+            "idle": round(r["idle"]) if r.get("idle") is not None else None,
+            "ctx": ctx,
+            "ctx_max": tope_contexto(pu.get("modelo"), ctx, pu.get("ventana_1m"),
+                                     pico_de(r)) if ctx else None,
+            # `None` y no cero cuando no se midio: sin `--usage` nadie ha leido el
+            # transcript entero, y un cero ahi se leeria como "no trabajo".
+            "turnos": u["turnos"] if u else None,
+            "activo": round(u["activo"]) if u else None,
+            "compacta": u["compacta"] if u else None,
+        }
+        fuera["sesiones"].append(s)
+        d = por_proy.setdefault(s["proyecto"], {"proyecto": s["proyecto"], "sesiones": 0,
+                                                "idle": None, "turnos": None,
+                                                "activo": None})
+        d["sesiones"] += 1
+        if s["idle"] is not None:
+            d["idle"] = s["idle"] if d["idle"] is None else min(d["idle"], s["idle"])
+        for campo in ("turnos", "activo"):
+            if s[campo] is not None:
+                d[campo] = (d[campo] or 0) + s[campo]
+    fuera["n_sesiones"] = len(fuera["sesiones"])
+    fuera["por_proyecto"] = sorted(por_proy.values(),
+                                   key=lambda d: (-d["sesiones"], d["proyecto"]))
+    fuera["n_proyectos"] = len(fuera["por_proyecto"])
+    # A medias = lo que al cerrar el dia sigue esperandote o con un comando a medio
+    # correr. El umbral NO se pone aqui: `estado_estable` ya separa lo que te espera de
+    # lo que se dio por parado, y meter un segundo corte daria dos respuestas distintas a
+    # la misma pregunta segun por donde se mire — que es lo que este programa existe para
+    # no hacer.
+    fuera["a_medias"] = [s for s in fuera["sesiones"]
+                         if s["estado"] in ("waiting", "writing", "in_command")]
+    if cands:
+        fuera["primera"], fuera["ultima"] = cands[-1][0], cands[0][0]
+    return fuera
+
+
+def _hora(epoch):
+    return time.strftime("%H:%M", time.localtime(epoch)) if epoch else ""
+
+
+def cmd_hoy(tope=10):
+    """Imprime lo que `jornada()` observo. Solo formatea: no vuelve a mirar nada."""
+    j = jornada()
+    if not j["n_sesiones"]:
+        print(_("Nothing touched since {h}.", h=_hora(j["corte"])))
+        return 1
+    # Una y muchas son dos cadenas, como en el resto de la interfaz desde la 1.29.0:
+    # "1 sesion(es)" delata que nadie lo leyo.
+    ses = (_("one session") if j["n_sesiones"] == 1
+           else _("{n} sessions", n=j["n_sesiones"]))
+    proy = (_("one project") if j["n_proyectos"] == 1
+            else _("{n} projects", n=j["n_proyectos"]))
+    print(_("Today \u00b7 since {h} \u00b7 {s} in {p}",
+            h=_hora(j["corte"]), s=ses, p=proy))
+    print("  " + _("first at {a}, last at {b}",
+                   a=_hora(j["primera"]), b=_hora(j["ultima"])))
+    print()
+    print(_("by project"))
+    for d in j["por_proyecto"][:tope]:
+        cola = ""
+        if d["turnos"] is not None:
+            cola = "   " + _("{n} replies", n=d["turnos"])
+            if d["activo"]:
+                cola += " \u00b7 " + _dur(d["activo"])
+        print(_FILA_PROY % (d["proyecto"][:30] or "?", d["sesiones"],
+                            _hace(d["idle"]) if d["idle"] is not None else "", cola))
+    resto = j["n_proyectos"] - len(j["por_proyecto"][:tope])
+    if resto > 0:
+        print("  " + _("and {n} more projects", n=resto))
+    if j["a_medias"]:
+        print()
+        print(_("still open"))
+        for s in j["a_medias"][:tope]:
+            pct = "  %3d%%" % round(100 * s["ctx"] / s["ctx_max"]) if s["ctx"] and s["ctx_max"] else ""
+            print(_FILA_ABIERTA % (
+                ICONO.get(s["estado"], "?"), recorta(s["titulo"] or s["id"][:8], 38),
+                ESTADO_LARGO(s["estado"]),
+                _hace(s["idle"]) if s["idle"] is not None else "", pct))
+    if not USO:
+        print()
+        print("  " + _("`{p} --hoy --usage` adds what each project burned "
+                       "(reads whole transcripts)", p=PROG))
+    return 0
+
+
 def _peso(b):
     """Bytes legibles. No se reusa `_mb`: redondea a entero porque nacio para la columna
     de RAM, donde 0,8 MB no existe — aqui hay proyectos de 800 KB y salian como "0 MB",
@@ -6133,6 +6293,9 @@ def main():
 
     if "--now" in argv:
         return cmd_now()
+
+    if "--hoy" in argv or "--today" in argv:
+        return cmd_hoy()
 
     if "--find" in argv:
         i = argv.index("--find")
