@@ -3153,6 +3153,28 @@ def hook_line(rows, items):
 INACTIVA = 3600          # a partir de aqui, "lleva parada un rato" y `d` la marca
 
 
+# U+FE0F, el selector de variacion que pide "pintame como emoji". Va DETRAS del
+# caracter al que modifica y vale cero columnas el solo, pero convierte en emoji —dos
+# columnas— a un simbolo que por su `east_asian_width` mediria una: `\u26a0` es 'N' y
+# `\u26a0\uFE0F` se pinta a dos. Sin mirarlo, cada emoji de esa familia (⚠️ ❤️ ▶️ ☑️,
+# los mas frecuentes en ingles tecnico) desplaza la fila una columna a la derecha.
+#
+# Aviso de alcance: esto NO se observo aqui. Se busco en los 605 titulos de esta
+# maquina y en las primeras 60 lineas de 250 transcripts, y no aparece ni uno — pero
+# los titulos los escribe el CLI a partir de lo que diga cada cual, y "en mi maquina no
+# pasa" no es un argumento en un repo que instala gente que no conozco.
+_VS16 = "\ufe0f"
+
+
+def _columnas(ch, siguiente=""):
+    """Columnas de UN caracter, mirando si el de despues lo convierte en emoji."""
+    if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Cf"):
+        return 0
+    if siguiente == _VS16:
+        return 2
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
 def ancho(s):
     """Columnas que ocupa un texto en pantalla, que no es su len().
 
@@ -3160,12 +3182,8 @@ def ancho(s):
     si se mide con len(); los titulos de Claude Code los llevan. Se resuelve con
     stdlib, sin depender de `wcwidth`.
     """
-    total = 0
-    for ch in s:
-        if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Cf"):
-            continue
-        total += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-    return total
+    return sum(_columnas(ch, s[i + 1] if i + 1 < len(s) else "")
+               for i, ch in enumerate(s))
 
 
 def recorta(s, cols):
@@ -3173,10 +3191,8 @@ def recorta(s, cols):
     if ancho(s) <= cols:
         return s
     out, usado = "", 0
-    for ch in s:
-        w = 0 if (unicodedata.combining(ch)
-                  or unicodedata.category(ch) in ("Mn", "Cf")) else (
-            2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1)
+    for i, ch in enumerate(s):
+        w = _columnas(ch, s[i + 1] if i + 1 < len(s) else "")
         if usado + w > cols - 1:
             break
         out += ch
@@ -5856,7 +5872,7 @@ def _T():
 _T()
 
 
-VERSION = "1.35.0"
+VERSION = "1.35.1"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

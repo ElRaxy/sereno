@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.35.1
+
+**Los emoji que se escriben con dos piezas ya no descuadran la fila.** El ancho del texto
+se medi­a en columnas y no en caracteres —un ideograma o un emoji valen dos—, pero se le
+escapaba una familia entera: los que se forman con el selector de variacion U+FE0F. `\u26a0`
+es de una columna por su `east_asian_width` y `\u26a0\ufe0f` se pinta a dos, asi que cada
+⚠️ ❤️ ▶️ ☑️ de un titulo desplazaba la fila una columna a la derecha. Son los mas
+frecuentes en ingles tecnico.
+
+**Aviso de alcance: esto no se observo aqui.** Se busco en los 605 titulos de esta maquina
+y en las primeras 60 lineas de 250 transcripts, y no aparece ni uno. Se arregla igual: los
+titulos los escribe el CLI con lo que diga cada cual, y "en mi maquina no pasa" no es un
+argumento en un repo que instala gente que no conocemos. Comprobado sobre 4.000 cadenas con
+CJK, emoji, combinantes e invisibles: **cero diferencias con la version anterior** fuera de
+los casos con selector.
+
+- **`tests/test_ancho_en_columnas.py`** — fija la propiedad de la que depende todo el
+  pintado y que ninguna funcion decia en voz alta: **lo recortado a N columnas nunca mide
+  mas de N**. Se comprueba sobre 3.006 cadenas por siete anchos, no sobre un puñado de
+  casos, porque basta que falle una vez para que la fila se salga de la ventana — y curses
+  no avisa cuando eso pasa: devuelve bien y el texto se pierde.
+
+- **Siete mutantes nuevos** en el catalogo (73 -> 80).
+
 ## 1.35.0
 
 **`--disk` dice ahora lo que RECUPERARIAS, no solo lo que ocupa.** Son preguntas

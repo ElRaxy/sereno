@@ -23,7 +23,7 @@ Requirements: Python 3.8 or newer, and nothing else. Sereno is one file and it s
 then fix it. Half the tests here exist because the first version of them passed something it
 shouldn't have.
 
-Since 1.33.0 that ritual is itself a test: `tests/test_mutantes.py` breaks seventy-three real guards,
+Since 1.33.0 that ritual is itself a test: `tests/test_mutantes.py` breaks eighty real guards,
 one at a time, on a copy of the tree, and fails if any mutant survives — or if an anchor no longer
 matches, which means the catalogue went stale and the entry has to be rewritten rather than
 quietly skipped. If you add a guard worth keeping, add its mutant.
@@ -45,7 +45,7 @@ quietly skipped. If you add a guard worth keeping, add its mutant.
 ## On AI-assisted code
 
 Sereno is written with Claude Code, and its author says so up front rather than being asked. That
-is also why the harness above exists: fifty-six tests, seventy-three mutants and a full run on
+is also why the harness above exists: fifty-seven tests, eighty mutants and a full run on
 every pull request are what make a claim about this code checkable by someone who did not write
 it. Contributions written the same way are welcome under exactly the same bar — the tests do not
 care who typed the line, and neither does the review.
