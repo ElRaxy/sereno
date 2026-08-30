@@ -5818,7 +5818,7 @@ def _T():
 _T()
 
 
-VERSION = "1.33.0"
+VERSION = "1.33.1"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -6056,7 +6056,11 @@ def cmd_now(cols=None, tope_eventos=3):
 HORA_JORNADA = 5
 # Las columnas, aqui arriba: son formato y no frase, y en el cuerpo las confundiria con
 # texto que deberia pasar por `_()` — lo vigila `tests/test_i18n.py`.
-_FILA_ABIERTA = "  %s %-38s %-16s %9s%s"
+# Rejilla propia y no la de `--disk`: alli el numero son ficheros (tres cifras) y va
+# seguido de un peso, aqui son sesiones (una cifra) y la fila quedaba con treinta
+# columnas de blanco en medio. Misma familia, distinta medida.
+_FILA_HOY_PROY = "  %-26s %3s  %10s%s"
+_FILA_HOY_ABIERTA = "  %s %s %s%s %9s%s"
 
 
 def corte_jornada(ahora=None):
@@ -6137,8 +6141,13 @@ def jornada(corte=None, ahora=None):
     # lo que se dio por parado, y meter un segundo corte daria dos respuestas distintas a
     # la misma pregunta segun por donde se mire — que es lo que este programa existe para
     # no hacer.
-    fuera["a_medias"] = [s for s in fuera["sesiones"]
-                         if s["estado"] in ("waiting", "writing", "in_command")]
+    # Lo que trabaja va primero y lo demas por lo mas reciente. Sin orden, la lista
+    # sale en el del `mtime` de los ficheros y mezcla las dos cosas: al cerrar el dia
+    # lo que se mira es que sigue en marcha, no en que orden se toco el disco.
+    fuera["a_medias"] = sorted(
+        [s for s in fuera["sesiones"]
+         if s["estado"] in ("waiting", "writing", "in_command")],
+        key=lambda s: (s["estado"] == "waiting", s["idle"] if s["idle"] is not None else 1e9))
     if cands:
         fuera["primera"], fuera["ultima"] = cands[-1][0], cands[0][0]
     return fuera
@@ -6172,19 +6181,32 @@ def cmd_hoy(tope=10):
             cola = "   " + _("{n} replies", n=d["turnos"])
             if d["activo"]:
                 cola += " \u00b7 " + _dur(d["activo"])
-        print(_FILA_PROY % (d["proyecto"][:30] or "?", d["sesiones"],
-                            _hace(d["idle"]) if d["idle"] is not None else "", cola))
+        print(_FILA_HOY_PROY % (recorta(d["proyecto"] or "?", 26), d["sesiones"],
+                                _hace(d["idle"]) if d["idle"] is not None else "", cola))
     resto = j["n_proyectos"] - len(j["por_proyecto"][:tope])
     if resto > 0:
         print("  " + _("and {n} more projects", n=resto))
     if j["a_medias"]:
         print()
         print(_("still open"))
-        for s in j["a_medias"][:tope]:
+        muestra = j["a_medias"][:tope]
+        # El titulo se rellena a lo que mide el mas largo de los que se van a pintar, no
+        # a un 38 fijo: con titulos cortos, ese numero abria un rio de blanco hasta el
+        # estado. Suelo y techo para que la columna no baile de una ejecucion a otra.
+        ancho_t = max(24, min(44, max(ancho(s["titulo"] or s["id"][:8])
+                                      for s in muestra)))
+        # El proyecto solo cuando la jornada toco mas de uno: repetir el mismo nombre en
+        # todas las lineas es tinta que no distingue nada.
+        con_proy = j["n_proyectos"] > 1
+        for s in muestra:
             pct = "  %3d%%" % round(100 * s["ctx"] / s["ctx_max"]) if s["ctx"] and s["ctx_max"] else ""
-            print(_FILA_ABIERTA % (
-                ICONO.get(s["estado"], "?"), recorta(s["titulo"] or s["id"][:8], 38),
-                ESTADO_LARGO(s["estado"]),
+            titulo = recorta(s["titulo"] or s["id"][:8], ancho_t)
+            # Cada cosa en SU columna: pegar el proyecto delante del estado en un solo
+            # campo relleno hacia el mensaje bailando segun lo largo que fuera el nombre.
+            proy = (rellena(recorta(s["proyecto"] or "", 14), 16) if con_proy else "")
+            print(_FILA_HOY_ABIERTA % (
+                ICONO.get(s["estado"], "?"), rellena(titulo, ancho_t), proy,
+                rellena(ESTADO_LARGO(s["estado"]), 16),
                 _hace(s["idle"]) if s["idle"] is not None else "", pct))
     if not USO:
         print()

@@ -90,6 +90,10 @@ MUTANTES = [
      'if s["estado"] in ("waiting", "writing", "in_command", "stopped")]',
      "test_hoy.py"),
 
+    ("'a medias' vuelve a salir en el orden del mtime",
+     '        key=lambda s: (s["estado"] == "waiting", s["idle"] if s["idle"] is not None else 1e9))',
+     "        key=lambda s: 0)", "test_hoy.py"),
+
     # ── lo desechable: nacido en un temporal no es trabajo ───────────────────
     ("las raices temporales casan por prefijo y no por tramo",
      '    return any(r == t or r.startswith(t + "/") for t in _raices_temporales())',

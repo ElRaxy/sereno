@@ -802,15 +802,13 @@ Today · since 05:00 · 5 sessions in 4 projects
   first at 10:07, last at 10:42
 
 by project
-  VanguardIA                         2     18m ago
-  anuubis-deploy                     1         now
-  sereno                             1         now
-  shopify-dropshipping               1      6m ago
+  VanguardIA                   4         now
+  sereno                       1         now
 
 still open
-  ● SEO maratelierdeestilo.com and Treatwell  writing            now   35%
-  ○ Shopify store                             waiting on you  6m ago   16%
-  ○ Warp error review                         waiting on you 35m ago   14%
+  ● Mejora continua de Sereno              sereno          writing                now   47%
+  ● Shopify store                          VanguardIA      writing                now   33%
+  ○ Warp error review                      VanguardIA      waiting on you     37m ago   14%
 ```
 
 **The day starts at five in the morning, not at midnight.** Someone closing at half past one is
@@ -826,6 +824,10 @@ and active time — and that does read whole transcripts:
   VanguardIA                         2         now   89 replies · 37m
   sereno                             1         now   177 replies · 1h 01m
 ```
+
+In *still open* the order is the point, not the disk clock: what is still running on top, what
+is waiting on you below it, most recent first. The project column only shows up if the day touched
+more than one, and the title width comes from the longest one about to be printed.
 
 Without `--usage` those fields are `null` and **not zero**: nobody measured them, and a zero there
 would read as "did no work". *Still open* uses the same cutoff as the list (`estado_estable`:

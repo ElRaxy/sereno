@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.33.1
+
+**`--hoy` se lee mejor.** No cambia lo que mide; cambia cómo se ve, que ayer se resolvió deprisa.
+
+- **Su propia rejilla.** Reutilizaba la de `--disk`, donde el número son ficheros (tres cifras)
+  seguidos de un peso. Aquí es una sola cifra, y la fila salía con treinta columnas de blanco
+  entre el nombre del proyecto y el número.
+- **El ancho del título sale del título más largo** que se va a pintar, con suelo y techo, en vez
+  de un 38 fijo que abría un río de blanco hasta el estado.
+- **El proyecto tiene su columna**, y solo aparece cuando la jornada tocó más de uno: repetir el
+  mismo nombre en todas las líneas es tinta que no distingue nada.
+- **Orden en «a medias»**: lo que sigue corriendo arriba, y debajo lo que te espera, por lo más
+  reciente. Antes salía en el del `mtime` de los ficheros, que mezcla las dos cosas.
+
+El caso que fija ese orden tuvo que cruzar estado y recencia —la que corre, tocada **antes**; la
+que espera, **después**— porque el barrido ya devuelve por `mtime` descendente y cualquier orden
+habría pasado. Dos intentos antes de que el mutante muriera: en el primero las dos filas eran
+"waiting" y no separaban nada; en el segundo, una tocada hace un minuto cuenta como *escribiendo*,
+porque por debajo de noventa segundos el transcript sigue caliente.
+
 ## 1.33.0
 
 **The mutation ritual is now a test.**
