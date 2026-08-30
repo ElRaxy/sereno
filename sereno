@@ -1967,6 +1967,11 @@ def parse_sel(text, rows):
             a, b = int(m.group(1)), int(m.group(2))
             if a > b:
                 a, b = b, a
+            # Recortar ANTES de generar. El filtro de abajo ya descarta lo que sobra,
+            # pero llega tarde: `1-50000000` sobre tres filas daba el resultado bueno
+            # tras 2,8 s y 2,3 GB de RAM, que en un equipo de 8 GB es la interfaz
+            # colgada por un dedo torpe. Recortado, el resultado es identico.
+            a, b = max(a, 1), min(b, len(rows))
             out += list(range(a - 1, b))
         elif part.isdigit():
             out.append(int(part) - 1)
@@ -5818,7 +5823,7 @@ def _T():
 _T()
 
 
-VERSION = "1.33.1"
+VERSION = "1.33.2"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
