@@ -311,6 +311,29 @@ MUTANTES = [
      "test_disk.py"),
     ("los cortes de antiguedad se quedan en uno solo",
      "_CORTES_EDAD = (7, 30, 90, 365)", "_CORTES_EDAD = (7,)", "test_disk.py"),
+
+    # ── medir en columnas: si esto falla, la fila se sale y curses no avisa ──
+    ("el selector de variacion deja de contarse y el emoji mide una columna",
+     "    if siguiente == _VS16:\n        return 2", "    if False:\n        return 2",
+     "test_ancho_en_columnas.py"),
+    ("los combinantes vuelven a ocupar columna",
+     '    if unicodedata.combining(ch) or unicodedata.category(ch) in ("Mn", "Cf"):\n        return 0',
+     "    if False:\n        return 0", "test_ancho_en_columnas.py"),
+    ("el ancho doble se mide como uno",
+     '    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1',
+     "    return 1", "test_ancho_en_columnas.py"),
+    ("recorta mira el caracter anterior en vez del siguiente",
+     '        w = _columnas(ch, s[i + 1] if i + 1 < len(s) else "")',
+     '        w = _columnas(ch, s[i - 1] if i else "")', "test_ancho_en_columnas.py"),
+    ("ancho deja de mirar el caracter siguiente",
+     '    return sum(_columnas(ch, s[i + 1] if i + 1 < len(s) else "")\n               for i, ch in enumerate(s))',
+     "    return sum(_columnas(ch) for ch in s)", "test_ancho_en_columnas.py"),
+    ("recorta se pasa una columna del ancho pedido",
+     "        if usado + w > cols - 1:", "        if usado + w > cols:",
+     "test_ancho_en_columnas.py"),
+    ("rellena cuenta caracteres en vez de columnas",
+     '    return s + " " * max(0, cols - ancho(s))',
+     '    return s + " " * max(0, cols - len(s))', "test_ancho_en_columnas.py"),
 ]
 
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
