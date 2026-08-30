@@ -763,6 +763,46 @@ La misma lectura que el panel, los mismos hechos, y ni un fichero más abierto p
 cola que cada una ya necesita. **La tecla `n` enseña lo mismo sin salir del selector** — lo compone una sola función, así que la pantalla y la terminal no pueden acabar diciendo cosas distintas de los mismos hechos. La cabecera no puede desmentir a las filas de debajo: se cuenta a
 partir de ellas, y hay un test que falla si alguna vez discrepan.
 
+### `--hoy`
+
+La pregunta de las nueve de la noche: **qué ha dado de sí el día**. `--now` es la foto del
+instante y `--disk` el peso acumulado; ninguno contesta esto.
+
+```
+Hoy · desde las 05:00 · 5 sesiones en 4 proyectos
+  la primera a las 10:07, la última a las 10:42
+
+por proyecto
+  VanguardIA                         2    hace 18m
+  anuubis-deploy                     1       ahora
+  sereno                             1       ahora
+  shopify-dropshipping               1     hace 6m
+
+a medias
+  ● SEO maratelierdeestilo.com y Treatwell escribiendo          ahora   35%
+  ○ Tienda de Shopify                      te espera a ti     hace 6m   16%
+  ○ Warp error review                      te espera a ti    hace 35m   14%
+```
+
+**El día empieza a las cinco de la mañana, no a medianoche.** Quien cierra a la una y media
+pregunta por el trabajo que acaba de hacer, y un corte a las 00:00 le contestaría *"nada tocado
+hoy"* justo cuando más lo mira — un fallo que se lee como una respuesta plausible, no como un
+error. `SERENO_JORNADA=7` mueve la hora.
+
+Es barato porque el filtro va por `mtime` **antes** de abrir nada: de 877 transcripts, un día
+normal toca menos de veinte. **`--hoy --usage`** añade lo que gastó cada proyecto —respuestas y
+tiempo activo— y eso sí lee los transcripts enteros:
+
+```
+  VanguardIA                         2       ahora   89 respuestas · 37m
+  sereno                             1       ahora   177 respuestas · 1h 01m
+```
+
+Sin `--usage` esos campos van a `null` y **no a cero**: nadie los ha medido, y un cero ahí se
+leería como "no trabajó". *A medias* usa el mismo corte que la lista (`estado_estable`: te espera
+hasta las seis horas, parada después), no uno propio: dos umbrales darían dos respuestas
+distintas a la misma pregunta según por dónde se mire.
+
 ### `--disk`
 
 Lo que pesan los transcripts, y dónde está ese peso. El panel da el tamaño de la fila bajo el

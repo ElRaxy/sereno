@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.31.0
+
+**`--hoy`: what today added up to, by project.** (`--today` works too.)
+
+`--now` is the snapshot of this instant. `--disk` is the accumulated weight. Neither answers the
+question you actually ask at the end of the day — what did I do today, and what is still hanging.
+
+```
+Today · since 05:00 · 5 sessions in 4 projects
+  first at 10:07, last at 10:42
+
+by project
+  VanguardIA                         2     18m ago
+  sereno                             1         now
+
+still open
+  ● SEO maratelierdeestilo.com and Treatwell  writing            now   35%
+  ○ Warp error review                         waiting on you 35m ago   14%
+```
+
+**The day starts at five in the morning.** Someone closing at half past one is asking about the
+work they just did; a midnight cutoff would answer *"nothing touched today"* exactly when they
+look hardest — and that failure reads as a plausible answer, not as an error. `SERENO_JORNADA=7`
+moves the hour.
+
+The `mtime` filter runs before anything is opened, so the command stays cheap: out of 877
+transcripts here, a normal day touches fewer than twenty. `--hoy --usage` adds replies and active
+time per project, and that one does read whole transcripts. Without it those fields are `null`,
+never `0`: nobody measured them, and a zero would read as "did no work".
+
+Same split as `--disk`: `jornada()` observes and returns typed facts, `cmd_hoy()` only prints
+them. And *still open* reuses the list's own cutoff instead of inventing a second one — a mutant
+proved the private threshold was dead code hiding behind `estado_estable`, and two thresholds
+would have meant two different answers to the same question.
+
 ## 1.30.2
 
 **`--dismiss` did nothing on any machine that had a session open.**

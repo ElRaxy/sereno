@@ -770,6 +770,46 @@ Same reading as the panel, same facts, no extra file opened per row beyond the t
 already needs. **`n` shows the same thing without leaving the picker** — one composer builds both, so the screen and the terminal cannot end up saying different things about the same facts. The header cannot drift from the rows underneath: it is counted from them, and a
 test fails if the two ever disagree.
 
+### `--hoy`
+
+The nine-o-clock question: **what did today add up to**. `--now` is the snapshot of this instant
+and `--disk` the accumulated weight; neither answers this one. (`--today` works too.)
+
+```
+Today · since 05:00 · 5 sessions in 4 projects
+  first at 10:07, last at 10:42
+
+by project
+  VanguardIA                         2     18m ago
+  anuubis-deploy                     1         now
+  sereno                             1         now
+  shopify-dropshipping               1      6m ago
+
+still open
+  ● SEO maratelierdeestilo.com and Treatwell  writing            now   35%
+  ○ Shopify store                             waiting on you  6m ago   16%
+  ○ Warp error review                         waiting on you 35m ago   14%
+```
+
+**The day starts at five in the morning, not at midnight.** Someone closing at half past one is
+asking about the work they just did, and a midnight cutoff would answer *"nothing touched today"*
+exactly when they look hardest — a bug that reads as a plausible answer rather than an error.
+`SERENO_JORNADA=7` moves the hour.
+
+It is cheap because the `mtime` filter runs **before** anything is opened: out of 877 transcripts,
+a normal day touches fewer than twenty. **`--hoy --usage`** adds what each project burned — replies
+and active time — and that does read whole transcripts:
+
+```
+  VanguardIA                         2         now   89 replies · 37m
+  sereno                             1         now   177 replies · 1h 01m
+```
+
+Without `--usage` those fields are `null` and **not zero**: nobody measured them, and a zero there
+would read as "did no work". *Still open* uses the same cutoff as the list (`estado_estable`:
+waiting on you up to six hours, stopped after), not one of its own — two thresholds would give two
+different answers to the same question depending on where you looked.
+
 ### `--disk`
 
 What the transcripts weigh, and where that weight is. The panel gives the size of the row under
