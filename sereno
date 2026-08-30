@@ -2725,21 +2725,34 @@ def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
         size = path.stat().st_size
     except OSError:
         return []
-    trozo, datos, pos = 256 * 1024, b"", size
+    # Cada vuelta lee SOLO el trozo nuevo y lo apila; unir al final. Releer desde el
+    # nuevo tope hasta el final —que es lo que se hacia— multiplica el disco por el
+    # numero de vueltas: un transcript de 8 MB en una sola linea se leia dieciseis
+    # veces, 135 MB, dentro del bucle que repinta la lista. Por lo mismo los saltos se
+    # cuentan por trozo y no sobre lo acumulado.
+    trozo, trozos, leido, saltos, pos = 256 * 1024, [], 0, 0, size
     try:
         with path.open("rb") as f:
-            while pos > 0 and len(datos) < tope:
-                pos = max(0, pos - trozo)
+            while pos > 0 and leido < tope:
+                cuanto = min(trozo, pos)
+                pos -= cuanto
                 f.seek(pos)
-                datos = f.read(size - pos)
-                if datos.count(b"\n") > cuantas or pos == 0:
+                b = f.read(cuanto)
+                trozos.append(b)
+                leido += len(b)
+                saltos += b.count(b"\n")
+                if saltos > cuantas or pos == 0:
                     break
     except OSError:
         return []
-    lineas = datos.split(b"\n")
+    lineas = b"".join(reversed(trozos)).split(b"\n")
     if pos > 0 and lineas:
         lineas = lineas[1:]                 # la primera puede venir partida
-    return [l.decode("utf-8", "replace") for l in lineas[-cuantas:] if l.strip()]
+    # El filtro va ANTES del corte. Al reves, el hueco que deja el salto final del
+    # fichero —y cualquier linea en blanco— se come una plaza de las `cuantas`
+    # pedidas: `pulso()` pedia 80 y recibia 79.
+    utiles = [l for l in lineas if l.strip()][-cuantas:]
+    return [l.decode("utf-8", "replace") for l in utiles]
 
 
 # ─────────────────── lo que lleva gastado, no lo que ocupa ─────────────────
@@ -5823,7 +5836,7 @@ def _T():
 _T()
 
 
-VERSION = "1.33.2"
+VERSION = "1.33.3"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

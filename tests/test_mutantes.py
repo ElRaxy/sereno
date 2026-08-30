@@ -162,6 +162,31 @@ MUTANTES = [
      '        "ficheros": tuple(sorted(comunes)),',
      '        "ficheros": tuple(sorted(fotra)),',
      "test_hechos_colision.py"),
+
+    # ── la cola del transcript, que es el bucle vivo del selector ────────────
+    ("la cola para en la primera vuelta: vuelve el bug de la linea que no cabe",
+     '                if saltos > cuantas or pos == 0:', '                if True:',
+     "test_ultimas_lineas.py"),
+    ("se descarta la primera linea aunque no venga partida",
+     "    if pos > 0 and lineas:", "    if lineas:", "test_ultimas_lineas.py"),
+    ("no se descarta la linea partida por el retroceso",
+     "    if pos > 0 and lineas:\n        lineas = lineas[1:]",
+     "    if False:\n        lineas = lineas[1:]", "test_ultimas_lineas.py"),
+    ("el hueco del salto final se come una de las lineas pedidas",
+     "    utiles = [l for l in lineas if l.strip()][-cuantas:]",
+     "    utiles = [l for l in lineas[-cuantas:] if l.strip()]",
+     "test_ultimas_lineas.py"),
+    ("se vuelve a releer desde el nuevo tope hasta el final en cada vuelta",
+     "                b = f.read(cuanto)\n                trozos.append(b)",
+     "                b = f.read(size - pos)\n                trozos = [b]",
+     "test_ultimas_lineas.py"),
+    ("el tope de lectura desaparece: una linea enorme se trae entera",
+     "            while pos > 0 and leido < tope:", "            while pos > 0:",
+     "test_ultimas_lineas.py"),
+    ("un transcript que desaparece a mitad revienta en vez de devolver nada",
+     '    except OSError:\n        return []\n    lineas = b"".join',
+     '    except OSError:\n        raise\n    lineas = b"".join',
+     "test_ultimas_lineas.py"),
 ]
 
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
