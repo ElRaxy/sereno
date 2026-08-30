@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""El texto de los dos cuadros que preguntan antes de abrir ventanas.
+
+`test_cuadro_relevo.py` comprueba que el cuadro CABE y que la eleccion llega entera a
+`relevo()`. Lo que dice cada linea no lo miraba nadie: de los cuatro cambios minimos
+probados sobre este compositor, los cuatro pasaban los 53 tests en verde.
+
+Y aqui el texto es la funcion. El cuadro es lo ultimo que se ve antes de abrir ventanas
+de otro CLI, asi que cada linea responde a una pregunta que no se puede dejar a medias:
+cuantas sesiones se entregan —el plural mal escrito hace dudar de si son estas o todas—,
+cuales son —si se recortan a cinco hay que DECIR que hay mas, o la lista miente por
+omision—, y por que no aparece el CLI que uno esperaba: uno de los motivos se arregla
+instalandolo y el otro no, asi que agruparlos bajo un mismo renglon deja al lector sin
+saber cual es el suyo.
+
+Los dos cuadros —`lineas_relevo` y `lineas_abrir`— comparten la mitad de arriba palabra
+por palabra: el titulo con su plural, las cinco primeras filas y el "y N mas". Es codigo
+duplicado a proposito, y por eso se comprueban juntos: un arreglo en uno que no llegue al
+otro es exactamente el fallo que esta forma invita a cometer.
+"""
+import os
+import pathlib
+import sys
+
+os.environ["SERENO_DEMO"] = "1"
+os.environ["SERENO_LANG"] = "en"
+RAIZ = pathlib.Path(__file__).resolve().parent.parent
+
+
+def filas(n, titulo="una sesion cualquiera"):
+    return [{"title_full": "%s %d" % (titulo, i), "name": "id%d" % i}
+            for i in range(n)]
+
+
+def textos(lineas):
+    return [t for t, _par in lineas]
+
+
+def main():
+    ns = {"__name__": "sereno_test"}
+    exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
+    lr = ns["lineas_relevo"]
+    fallos = []
+
+    # Los ausentes los decide el PATH de la maquina, que en el CI esta vacio y aqui no.
+    # Se fija a mano para que el test diga lo mismo en los dos sitios.
+    ausentes = [("codex", "not installed"), ("gemini", "not checked how to seed it")]
+    ns["ausentes_de_relevo"] = lambda destinos: list(ausentes)
+
+    # ── control positivo: sin esto, lo de abajo comprobaria listas vacias ────
+    base = textos(lr(filas(1), ["claude"], False, 60))
+    if not any("claude" in t for t in base):
+        print("FALLO: el destino ofrecido no aparece en el cuadro: %r" % (base,))
+        return 1
+    if not any("una sesion cualquiera 0" in t for t in base):
+        print("FALLO: la sesion que se entrega no aparece en el cuadro")
+        return 1
+
+    def comprueba(que, cond, extra=""):
+        if not cond:
+            fallos.append(que + (": " + extra if extra else ""))
+
+    # ── cuantas se entregan: el singular no es cosmetico ─────────────────────
+    una = " ".join(textos(lr(filas(1), ["claude"], False, 60)))
+    tres = " ".join(textos(lr(filas(3), ["claude"], False, 60)))
+    comprueba("con una sesion el titulo va en plural", "1 session to" in una, una[:60])
+    comprueba("con tres sesiones el titulo va en singular",
+              "3 sessions to" in tres, tres[:60])
+
+    # ── recortar la lista sin decirlo es mentir por omision ──────────────────
+    t8 = textos(lr(filas(8), ["claude"], False, 60, tope=5))
+    nombradas = [t for t in t8 if "una sesion cualquiera" in t]
+    comprueba("se pintan mas filas que el tope", len(nombradas) == 5,
+              "son %d" % len(nombradas))
+    comprueba("no se dice cuantas quedan fuera", any("3 more" in t for t in t8),
+              repr(t8))
+    t5 = textos(lr(filas(5), ["claude"], False, 60, tope=5))
+    comprueba("sale un 'y N mas' con la lista completa",
+              not any("more" in t for t in t5))
+
+    # ── los ausentes, cada uno con SU motivo ─────────────────────────────────
+    t = textos(lr(filas(1), ["claude"], False, 60))
+    linea_codex = [x for x in t if "codex" in x]
+    linea_gemini = [x for x in t if "gemini" in x]
+    comprueba("no se dice que codex no se puede ofrecer", linea_codex)
+    comprueba("no se dice que gemini no se puede ofrecer", linea_gemini)
+    if linea_codex and linea_gemini:
+        comprueba("los dos ausentes caen en el mismo renglon",
+                  linea_codex[0] != linea_gemini[0])
+        comprueba("codex no lleva su motivo", "not installed" in linea_codex[0])
+        comprueba("gemini no lleva su motivo",
+                  "not checked how to seed it" in linea_gemini[0])
+    # Dos CLI con el MISMO motivo si comparten renglon: es lo que hace legible la lista
+    # cuando faltan cuatro.
+    ausentes[:] = [("codex", "not installed"), ("gemini", "not installed")]
+    juntos = [x for x in textos(lr(filas(1), ["claude"], False, 60))
+              if "not installed" in x]
+    comprueba("dos ausentes por lo mismo se parten en dos renglones",
+              len(juntos) == 1 and "codex" in juntos[0] and "gemini" in juntos[0],
+              repr(juntos))
+    ausentes[:] = [("codex", "not installed"),
+                   ("gemini", "not checked how to seed it")]
+
+    # ── el toggle de la conversacion dice su estado, y lo dice en color ──────
+    off = lr(filas(1), ["claude"], False, 60)
+    on = lr(filas(1), ["claude"], True, 60)
+    k_off = [(t, p) for t, p in off if t.startswith("[k]")]
+    k_on = [(t, p) for t, p in on if t.startswith("[k]")]
+    comprueba("no hay linea de toggle de conversacion", k_off and k_on)
+    if k_off and k_on:
+        comprueba("el toggle no dice si esta activo", k_off[0][0] != k_on[0][0])
+        comprueba("el toggle se pinta igual activo que apagado",
+                  k_off[0][1] != k_on[0][1])
+    comprueba("con la conversacion activada no se avisa de que se escribe a disco",
+              any("on disk" in t for t in textos(on)))
+    comprueba("el aviso de disco sale con la conversacion apagada",
+              not any("on disk" in t for t in textos(off)))
+
+    # ── donde abrirlas: preguntar con un solo sitio es ruido ─────────────────
+    uno = textos(lr(filas(1), ["claude"], False, 60, donde="Warp",
+                    hay_donde=("Warp",)))
+    dos = textos(lr(filas(1), ["claude"], False, 60, donde="Warp",
+                    hay_donde=("Warp", "Terminal")))
+    comprueba("se pregunta donde abrir habiendo un solo sitio",
+              not any(t.startswith("[w]") for t in uno))
+    comprueba("no se pregunta donde abrir habiendo dos",
+              any(t.startswith("[w]") for t in dos))
+
+    # ── el titulo se recorta al ancho del cuadro ─────────────────────────────
+    # Solo el titulo: las lineas fijas —las teclas, los ausentes— no dependen del
+    # ancho y son las que lo FIJAN, que es lo que mide `test_cuadro_relevo.py`. Un
+    # titulo sin recortar, en cambio, estira el cuadro hasta sacarlo de la pantalla.
+    ancho = 40
+    puestas = [t for t in textos(lr([{"title_full": "t" * 300, "name": "x"}],
+                                    ["claude"], False, ancho))
+               if t.startswith("\u00b7 ")]
+    comprueba("el titulo no se pinta", puestas)
+    if puestas:
+        comprueba("el titulo se sale del cuadro",
+                  max(len(t) for t in puestas) <= ancho,
+                  "mide %d con ancho %d" % (max(len(t) for t in puestas), ancho))
+
+    # ── el cuadro gemelo: `lineas_abrir` copia la mitad de arriba ────────────
+    la = ns["lineas_abrir"]
+    una_a = " ".join(textos(la(filas(1), ["Warp"], 60)))
+    tres_a = " ".join(textos(la(filas(3), ["Warp"], 60)))
+    comprueba("abrir: con una sesion el titulo va en plural",
+              "1 session in" in una_a, una_a[:60])
+    comprueba("abrir: con tres sesiones el titulo va en singular",
+              "3 sessions in" in tres_a, tres_a[:60])
+    a8 = textos(la(filas(8), ["Warp"], 60, tope=5))
+    comprueba("abrir: se pintan mas filas que el tope",
+              len([x for x in a8 if "una sesion cualquiera" in x]) == 5)
+    comprueba("abrir: no se dice cuantas quedan fuera",
+              any("3 more" in x for x in a8), repr(a8))
+    puestas_a = [x for x in textos(la([{"title_full": "t" * 300, "name": "x"}],
+                                      ["Warp"], ancho))
+                 if x.startswith("\u00b7 ")]
+    comprueba("abrir: el titulo no se pinta", puestas_a)
+    if puestas_a:
+        comprueba("abrir: el titulo se sale del cuadro",
+                  max(len(x) for x in puestas_a) <= ancho)
+    comprueba("abrir: el sitio ofrecido no aparece",
+              any("Warp" in x for x in textos(la(filas(1), ["Warp"], 60))))
+
+    for f in fallos:
+        print("FALLO:", f)
+    print("ok" if not fallos else "%d fallos" % len(fallos))
+    return 1 if fallos else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
