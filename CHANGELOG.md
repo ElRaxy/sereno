@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.33.2
+
+**Un rango absurdo en el cuadro de cerrar ya no se come la RAM.** `parse_sel` recortaba
+el rango *despues* de generarlo, asi que `1-50000000` sobre tres sesiones devolvia la
+respuesta correcta tras **2,8 s y 2,3 GB de memoria**. En un equipo de 8 GB eso es la
+interfaz colgada por un dedo torpe, y el cuadro donde pasa es justo el que decide que
+sesiones se matan. Recortado antes de generarlo: **de 1.835 ms a 0,034 ms**, mismo
+resultado. Comprobado sobre 294 combinaciones de entrada y numero de filas: **cero
+discrepancias** con la version anterior.
+
+- **`tests/test_parse_sel.py`** — la funcion que traduce lo tecleado a filas que se van
+  a cerrar no tenia ni un caso, y es la de consecuencias mas caras del programa. Fija sus
+  dos fallos opuestos (entender de menos deja vivo lo que se queria cerrar, entender de
+  mas mata una sesion que trabajaba), que `None` no es `[]`, que la cuenta es de uno, que
+  una palabra desconocida invalida la seleccion entera en vez de adivinar, que los tres
+  atajos valen en los dos idiomas, y que **una fila cuyo estado no se pudo observar no
+  cuenta como parada**. Tambien vigila el coste, no solo el resultado.
+
+- **`tests/test_cifras_de_la_doc.py`** — las cifras que la documentacion afirma sobre si
+  misma se comprueban contra la realidad. El README llego a anunciar veintitres tests
+  habiendo cuarenta y ocho, y veinte mutantes habiendo veintiuno: nadie miente, la cifra
+  se escribe una vez y el siguiente test la deja atras, y encima va en letras, donde no
+  la ve ningun grep. Lee "forty-eight", "cuarenta y ocho" y "veinticinco", y lleva su
+  propio control positivo: si el conversor se rompe, se delata en vez de aprobarlo todo.
+
+- **Cuatro mutantes nuevos** en el catalogo (21 -> 25), los cuatro sobre `parse_sel`.
+
 ## 1.33.1
 
 **`--hoy` se lee mejor.** No cambia lo que mide; cambia cómo se ve, que ayer se resolvió deprisa.

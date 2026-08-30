@@ -32,6 +32,23 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
 # (que guarda es · ancla exacta en `sereno` · con que se sustituye · quien debe cazarlo)
 MUTANTES = [
+    # ── lo tecleado en el cuadro de cerrar ───────────────────────────────────
+    ("el rango se materializa entero antes de recortarlo",
+     "            a, b = max(a, 1), min(b, len(rows))",
+     "            a, b = a, b",
+     "test_parse_sel.py"),
+    ("una palabra que no es atajo se ignora en vez de invalidar la seleccion",
+     "        else:\n            return None                # una palabra que no es atajo: no adivinar",
+     "        else:\n            continue                   # una palabra que no es atajo: no adivinar",
+     "test_parse_sel.py"),
+    ("una fila sin estado observado cuenta como parada y se cerraria",
+     'return [i for i, r in enumerate(rows) if r["working"] is False]',
+     'return [i for i, r in enumerate(rows) if not r["working"]]',
+     "test_parse_sel.py"),
+    ("no entender lo tecleado se confunde con no seleccionar nada",
+     "    return out or None", "    return out",
+     "test_parse_sel.py"),
+
     # ── el aviso de contexto de --watch ──────────────────────────────────────
     ("el aviso de contexto se repite dentro del mismo escalon",
      'if n and n > antes.get(r["id"], 0):', 'if n and n >= antes.get(r["id"], 0):',
