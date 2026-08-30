@@ -531,6 +531,13 @@ sereno --json --all      # add the resumable history, the equivalent of pressing
 sereno --json | jq -r '.sessions[] | .session_id'   # to hand to `claude --resume`
 ```
 
+**`schema` tells you whether your script still works.** The envelope carries `sereno` (the
+program version) and `schema` (the contract version). They move for different reasons: `sereno`
+goes up for a colour or a typo, `schema` only when a field is renamed, retyped or removed. A new
+field does **not** bump it — nobody breaks by receiving more. So pin `schema`, not `sereno`: while
+it reads `1`, a script written today keeps reading the same fields. A test refuses to let a field
+disappear without the number moving with it.
+
 **`id` and `session_id` are not the same thing, and it is worth knowing which you want.** `id` is
 the **row key**: the tmux session name for a live one (`cc-VanguardIA-90a6fb95`) and the uuid for
 one from history — good for matching rows across two calls. `session_id` is the **Claude session
@@ -1249,7 +1256,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks thirty-nine real guards, one at a time, on a copy of the tree, and
+  `tests/test_mutantes.py` breaks forty-one real guards, one at a time, on a copy of the tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.
 - **A test that isn't wired in doesn't count either.** The CI runs `tests/todos.py`, which

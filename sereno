@@ -1434,6 +1434,16 @@ def estado_estable(r):
     return "waiting" if (r.get("idle") or 0) < 6 * INACTIVA else "stopped"
 
 
+# La version del CONTRATO, que no es la del programa. `sereno` sube de version por
+# cualquier motivo —un color, un texto, un arreglo de la cola del transcript— y quien
+# consume esta salida no puede deducir de ahi si sus campos siguen ahi. Este numero
+# sube SOLO cuando un campo cambia de nombre, de tipo o desaparece: mientras valga 1,
+# un script escrito hoy sigue leyendo lo mismo. Anadir un campo nuevo NO lo sube —
+# nadie se rompe por recibir de mas—, y eso tambien esta escrito en
+# `tests/test_json_sin_conversacion.py`, que es quien lo hace cumplir.
+ESQUEMA_JSON = 1
+
+
 def filas_json(rows):
     """Los mismos hechos que pinta la lista, sin una linea de conversacion dentro.
 
@@ -1519,7 +1529,8 @@ def filas_json(rows):
 
 
 def print_json(rows):
-    print(json.dumps({"sereno": VERSION, "sessions": filas_json(rows)},
+    print(json.dumps({"sereno": VERSION, "schema": ESQUEMA_JSON,
+                      "sessions": filas_json(rows)},
                      indent=2, ensure_ascii=False))
 
 

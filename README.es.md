@@ -554,6 +554,13 @@ done
 say "te reclama"
 ```
 
+**`schema` dice si tu script sigue valiendo.** El sobre trae `sereno` —la versión del programa— y
+`schema` —la del contrato—, y se mueven por motivos distintos: `sereno` sube por un color o por una
+errata; `schema`, solo cuando un campo cambia de nombre, de tipo o desaparece. Añadir uno nuevo
+**no** lo sube: nadie se rompe por recibir de más. Así que fija `schema` y no `sereno`: mientras
+valga `1`, un script escrito hoy sigue leyendo lo mismo. Un test se niega a dejar que un campo
+desaparezca sin que el número se mueva con él.
+
 Todos los campos son tipados y todos los estados salen de ese mismo enum, así que aquí nada tiene
 que interpretar prosa. `context_max` vale `null` cuando el tope no consta, que es por lo que la
 línea de tmux filtra por él antes de dividir.
@@ -1215,7 +1222,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe treinta y nueve guardas de verdad, una a una, sobre una copia del árbol, y
+  `tests/test_mutantes.py` rompe cuarenta y una guardas de verdad, una a una, sobre una copia del árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.
 - **Un test que no está cableado tampoco vale.** El CI corre `tests/todos.py`, que recoge la

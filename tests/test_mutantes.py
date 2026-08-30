@@ -187,6 +187,14 @@ MUTANTES = [
      '    except OSError:\n        return []\n    lineas = b"".join',
      '    except OSError:\n        raise\n    lineas = b"".join',
      "test_ultimas_lineas.py"),
+
+    # ── el contrato de --json, que leen scripts de otros ─────────────────────
+    ("--json deja de anunciar la version de su contrato",
+     '    print(json.dumps({"sereno": VERSION, "schema": ESQUEMA_JSON,\n                      "sessions": filas_json(rows)},',
+     '    print(json.dumps({"sereno": VERSION, "sessions": filas_json(rows)},',
+     "test_json_sin_conversacion.py"),
+    ("el numero de contrato se mueve sin que nadie lo declare",
+     "ESQUEMA_JSON = 1", "ESQUEMA_JSON = 2", "test_json_sin_conversacion.py"),
 ]
 
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
