@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.34.0
+
+**`--json` dice ahora la version de su CONTRATO, que no es la del programa.** El sobre
+anunciaba `sereno: "1.33.3"` y nada mas, y esa version sube por un color, un texto o un
+arreglo interno: quien consume la salida no podia deducir de ahi si sus campos seguian
+ahi. Ahora lleva ademas `schema`, que se mueve **solo** cuando un campo cambia de nombre,
+de tipo o desaparece. Anadir uno nuevo no lo sube —nadie se rompe por recibir de mas—,
+asi que la regla de uso es: **fija `schema`, no `sereno`**.
+
+```json
+{ "sereno": "1.34.0", "schema": 1, "sessions": [ ... ] }
+```
+
+El numero por si solo seria una promesa sin vigilante. La cumple
+`tests/test_json_sin_conversacion.py`, que ademas de los 32 campos de la fila que ya
+congelaba cubre el **sobre** —ni una clave de mas donde un script hace
+`for s in d["sessions"]`—, comprueba que el programa y el test describen el mismo
+esquema, y cuando un campo desaparece lo dice con el arreglo escrito en el propio fallo.
+
+**Y red para los tres compositores de texto que no la tenian.** Los tres componen lo
+unico que sobrevive a una tuberia: cuando el color se pierde, un estado que solo viviera
+en el par de color deja nueve lineas identicas. Medido por mutacion antes de escribir
+nada, de los cambios minimos aplicados a los tres **todos menos uno pasaban los 53 tests
+en verde**.
+
+- **`tests/test_cuadros_de_eleccion.py`** — `lineas_relevo` y su gemelo `lineas_abrir`
+  comparten la mitad de arriba palabra por palabra: el titulo con su plural, las cinco
+  primeras filas y el "y N mas". Van juntos a proposito, porque un arreglo en uno que no
+  llegue al otro es justo el fallo que esa duplicidad invita a cometer. Fija lo que el
+  cuadro tiene que DECIR antes de abrir ventanas de otro CLI: cuantas se entregan, que
+  una lista recortada avisa de lo que deja fuera, y que cada CLI ausente sale con SU
+  motivo — uno se arregla instalandolo y el otro no.
+
+- **`tests/test_lineas_now.py`** — el estado va escrito y no solo en color, el reparto de
+  la cabecera —cuantas trabajan, cuantas te esperan— no se invierte, el "hace tanto" no
+  sale en las que estan trabajando, y una sesion sin llamadas lo dice en vez de quedarse
+  muda.
+
+- **`tests/test_sesiones_codex.py`** — el indice de Codex solo crece, asi que la misma
+  sesion aparece muchas veces: se deduplica por id quedandose con lo ULTIMO. Una linea a
+  medias —Codex escribiendo mientras leemos— se salta en vez de dejar la lista vacia, y
+  se lee la cola y no el fichero entero, que es la razon de leer el indice en vez de los
+  rollouts.
+
+- **Veintiseis mutantes nuevos** en el catalogo (41 -> 67).
+
 ## 1.33.3
 
 **La cola del transcript deja de releerse a si misma.** `ultimas_lineas` retrocedia en
