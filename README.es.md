@@ -18,7 +18,6 @@ Un fichero de Python · cero dependencias · Claude Code, Codex, Gemini, Antigra
 [![Dependencias](https://img.shields.io/badge/dependencias-ninguna-5fff5f?style=flat-square&labelColor=16161e)](#-instalación)
 [![Instalación](https://img.shields.io/badge/instalar-un%20fichero-ffaf00?style=flat-square&labelColor=16161e)](#-instalación)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-af87ff?style=flat-square&labelColor=16161e)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/ElRaxy/sereno?style=flat-square&labelColor=16161e&color=ffaf00)](https://github.com/ElRaxy/sereno/stargazers)
 
 [English](README.md) · **Español**
 
