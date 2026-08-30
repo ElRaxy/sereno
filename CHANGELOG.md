@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.35.0
+
+**`--disk` dice ahora lo que RECUPERARIAS, no solo lo que ocupa.** Son preguntas
+distintas, y solo la segunda es la razon por la que uno lanza este comando alguna vez.
+El total decia "3,2 GB en 478 sesiones" y ahi se acababa: quien lo miraba seguia sin
+saber por donde empezar.
+
+```
+lo que recuperarias, segun lo que lleve sin tocarse
+  mas de 7d        337      2.5 GB
+  mas de 30d       210      1.9 GB
+  mas de 90d        95    788.0 MB
+  cada tramo incluye los de abajo · borrar un transcript deja esa sesion fuera de --resume para siempre
+```
+
+Tres decisiones que no son de estilo:
+
+- **Los tramos van anidados** —lo de mas de 90 dias esta dentro de lo de mas de 30— para
+  que se lean como "y si apuro un poco mas, cuanto mas". Sumarlos contaria dos veces la
+  misma sesion, y el test lo comprueba: apurar nunca puede devolver mas.
+- **El corte mas bajo es una semana y no un mes.** En la maquina donde se escribio esto
+  hay 3,2 GB de historial y NADA pasa de 30 dias —lo mas viejo son 28—, asi que unos
+  cortes que empezaran en el mes dejaban el bloque vacio justo donde mas pesa. Se pintan
+  solo los tramos con algo dentro: una maquina con anos ve cuatro lineas y esta ve una.
+- **Una sesion cuya fecha no se pudo leer no entra en ninguno.** El fichero se mira dos
+  veces —tamano y fecha— y entre las dos puede desaparecer; que no se haya podido mirar
+  no es prueba de que sea vieja, y contarla como tal la mete en la lista de lo borrable
+  por el motivo contrario al que deberia.
+
+Sigue sin borrar nada, sin ofrecerse a hacerlo y sin llamar basura a nada. Lo unico que
+se anade es la advertencia de que un transcript borrado deja esa sesion fuera de
+`--resume` para siempre — dicha una vez, porque quien lee esto esta a punto de borrar a
+mano.
+
+- **Seis mutantes nuevos** en el catalogo (67 -> 73), y `tests/test_disk.py` envejece
+  ficheros a mano para probarlo: sin eso los tramos salen a cero en esta maquina y el
+  test aprobaria una funcion que no se ejecuta.
+
 ## 1.34.0
 
 **`--json` dice ahora la version de su CONTRATO, que no es la del programa.** El sobre
