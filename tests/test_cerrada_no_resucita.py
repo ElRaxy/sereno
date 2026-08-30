@@ -57,7 +57,7 @@ def main():
     transcript(ns, tmp, a)
     transcript(ns, tmp, b)          # esta nadie la cierra: es el control positivo
     (ns["LIVE"] / "999-1.env").write_text(
-        f"id={a}\ncwd=/tmp\npid=999\ntmux_session=cc-demo-1\n")
+        f"id={a}\ncwd=/home/u/proyecto\npid=999\ntmux_session=cc-demo-1\n")
     viva = [("cc-demo-1", int(time.time()) - 60, False, "una sesion", "999")]
     ns["tmux_list"] = lambda *x, **k: viva
     ns["tmux_kill"] = lambda *x, **k: viva.clear()

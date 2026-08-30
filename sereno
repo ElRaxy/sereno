@@ -1021,6 +1021,42 @@ def hay_sitio(ruta):
     return existe
 
 
+# ────────────── lo que nacio para tirarse no es trabajo ──────────────
+# Un `claude` lanzado por un script en un directorio temporal —evaluadores, optimizadores
+# de skills, pruebas de un harness— deja el mismo transcript que una sesion de verdad. En
+# esta maquina eran 46 de 200 filas del historial: veintidos "Score how well the response
+# satisfies…" y veintidos "Complete the following task…", todas del mismo optimizador.
+#
+# No se detectan por el titulo, que es adivinar: se detectan por DONDE nacieron. Su `cwd`
+# cuelga del temporal del sistema, un sitio del que nadie reanuda nada porque ya no existe
+# al dia siguiente.
+def _raices_temporales():
+    """Los prefijos que son 'directorio de usar y tirar' en esta maquina. Una vez."""
+    if "_v" not in _raices_temporales.__dict__:
+        crudo = [os.environ.get("TMPDIR", ""), "/tmp", "/var/tmp",
+                 "/var/folders", "/private/var/folders", "/private/tmp"]
+        vistos = []
+        for r in crudo:
+            r = (r or "").rstrip("/")
+            if r and r not in vistos:
+                vistos.append(r)
+        _raices_temporales._v = tuple(vistos)
+    return _raices_temporales._v
+
+
+def de_usar_y_tirar(ruta):
+    """True si esa ruta cuelga del temporal del sistema. Un hecho, no un juicio.
+
+    Se mira la RUTA y no el contenido a proposito: el titulo de una sesion sintetica se
+    parece al de una real lo suficiente como para que filtrar por ahi sea adivinar, y
+    ademas cambiaria con cada version del script que las lanza. Donde nacio, no.
+    """
+    if not ruta:
+        return False
+    r = str(ruta).rstrip("/")
+    return any(r == t or r.startswith(t + "/") for t in _raices_temporales())
+
+
 def _proyecto_de_dir(nombre):
     """`-home-you-code-my-project` -> `/home/you/code/my-project`.
 
@@ -1100,6 +1136,10 @@ def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True):
     ahora, cands = time.time(), []
     for p in PROJECTS.glob("*/*.jsonl"):     # sin `**`: los `subagents/` no se reanudan
         if p.stem in vistos or not _UUID.match(p.stem):
+            continue
+        # El nombre del directorio ya dice donde nacio, asi que esto no cuesta abrir
+        # nada: es el mismo criterio que el filtro por mtime de abajo.
+        if de_usar_y_tirar(_proyecto_de_dir(p.parent.name)):
             continue
         try:
             mt = p.stat().st_mtime
@@ -1530,9 +1570,15 @@ def buscar(aguja, limite=200, todo=False):
     if DEMO or not PROJECTS.is_dir():
         return []
     a = aguja.lower().encode("utf-8", "replace")
-    cands = []
+    cands, tirados = [], 0
     for p in PROJECTS.glob("*/*.jsonl"):
         if not _UUID.match(p.stem):
+            continue
+        # Las de usar y tirar se saltan por defecto —son evaluadores y optimizadores, no
+        # cosas que dijeras tu— pero `--all` las mira: ese flag significa "mira todo", y
+        # que signifique otra cosa segun el dia es peor que no tenerlo.
+        if not todo and de_usar_y_tirar(_proyecto_de_dir(p.parent.name)):
+            tirados += 1
             continue
         try:
             cands.append((p.stat().st_mtime, p))
@@ -1558,6 +1604,13 @@ def buscar(aguja, limite=200, todo=False):
     if omitidos:
         print(_("(the {n} most recent; {f} older ones left out \u2014 add --all)",
                 n=len(cands), f=omitidos), file=sys.stderr)
+    # Lo mismo con las de usar y tirar: se saltan, y por eso se dicen. Un buscador que
+    # calla lo que no mira contesta "no se dijo nunca" cuando la verdad es "no lo mire".
+    if tirados:
+        print(_("(one throwaway session from a temp dir not searched \u2014 add --all)")
+              if tirados == 1 else
+              _("({n} throwaway sessions from a temp dir not searched \u2014 add --all)",
+                n=tirados), file=sys.stderr)
 
     salida = []
     for mt, p in cands:
@@ -5685,6 +5738,14 @@ def _T():
         "{n} sessions": "{n} sesiones",
         "one project": "un proyecto",
         "{n} projects": "{n} proyectos",
+        "(one throwaway session from a temp dir not searched \u2014 add --all)":
+            "(una sesi\u00f3n de usar y tirar de un temporal sin mirar \u2014 a\u00f1ade --all)",
+        "  plus one throwaway session born in a temp dir, {mb}":
+            "  y una sesi\u00f3n de usar y tirar nacida en un temporal, {mb}",
+        "({n} throwaway sessions from a temp dir not searched \u2014 add --all)":
+            "({n} sesiones de usar y tirar de un temporal sin mirar \u2014 a\u00f1ade --all)",
+        "  plus {n} throwaway sessions born in a temp dir, {mb}":
+            "  y {n} sesiones de usar y tirar nacidas en un temporal, {mb}",
         "Nothing touched since {h}.": "Nada tocado desde las {h}.",
         "first at {a}, last at {b}": "la primera a las {a}, la \u00faltima a las {b}",
         "by project": "por proyecto",
@@ -5757,7 +5818,7 @@ def _T():
 _T()
 
 
-VERSION = "1.31.0"
+VERSION = "1.32.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
@@ -5816,8 +5877,8 @@ def peso_historial(tope=20):
     inflado el numero de ficheros sin mover un MB.
     """
     por_proyecto, mayores = {}, []
-    n = n_sub = 0
-    bytes_tot = bytes_sub = bytes_sin_sitio = 0
+    n = n_sub = n_tirar = 0
+    bytes_tot = bytes_sub = bytes_sin_sitio = bytes_tirar = 0
     n_sin_sitio = 0
     for d in sorted(PROJECTS.iterdir()) if PROJECTS.is_dir() else ():
         if not d.is_dir():
@@ -5830,6 +5891,14 @@ def peso_historial(tope=20):
             if not _UUID.match(jl.stem):
                 n_sub += 1
                 bytes_sub += tam
+                continue
+            # Las de usar y tirar se cuentan aparte, igual que los subagentes y por lo
+            # mismo: su peso es real y hay que decirlo, pero meterlas en el reparto por
+            # proyecto llena la tabla de nombres que no son proyectos de nadie
+            # ("skillopt_sleep_claude_ylulwmwr").
+            if de_usar_y_tirar(_proyecto_de_dir(d.name)):
+                n_tirar += 1
+                bytes_tirar += tam
                 continue
             n += 1
             bytes_tot += tam
@@ -5865,6 +5934,7 @@ def peso_historial(tope=20):
         "raiz": str(PROJECTS),
         "sesiones": n, "bytes": bytes_tot,
         "subagentes": n_sub, "bytes_subagentes": bytes_sub,
+        "de_usar_y_tirar": n_tirar, "bytes_de_usar_y_tirar": bytes_tirar,
         "sin_sitio": n_sin_sitio, "bytes_sin_sitio": bytes_sin_sitio,
         "proyectos": len(por_proyecto),
         "por_proyecto": sorted(por_proyecto.values(), key=lambda x: -x["bytes"]),
@@ -6018,6 +6088,8 @@ def jornada(corte=None, ahora=None):
     for p in PROJECTS.glob("*/*.jsonl"):        # sin `**`: los subagentes no son sesiones
         if not _UUID.match(p.stem):
             continue
+        if de_usar_y_tirar(_proyecto_de_dir(p.parent.name)):
+            continue                            # lo que nacio para tirarse no es trabajo
         try:
             mt = p.stat().st_mtime
         except OSError:
@@ -6144,6 +6216,11 @@ def cmd_disk(tope=8):
     if h["subagentes"]:
         print(_("  plus {n} subagent transcripts, {mb}",
                 n=h["subagentes"], mb=_peso(h["bytes_subagentes"])))
+    if h["de_usar_y_tirar"]:
+        print(_("  plus one throwaway session born in a temp dir, {mb}",
+                mb=_peso(h["bytes_de_usar_y_tirar"])) if h["de_usar_y_tirar"] == 1 else
+              _("  plus {n} throwaway sessions born in a temp dir, {mb}",
+                n=h["de_usar_y_tirar"], mb=_peso(h["bytes_de_usar_y_tirar"])))
     print()
     print(_("by project"))
     # La cola se resume en una linea. Sin esto, en esta maquina cinco de las ocho lineas

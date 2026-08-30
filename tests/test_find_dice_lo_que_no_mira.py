@@ -18,10 +18,10 @@ def main():
     fallos = []
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
+        proy = casa / ".claude/projects/-home-u-proyecto"
         proy.mkdir(parents=True)
         for i in range(5):
-            linea = {"type": "user", "cwd": "/tmp/proyecto",
+            linea = {"type": "user", "cwd": "/home/u/proyecto",
                      "message": {"role": "user",
                                  "content": f"una aguja concreta numero {i} " + "x" * 40}}
             f = proy / (UUID % i + ".jsonl")

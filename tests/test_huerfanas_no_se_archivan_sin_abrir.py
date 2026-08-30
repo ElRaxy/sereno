@@ -36,7 +36,7 @@ def carga(abre):
 
 def huerfana(tmp, sid):
     f = tmp / f"{sid}.env"
-    f.write_text(f"id={sid}\ncwd=/tmp\n")
+    f.write_text(f"id={sid}\ncwd=/home/u/proyecto\n")
     return {"id": sid, "cwd": "/tmp", "title": "una", "_file": f,
             "resume_flags__list": []}
 

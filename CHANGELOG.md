@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.32.0
+
+**46 of the 200 rows in the history were nobody's sessions.**
+
+A skill optimiser launching itself: twenty-two *"Score how well the response satisfies…"* and
+twenty-two *"Complete the following task…"*. They took the real ones' place in the list, counted
+as work in `--hoy`, and put projects named `skillopt_sleep_claude_ylulwmwr` into `--disk`'s
+breakdown. Here, 78 of them in total.
+
+They are recognised by **where they were born**, not by what they say. Their working directory
+hangs off the system temp dir (`$TMPDIR`, `/tmp`, `/var/folders`…) — somewhere nobody resumes
+anything from, because tomorrow it is gone. Filtering on the title would be guessing, and it would
+break with the next version of whatever script launches them.
+
+- Not offered for resuming, and not counted as work in `--hoy`.
+- `--disk` still reports what they weigh, on its own line, exactly as it does for subagents: the
+  weight is real even when the work isn't yours.
+- `--find` skips them **and says so** — a search that stays quiet about what it skipped answers
+  "never said" when the truth is "never looked". `--all` looks at them, because `--all` means
+  look at everything.
+
+**The price, stated plainly:** a session genuinely started inside `/tmp` no longer shows up. The
+rare case gives way to the one that happens every day.
+
+Ten test files stopped using `/tmp/proyecto` as their pretend working directory — under the new
+rule that stands for a throwaway session, which is not what those cases mean. Six mutants, all
+red, including the one that matters: matching the temp roots by plain prefix instead of by path
+segment, which would swallow `/var/folders2`.
+
 ## 1.31.0
 
 **`--hoy`: what today added up to, by project.** (`--today` works too.)
