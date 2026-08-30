@@ -236,6 +236,28 @@ Two guards, both because a zero is not always a zero:
 - **Never a live session.** One you just launched has not answered yet, and it is the row you most
   want to see.
 
+### The ones born to be thrown away
+
+On the machine this was written on, **46 of the 200 rows in the history were nobody's sessions**:
+a skill optimiser running itself — twenty-two *"Score how well the response satisfies…"* and
+twenty-two *"Complete the following task…"*. They took the real ones' place in the list, showed up
+in `--hoy`, and put projects like `skillopt_sleep_claude_ylulwmwr` into `--disk`'s breakdown.
+
+They are not detected by what they say — that would be guessing, and it would change with every
+version of the script that launches them. They are detected by **where they were born**: their
+working directory hangs off the system temp dir (`$TMPDIR`, `/tmp`, `/var/folders`…), a place
+nobody resumes anything from because tomorrow it is gone.
+
+- They are not offered for resuming, and they don't count as work in `--hoy`.
+- `--disk` **does** report what they weigh, separately, the same way it does for subagents: their
+  weight is real even if the work isn't yours.
+- `--find` skips them **and says so** — *"(78 throwaway sessions from a temp dir not searched —
+  add `--all`)"*. A search that stays quiet about what it skipped answers "never said" when the
+  truth is "never looked". With `--all` it looks, because `--all` means look at everything.
+
+**The price, stated plainly:** if you genuinely work inside `/tmp`, those sessions won't show up in
+the list. It is a deliberate trade — the rare case gives way to the one that happens every day.
+
 ### Sessions with nowhere to go back to
 
 A session whose working directory no longer exists cannot be returned to: resuming it drops you

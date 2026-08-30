@@ -16,7 +16,7 @@ UUID = "0123abcd-4567-89ef-0123-456789abcdef"
 def escribe(t, leidos):
     """Un transcript minimo cuyo ultimo turno declara `leidos` tokens de contexto."""
     lineas = [
-        {"type": "user", "cwd": "/tmp/proyecto", "gitBranch": "main",
+        {"type": "user", "cwd": "/home/u/proyecto", "gitBranch": "main",
          "message": {"role": "user", "content": "haz algo"}},
         {"type": "assistant", "message": {
             "role": "assistant", "model": "claude-opus-5",
@@ -30,7 +30,7 @@ def main():
     fallos = []
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
+        proy = casa / ".claude/projects/-home-u-proyecto"
         proy.mkdir(parents=True)
         t = proy / f"{UUID}.jsonl"
         escribe(t, leidos=185_000)          # 185.020 de 200.000 = 92,5%

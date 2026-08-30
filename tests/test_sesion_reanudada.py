@@ -21,7 +21,7 @@ OTRO = "cccccccc-9999-0000-1111-222222222222"
 def linea(session_id, texto, heredada_de=None):
     """Una linea del transcript. `heredada_de` reproduce lo que hace el CLI al
     reanudar: la linea viaja al fichero nuevo con su `session_id` original dentro."""
-    j = {"type": "assistant", "sessionId": session_id, "cwd": "/tmp/proyecto",
+    j = {"type": "assistant", "sessionId": session_id, "cwd": "/home/u/proyecto",
          "message": {"role": "assistant", "model": "claude-opus-5",
                      "usage": {"cache_read_input_tokens": 1000},
                      "content": [{"type": "text", "text": texto}]}}
@@ -40,7 +40,7 @@ def main():
     fallos = []
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
+        proy = casa / ".claude/projects/-home-u-proyecto"
         proy.mkdir(parents=True)
         reg = casa / "reg"
         (reg / "live").mkdir(parents=True)   # el registro cuelga de `live/`
@@ -53,7 +53,7 @@ def main():
         exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
         vivo, VIVA = ns["transcript_vivo"], ns["VIVA"]
 
-        entrada = {"id": VIEJO, "project_dir": str(proy), "cwd": "/tmp/proyecto"}
+        entrada = {"id": VIEJO, "project_dir": str(proy), "cwd": "/home/u/proyecto"}
         viejo_p, nuevo_p, otro_p = (proy / f"{s}.jsonl" for s in (VIEJO, NUEVO, OTRO))
 
         # 1. Mientras el registrado siga escribiendo, no se busca nada.

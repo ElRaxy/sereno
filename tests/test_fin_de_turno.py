@@ -17,7 +17,7 @@ import json, os, pathlib, sys, tempfile, time
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 UUID = "0123abcd-4567-89ef-0123-456789abcdef"
 
-PROMPT = {"type": "user", "cwd": "/tmp/proyecto", "gitBranch": "main",
+PROMPT = {"type": "user", "cwd": "/home/u/proyecto", "gitBranch": "main",
           "message": {"role": "user", "content": "haz algo que se vea"}}
 
 # Las dos formas reales, medidas sobre los transcripts de esta maquina: de 87
@@ -70,7 +70,7 @@ def main():
     ]
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
+        proy = casa / ".claude/projects/-home-u-proyecto"
         proy.mkdir(parents=True)
         t = proy / f"{UUID}.jsonl"
         os.environ["HOME"] = str(casa)

@@ -236,6 +236,29 @@ Dos guardas, las dos porque un cero no siempre es un cero:
 - **Nunca una sesión viva.** Una que acabas de lanzar aún no ha contestado, y es justo la fila que
   más quieres ver.
 
+### Las que nacieron para tirarse
+
+En la máquina donde se escribió esto, **46 de las 200 filas del historial no eran sesiones de
+nadie**: eran un optimizador de skills lanzándose a sí mismo — veintidós *"Score how well the
+response satisfies…"* y veintidós *"Complete the following task…"*. Ocupaban el sitio de las
+reales en la lista, salían en `--hoy`, y metían proyectos como `skillopt_sleep_claude_ylulwmwr`
+en el reparto de `--disk`.
+
+No se detectan por lo que dicen, que sería adivinar y cambiaría con cada versión del script que
+las lanza. Se detectan por **dónde nacieron**: su directorio de trabajo cuelga del temporal del
+sistema (`$TMPDIR`, `/tmp`, `/var/folders`…), un sitio del que nadie reanuda nada porque mañana
+ya no existe.
+
+- No se ofrecen para reanudar, ni cuentan como trabajo en `--hoy`.
+- `--disk` **sí** dice lo que pesan, aparte, igual que hace con los subagentes: su peso es real
+  aunque no sean trabajo tuyo.
+- `--find` las salta **y lo dice** — *"(78 sesiones de usar y tirar de un temporal sin mirar —
+  añade `--all`)"*. Un buscador que calla lo que no mira contesta "no se dijo nunca" cuando la
+  verdad es "no lo miré". Con `--all` las mira, porque `--all` significa mirar todo.
+
+**El precio, dicho claro:** si de verdad trabajas dentro de `/tmp`, esas sesiones no te saldrán
+en la lista. Es un intercambio consciente — el caso raro cede ante el que pasa todos los días.
+
 ### Las que ya no tienen sitio al que volver
 
 Una sesión cuyo directorio de trabajo ya no existe no admite vuelta: reanudarla te deja en un `cd`

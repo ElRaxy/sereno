@@ -14,7 +14,7 @@ UUID = "0123abcd-4567-89ef-0123-456789abcdef"
 
 LINEAS = [
     # SI: lo tecleo una persona.
-    {"type": "user", "cwd": "/tmp/proyecto",
+    {"type": "user", "cwd": "/home/u/proyecto",
      "message": {"role": "user", "content": f"revisa el {AGUJA} del informe"}},
     # NO: salida de un comando. No lo dijo nadie.
     {"type": "user", "message": {"role": "user", "content": [
@@ -41,7 +41,7 @@ def main():
     fallos = []
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
+        proy = casa / ".claude/projects/-home-u-proyecto"
         proy.mkdir(parents=True)
         t = proy / f"{UUID}.jsonl"
         t.write_text("\n".join(json.dumps(x) for x in LINEAS) + "\n")

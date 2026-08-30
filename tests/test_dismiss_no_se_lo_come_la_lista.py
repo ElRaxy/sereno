@@ -18,7 +18,7 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
 def entrada(live, pid, sid):
     f = live / f"{pid}-1700000000.env"
-    f.write_text(f"id={sid}\ncwd=/tmp\npid={pid}\nstarted=hoy\ntitle=una\n")
+    f.write_text(f"id={sid}\ncwd=/home/u/proyecto\npid={pid}\nstarted=hoy\ntitle=una\n")
     return f
 
 

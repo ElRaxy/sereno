@@ -15,7 +15,7 @@ import datetime, json, os, pathlib, sys, tempfile, time
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
 
-def escribe(t, texto="haz algo", leidos=40_000, cwd="/tmp/proyecto"):
+def escribe(t, texto="haz algo", leidos=40_000, cwd="/home/u/proyecto"):
     lineas = [{"type": "user", "cwd": cwd, "gitBranch": "main",
                "message": {"role": "user", "content": texto}},
               {"type": "assistant", "message": {
@@ -33,8 +33,8 @@ def main():
     fallos = []
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
-        otro = casa / ".claude/projects/-tmp-otro"
+        proy = casa / ".claude/projects/-home-u-proyecto"
+        otro = casa / ".claude/projects/-home-u-otro"
         proy.mkdir(parents=True); otro.mkdir(parents=True)
         hoy = proy / "0123abcd-4567-89ef-0123-456789abcdef.jsonl"
         vieja = proy / "1123abcd-4567-89ef-0123-456789abcdef.jsonl"
@@ -42,7 +42,7 @@ def main():
         escribe(hoy); escribe(vieja)
         # El proyecto sale del `cwd` del transcript, no de la carpeta: dos ficheros con
         # el mismo cwd son el MISMO proyecto por mucho que esten en directorios distintos.
-        escribe(lejana, cwd="/tmp/otro")
+        escribe(lejana, cwd="/home/u/otro")
 
         os.environ["HOME"] = str(casa)
         os.environ["SERENO_TMUX_SOCK"] = "no-existe-este-socket"

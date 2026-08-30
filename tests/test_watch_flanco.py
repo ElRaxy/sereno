@@ -16,7 +16,7 @@ def escribe(t, pendiente):
     """Un transcript minimo. `pendiente=True` deja un tool_use sin su tool_result:
     eso es "corriendo un comando", que es justo lo que el mtime NO distingue."""
     lineas = [
-        {"type": "user", "cwd": "/tmp/proyecto", "gitBranch": "main",
+        {"type": "user", "cwd": "/home/u/proyecto", "gitBranch": "main",
          "message": {"role": "user", "content": "haz algo"}},
         {"type": "assistant", "message": {
             "role": "assistant", "model": "claude-opus-5",
@@ -40,7 +40,7 @@ def main():
     fallos = []
     with tempfile.TemporaryDirectory() as tmp:
         casa = pathlib.Path(tmp)
-        proy = casa / ".claude/projects/-tmp-proyecto"
+        proy = casa / ".claude/projects/-home-u-proyecto"
         proy.mkdir(parents=True)
         t = proy / f"{UUID}.jsonl"
         escribe(t, pendiente=True)
