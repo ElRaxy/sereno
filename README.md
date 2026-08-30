@@ -635,6 +635,25 @@ for the largest on disk (89 MB) — fine when you ask for it, wrong for a status
 every few seconds. In the picker it costs nothing extra: it is read for the row under the
 cursor, like the rest of the panel, and cached.
 
+#### Reading without blocking
+
+In the picker that read is not done in one go. Every turn of the loop — every keystroke and every
+2.5 s — spends a budget of **25 ms** reading whatever is still missing, starting with the row you
+are looking at and staying with it until it is finished. A partial read shows as one: while
+anything is missing the panel prints "reading…" instead of a figure, because half a read gives
+half a figure, and in a column headed "spend" that reads as the total.
+
+Measured over the 40 sessions on this machine: **345 ms in a single turn** before, and now 12
+turns of **38 ms at most** (the budget is checked after each row, so one turn can overshoot by
+whatever a single row costs). With everything read, the turn costs 0.002 ms. The largest
+transcript on disk went from one 120 ms stretch to four turns.
+
+The **peak** is the exception, and it is used even when the read is partial: it can only grow, so
+a partial falls short but never overshoots. On the 89 MB transcript it crosses 200k on the first
+turn, so the bar corrects itself almost at once. **Sorting by spend** admits no partials, on the
+other hand — it would sort by what has been read rather than by what was spent — so a half-read
+row waits at the bottom and moves up once, when it finishes.
+
 Four figures, and **no total**. Cache read is not new material — it is what was already sent
 being read again — and it runs a hundred times larger than everything else put together (300M
 against 3M in an eight-hour session). Adding it to the input gives a huge number that means
