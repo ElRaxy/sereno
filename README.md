@@ -1180,14 +1180,17 @@ Changes between versions are in [CHANGELOG.md](CHANGELOG.md).
 
 ## 🤝 Contributing
 
-Issues and pull requests welcome, in English or Spanish. Run the tests before you open one:
+Issues and pull requests welcome, in English or Spanish. The short, actionable version of this
+section is [CONTRIBUTING.md](CONTRIBUTING.md). Run the tests before you open one:
 
 ```bash
-for t in tests/test_*.py; do python3 "$t"; done
+python3 tests/todos.py
 ```
 
-There are twenty-three, and CI runs all of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13.
-Most guard against something that fails **silently**, which is why they exist at all:
+That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
+collects the whole folder, prints a line per file and ends with the count. There are forty-eight
+today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
+guard against something that fails **silently**, which is why they exist at all:
 
 - **`test_demo_aislado.py`** — demo mode must not return a single row that came from real disk.
   Plants a canary in a fake `HOME` and walks every function that reads data.
@@ -1228,7 +1231,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks twenty real guards, one at a time, on a copy of the tree, and
+  `tests/test_mutantes.py` breaks twenty-one real guards, one at a time, on a copy of the tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.
 - **A test that isn't wired in doesn't count either.** The CI runs `tests/todos.py`, which

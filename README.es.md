@@ -1173,14 +1173,17 @@ Los cambios entre versiones están en [CHANGELOG.md](CHANGELOG.md).
 
 ## 🤝 Contribuir
 
-Issues y pull requests bienvenidos, en castellano o en inglés. Antes de abrir uno, pasa los tests:
+Issues y pull requests bienvenidos, en castellano o en inglés. La versión corta y accionable de
+esta sección está en [CONTRIBUTING.md](CONTRIBUTING.md). Antes de abrir uno, pasa los tests:
 
 ```bash
-for t in tests/test_*.py; do python3 "$t"; done
+python3 tests/todos.py
 ```
 
-Son veintitrés, y el CI los corre en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan
-algo que falla **en silencio**, que es justo por lo que existen:
+Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son cuarenta y ocho,
+y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
+que falla **en silencio**, que es justo por lo que existen:
 
 - **`test_demo_aislado.py`** — el modo demo no puede devolver ni una fila que venga del disco de
   verdad. Planta un canario en un `HOME` de mentira y recorre todas las funciones que leen datos.
@@ -1213,7 +1216,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe veinte guardas de verdad, una a una, sobre una copia del árbol, y
+  `tests/test_mutantes.py` rompe veintiuna guardas de verdad, una a una, sobre una copia del árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.
 - **Un test que no está cableado tampoco vale.** El CI corre `tests/todos.py`, que recoge la
