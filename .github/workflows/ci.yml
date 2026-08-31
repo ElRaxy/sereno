@@ -21,6 +21,19 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: ${{ matrix.python }}
+      # tmux no viene de serie en el runner, y `test_tmux_de_verdad.py` FALLA sin el
+      # en vez de saltarse: es la unica via de "abrir varias" fuera de macOS, y un test
+      # que se calla cuando falta su dependencia deja ese camino sin red pareciendo que
+      # lo cubre. Se instala aqui para que el fallo, si lo hay, sea el de tmux faltando
+      # y no un test mudo.
+      - name: tmux, que el test de lanzadores lo necesita de verdad
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+          else
+            brew list tmux > /dev/null 2>&1 || brew install tmux
+          fi
+          tmux -V
       - name: compila
         run: python -m py_compile sereno
       - name: arranca en una maquina sin sesiones

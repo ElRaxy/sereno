@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.35.3
+
+**Abrir varias por tmux ya se prueba llamando a tmux.** Era la unica pieza del programa
+que decia funcionar fuera de macOS y que nadie habia visto correr nunca:
+`test_lanzadores.py` cubre la tabla que decide a quien llamar y el guion que va por
+delante, pero a tmux le pasa un `lambda: True` o le cambia `subprocess` por un doble. En
+Linux eso deja el camino ENTERO sin comprobar, porque alli warp y Terminal.app no existen
+y tmux es lo unico que queda.
+
+`tests/test_tmux_de_verdad.py` levanta un servidor tmux propio, abre tres pestañas y mira
+que paso: que la tabla elige tmux y **solo** tmux en Linux, que aparecen tres ventanas con
+los nombres pedidos, que la orden de cada una llega a correr —deja su huella en disco— y
+que corre en el directorio que se pidio. Una ventana abierta en `~` con la orden dentro se
+ve igual de bien en una captura, y es justo el bug que el guion existe para no tener.
+
+Comprobado en las dos plataformas: **macOS y Linux** (contenedor Ubuntu sobre
+`python:3.12-slim`, tmux 3.5a), con la bateria entera corriendo en el segundo.
+
+Tres decisiones que no son de estilo:
+
+- **El servidor de pruebas va en un socket aparte** (`-L sereno-tests`). Sin eso, correr
+  la bateria en la maquina de alguien que trabaja dentro de tmux —que es justo para quien
+  se escribio este programa— le abriria tres ventanas en mitad de sus sesiones de verdad.
+- **Sin tmux el test FALLA, no se salta.** Un test que se calla cuando le falta su
+  dependencia no protege nada, solo lo parece; el CI ahora lo instala antes de la bateria
+  para que el fallo, si lo hay, sea el de tmux faltando y no un test mudo.
+- **Se comprueba tambien lo que pasa SIN ningun tmux**: la funcion tiene que decir que
+  abrio cero, no tres. Devuelve hechos —cuantas salieron— y de ahi sale el mensaje que
+  lee el usuario.
+
+**Y un hallazgo que se deja escrito porque el test no puede protegerlo:** el `-c cwd` de
+`new-window` y el `cd` del guion hacen lo mismo, asi que quitar cualquiera de los dos deja
+la otra via corrigiendo y **desde fuera no hay diferencia observable**. El mutante que
+borra el `-c` sobrevive, y no por un hueco del test. El `cd` si tiene red propia en
+`test_lanzadores.py`, que ejecuta el guion suelto.
+
+- **Tres mutantes nuevos** en el catalogo (89 -> 92): contar como abierta una ventana que
+  tmux rechazo, no borrar el guion antes del `exec`, y perder el titulo de la sesion por
+  el camino.
+
+Sigue sin cubrirse lo que no existe: iTerm2, kitty y gnome-terminal no estan en la tabla
+—anadirlos es una linea, pero la forma exacta de pedirles una ventana con una orden dentro
+se comprueba antes, no se pone a ojo— y para eso hace falta una maquina con ellos.
+
 ## 1.35.2
 
 **El panel lateral se reparte donde se puede leer.** Las tres piezas que lo componen

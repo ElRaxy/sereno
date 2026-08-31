@@ -1062,7 +1062,7 @@ ejecuta, y es donde se reporta cualquier cosa explotable.
 | | |
 |:--|:--|
 | **macOS** | funciona, y es donde se construyó |
-| **Linux** | funciona — el CI arranca el TUI de verdad en un pty sobre Ubuntu |
+| **Linux** | funciona — el CI arranca el TUI de verdad en un pty sobre Ubuntu, y abre las pestañas llamando a tmux de verdad, que allí es la única vía |
 | **Windows** | no. `curses` no está en la librería estándar de Python ahí. **Con WSL, sí** |
 | **Python** | 3.8 o más nuevo, sin paquetes |
 | **Terminal** | cualquiera. Usa 256 colores si los hay y degrada con elegancia si no |
@@ -1201,7 +1201,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son cincuenta y ocho,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son cincuenta y nueve,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1236,7 +1236,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ochenta y nueve guardas de verdad, una a una, sobre una copia del árbol, y
+  `tests/test_mutantes.py` rompe noventa y dos guardas de verdad, una a una, sobre una copia del árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.
 - **Un test que no está cableado tampoco vale.** El CI corre `tests/todos.py`, que recoge la
