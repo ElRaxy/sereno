@@ -4064,6 +4064,157 @@ def copia_al_portapapeles(texto):
         return False
 
 
+def campos_panel(r, d, cwd_cur, ahora=None):
+    """Los pares etiqueta/valor del panel lateral, en orden y ya filtrados.
+
+    Cada campo es `(etiqueta, valor, par_de_color)` y, en los dos que se pueden copiar
+    al pincharlos, un cuarto elemento con lo que se pega — que NO es lo que se pinta.
+    Se pintan con la etiqueta a la izquierda y el valor a la derecha: con 70 columnas de
+    panel, una lista de valores sueltos no se lee, no se sabe que es cada cosa. Cuesta
+    10 columnas y las hay de sobra.
+    Los que salen vacios no llegan: un panel con cinco etiquetas en blanco no dice que
+    no haya dato, parece roto.
+
+    Se saco de `pick_ui` porque son sesenta lineas de decisiones —cuando el contexto se
+    pinta en rojo, que se ensena mientras el acumulado se lee a medias, que id sirve
+    para `--resume`— que solo se podian comprobar arrancando curses.
+    """
+    ahora = time.time() if ahora is None else ahora
+    fu = r.get("fuente", "claude")
+    pu_cur = r.get("pulso") or {}
+    ctx_cur = pu_cur.get("ctx")
+    # Lo que `avanza_uso()` haya leido ya, sin ir a buscar mas: aqui no se
+    # abre ningun fichero, que es lo que quitaba 120 ms cada vez que el
+    # cursor llegaba a una sesion grande. Lo que falte llega en la vuelta
+    # siguiente. El pico si se usa aunque el acumulado este a medias: solo
+    # puede crecer, asi que un parcial se queda corto pero nunca miente.
+    uso_cur = r.get("_uso")
+    listo_cur = bool(uso_cur and uso_cur.get("completo"))
+    tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
+                             pu_cur.get("ventana_1m"), pico_de(r))
+    campos = [
+        (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")
+         else 7 if (d.get("fase") or "").startswith(("esperando", "escribiendo", "lleva")) else 4),
+        # El cuarto elemento es lo que se copia al pinchar, y aqui NO es
+        # lo que se pinta: la etiqueta ensena el nombre corto del proyecto
+        # y la rama, pero lo que se pega en una terminal es la ruta entera.
+        # En las 40 sesiones del historial de esta maquina la ruta completa
+        # no se ve ni una vez, asi que un clic que copiara lo pintado
+        # copiaria justo lo que ya se estaba leyendo.
+        (_("project"), " \u00b7 ".join(x for x in (r.get("proyecto"),
+                                                   r.get("rama")) if x), 8,
+         cwd_cur or None),
+        (_("open for"), _lapso(max(0, ahora - r["created"]))
+         if r.get("created") else "", 4),
+        (_("memory"), _mb(r["mem_mb"]) if r["mem_mb"] else "", 8),
+        # El porcentaje va con las cifras al lado: la barra de la lista
+        # dice "va justa", pero para decidir si compactar hace falta saber
+        # si el tope son 200k o un millon.
+        # Las compactaciones van PEGADAS al porcentaje porque son lo que lo
+        # explica: una sesion de doce horas marcando 20% no es una sesion
+        # fresca, es una que ha tirado el contexto tres veces. Leer el numero
+        # sin el dato de al lado lleva a la conclusion contraria.
+        (_("context"), (f"{_tok(ctx_cur)} / {_tok(tope_cur)}  "
+                        f"{round(100 * ctx_cur / tope_cur)}%"
+                        + ("  \u00b7 " + _("{n} compaction(s)",
+                                          n=uso_cur["compacta"])
+                           if listo_cur and uso_cur["compacta"] else ""))
+         if ctx_cur else "", color_contexto(ctx_cur / tope_cur if ctx_cur else 0)),
+        (_("model"), _modelo_corto(pu_cur.get("modelo")), 4),
+        # Mientras se lee, un guion y no una cifra: media lectura da media
+        # cifra, y una cifra a medias en una columna que dice "gastado" se
+        # lee como el total. Dura una vuelta o dos.
+        (_("spent"), _uso_texto(uso_cur) if listo_cur
+         else (_("reading\u2026") if uso_cur else ""), 8),
+        (_("rhythm"), _uso_ritmo(uso_cur) if listo_cur else "", 4),
+        (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
+         if d.get("peso") else
+         ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
+        # El id de la SESION, no la clave de la fila: en una viva esta era
+        # el nombre de tmux, que no sirve para `claude --resume`.
+        (_("session"), id_sesion(r) or r["name"], 4,
+         id_sesion(r) or r["name"]),
+    ]
+    if fu != "claude":
+        campos.insert(0, (_("source"),
+                          _("{f} \u00b7 ENTER resumes it",
+                            f=etiqueta_fuente(fu)), 7))
+    return [c for c in campos if c[1]]
+
+
+def bloques_panel(r, d, ult, hay_ruta):
+    """Los bloques de texto del panel, en el orden en que se leen, ya sin los vacios.
+
+    Cada uno es `(cabecera, texto, par, tope_de_lineas, copiable)`. El quinto dice si
+    la cabecera copia su texto al pincharla: solo el prompt y la respuesta, que son los
+    dos que uno vuelve a usar en otro sitio y ademas los unicos que se pintan
+    RECORTADOS —medido en las 40 sesiones del historial, 15 de 37 respuestas no caben—,
+    asi que el clic no repite lo que se ve, rescata lo que no cabe. El choque y la
+    llamada en curso se leen y se acabo.
+
+    El orden no es cosmetico. El choque va ARRIBA del todo, por delante de lo que la
+    sesion esta haciendo: si dos escriben en el mismo fichero, eso es lo primero que hay
+    que leer del panel, no el ultimo prompt. Y "ahora mismo" solo aparece cuando el
+    recorrido NO cabe: el recorrido ensena esa misma llamada con su duracion en vivo, y
+    de los dos dibujos del mismo hecho se queda el que ademas trae el camino.
+    """
+    cl = r.get("colision")
+    return [b for b in (
+        ((_("\u25b8 another session is writing here too"),
+          _texto_colision(cl), 5, 3, False) if cl else None),
+        ((_("\u25b8 right now"), d.get("tool"), 7, 2, False)
+         if (not hay_ruta and (r.get("pulso") or {}).get("herramienta"))
+         else None),
+        (_("\u25b8 what you last said"), ult, 6, 4, True),
+        (_("\u25b8 what it last replied"), d.get("resp"), 9, 5, True),
+    ) if b and b[1]]
+
+
+def reparto_panel(fila0, fondo, n_campos, bloques, n_ruta_total, n_alertas,
+                  ancho_det, hay_ruta):
+    """Donde empieza cada zona del panel lateral, y cuantas lineas se lleva cada bloque.
+
+    Devuelve `(base_campos, base_ruta, n_ruta, hay_ruta, cuotas)`. Es la aritmetica que
+    decide QUE SE VE: si el recorrido cabe, cuantos de sus pasos entran, y cuanto texto
+    del prompt y de la respuesta sobrevive al recorte. Estaba dentro de `pick_ui` y por
+    tanto solo se podia comprobar arrancando curses en un pseudo-terminal — que dice si
+    el programa pinta, no si repartio bien.
+
+    `bloques` son los `(etiqueta, texto, par, tope, copiable)` que ya se sabe que tienen
+    texto; de cada uno solo se miran aqui el texto y su tope de lineas.
+    """
+    # Los metadatos se anclan ABAJO y el texto fluye desde arriba: asi las etiquetas
+    # caen siempre en la misma linea y el ojo no las persigue cuando el prompt de la
+    # sesion de al lado ocupa el doble. Sin texto arriba (las sesiones de otros CLI no
+    # traen prompt) anclar abajo dejaria veinte lineas en blanco y tres etiquetas al
+    # fondo.
+    base_campos = (max(fila0 + 2, fondo - n_campos + 1)
+                   if (bloques or hay_ruta) else fila0)
+    # El recorrido se reserva su sitio ANTES de repartir el texto: cuando falta altura
+    # lo que cede es la respuesta —que sigue entera dentro de la sesion— y no la unica
+    # vista que dice donde se atasco. Y si la ventana es baja encoge por el extremo
+    # VIEJO antes de desaparecer: dos filas del camino informan mas que ninguna, y la
+    # que importa se queda.
+    n_ruta = 0
+    if hay_ruta:
+        margen = 2 if bloques else 0
+        sitio = base_campos - fila0 - 2 - n_alertas - margen
+        n_ruta = max(0, min(RUTA_VISIBLE, n_ruta_total, sitio))
+        hay_ruta = n_ruta > 0
+    alto_ruta = (2 + n_alertas + n_ruta) if hay_ruta else 0
+    base_ruta = base_campos - alto_ruta
+    # Tope por bloque, y reparto proporcional solo si no caben: sin tope, una respuesta
+    # con tabla se comia veinte lineas y tapaba el prompt.
+    libre = max(0, base_ruta - fila0 - 1 - 2 * len(bloques))
+    pide = [min(tope, max(1, -(-ancho(t) // max(1, ancho_det))))
+            for _e, t, _p, tope, _c in bloques]
+    total = sum(pide)
+    cuotas = [q if total <= libre
+              else max(1, min(q, round(libre * q / max(1, total))))
+              for q in pide]
+    return base_campos, base_ruta, n_ruta, hay_ruta, cuotas
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -4590,128 +4741,19 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
 
             if lateral:
                 x0 = ancho_lista + 4
-                # Etiqueta a la izquierda y valor a la derecha: con 70 columnas de
-                # panel, una lista de valores sueltos no se lee — no se sabe que es cada
-                # cosa. Cuesta 10 columnas y las hay de sobra.
-                pu_cur = rows[cur].get("pulso") or {}
-                ctx_cur = pu_cur.get("ctx")
-                # Lo que `avanza_uso()` haya leido ya, sin ir a buscar mas: aqui no se
-                # abre ningun fichero, que es lo que quitaba 120 ms cada vez que el
-                # cursor llegaba a una sesion grande. Lo que falte llega en la vuelta
-                # siguiente. El pico si se usa aunque el acumulado este a medias: solo
-                # puede crecer, asi que un parcial se queda corto pero nunca miente.
-                uso_cur = rows[cur].get("_uso")
-                listo_cur = bool(uso_cur and uso_cur.get("completo"))
-                tope_cur = tope_contexto(pu_cur.get("modelo"), ctx_cur,
-                                         pu_cur.get("ventana_1m"), pico_de(rows[cur]))
-                campos = [
-                    (_("status"), d.get("fase") or "", 9 if (d.get("fase") or "").startswith("te espera")
-                     else 7 if (d.get("fase") or "").startswith(("esperando", "escribiendo", "lleva")) else 4),
-                    # El cuarto elemento es lo que se copia al pinchar, y aqui NO es
-                    # lo que se pinta: la etiqueta ensena el nombre corto del proyecto
-                    # y la rama, pero lo que se pega en una terminal es la ruta entera.
-                    # En las 40 sesiones del historial de esta maquina la ruta completa
-                    # no se ve ni una vez, asi que un clic que copiara lo pintado
-                    # copiaria justo lo que ya se estaba leyendo.
-                    (_("project"), " \u00b7 ".join(x for x in (rows[cur].get("proyecto"),
-                                                         rows[cur].get("rama")) if x), 8,
-                     cwd_cur or None),
-                    (_("open for"), _lapso(max(0, time.time() - rows[cur]["created"]))
-                     if rows[cur].get("created") else "", 4),
-                    (_("memory"), _mb(rows[cur]["mem_mb"]) if rows[cur]["mem_mb"] else "", 8),
-                    # El porcentaje va con las cifras al lado: la barra de la lista
-                    # dice "va justa", pero para decidir si compactar hace falta saber
-                    # si el tope son 200k o un millon.
-                    # Las compactaciones van PEGADAS al porcentaje porque son lo que lo
-                    # explica: una sesion de doce horas marcando 20% no es una sesion
-                    # fresca, es una que ha tirado el contexto tres veces. Leer el numero
-                    # sin el dato de al lado lleva a la conclusion contraria.
-                    (_("context"), (f"{_tok(ctx_cur)} / {_tok(tope_cur)}  "
-                                    f"{round(100 * ctx_cur / tope_cur)}%"
-                                    + ("  \u00b7 " + _("{n} compaction(s)",
-                                                      n=uso_cur["compacta"])
-                                       if listo_cur and uso_cur["compacta"] else ""))
-                     if ctx_cur else "", color_contexto(ctx_cur / tope_cur if ctx_cur else 0)),
-                    (_("model"), _modelo_corto(pu_cur.get("modelo")), 4),
-                    # Mientras se lee, un guion y no una cifra: media lectura da media
-                    # cifra, y una cifra a medias en una columna que dice "gastado" se
-                    # lee como el total. Dura una vuelta o dos.
-                    (_("spent"), _uso_texto(uso_cur) if listo_cur
-                     else (_("reading\u2026") if uso_cur else ""), 8),
-                    (_("rhythm"), _uso_ritmo(uso_cur) if listo_cur else "", 4),
-                    (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
-                     if d.get("peso") else
-                     ("" if fu != "claude" else _("NO TRANSCRIPT: not recoverable")), 5),
-                    # El id de la SESION, no la clave de la fila: en una viva esta era
-                    # el nombre de tmux, que no sirve para `claude --resume`.
-                    (_("session"), id_sesion(rows[cur]) or rows[cur]["name"], 4,
-                     id_sesion(rows[cur]) or rows[cur]["name"]),
-                ]
-                if fu != "claude":
-                    campos.insert(0, (_("source"),
-                                      _("{f} \u00b7 ENTER resumes it",
-                                        f=etiqueta_fuente(fu)), 7))
-                campos = [c for c in campos if c[1]]
-
-                # Los metadatos se anclan ABAJO y el texto fluye desde arriba: asi las
-                # etiquetas caen siempre en la misma linea y el ojo no las persigue
-                # cuando el prompt de la sesion de al lado ocupa el doble.
-                # El choque va ARRIBA del todo, por delante de lo que la sesion esta
-                # haciendo: si dos escriben en el mismo fichero, eso es lo primero que hay
-                # que leer del panel, no el ultimo prompt.
-                # El recorrido ensena la llamada en curso con su duracion en vivo, asi
-                # que "ahora mismo" pasaria a decir lo mismo una linea mas arriba. De
-                # los dos dibujos del mismo hecho se queda el que ademas trae el camino,
-                # y "ahora mismo" solo vuelve cuando el recorrido no cabe.
+                campos = campos_panel(rows[cur], d, cwd_cur)
                 ruta = d.get("ruta") or []
                 sn = sintomas(ruta)
                 alertas_ruta = alertas(sn)
                 hay_ruta = bool(ruta) and ancho_det >= RUTA_FIJO + 26
-                cl = rows[cur].get("colision")
-                # El quinto elemento dice si la cabecera copia su texto al pincharla.
-                # Solo el prompt y la respuesta: son los dos que uno vuelve a usar en
-                # otro sitio, y ademas los unicos que se pintan RECORTADOS —medido en
-                # las 40 sesiones del historial, 15 de 37 respuestas no caben—, asi que
-                # el clic no repite lo que se ve, rescata lo que no cabe. El choque y
-                # la llamada en curso se leen y se acabo.
-                bloques = [b for b in (
-                    ((_("\u25b8 another session is writing here too"),
-                      _texto_colision(cl), 5, 3, False) if cl else None),
-                    ((_("\u25b8 right now"), d.get("tool"), 7, 2, False)
-                     if (not hay_ruta
-                         and (rows[cur].get("pulso") or {}).get("herramienta"))
-                     else None),
-                    (_("\u25b8 what you last said"), ult, 6, 4, True),
-                    (_("\u25b8 what it last replied"), d.get("resp"), 9, 5, True),
-                ) if b and b[1]]
-                # Sin texto arriba (las sesiones de otros CLI no traen prompt) anclar
-                # abajo dejaria veinte lineas en blanco y tres etiquetas al fondo.
-                base_campos = (max(fila0 + 2, fondo - len(campos) + 1)
-                               if (bloques or hay_ruta) else fila0)
-                # El recorrido se reserva su sitio ANTES de repartir el texto: cuando
-                # falta altura lo que cede es la respuesta —que sigue entera dentro de
-                # la sesion— y no la unica vista que dice donde se atasco. Y si la
-                # ventana es baja encoge por el extremo VIEJO antes de desaparecer: dos
-                # filas del camino informan mas que ninguna, y la que importa se queda.
-                n_ruta = 0
-                if hay_ruta:
-                    margen = 2 if bloques else 0
-                    sitio = base_campos - fila0 - 2 - len(alertas_ruta) - margen
-                    n_ruta = max(0, min(RUTA_VISIBLE, len(ruta), sitio))
-                    hay_ruta = n_ruta > 0
-                alto_ruta = (2 + len(alertas_ruta) + n_ruta) if hay_ruta else 0
-                base_ruta = base_campos - alto_ruta
-                # Tope por bloque, y reparto proporcional solo si no caben: sin tope,
-                # una respuesta con tabla se comia veinte lineas y tapaba el prompt.
-                libre = max(0, base_ruta - fila0 - 1 - 2 * len(bloques))
-                pide = [min(tope, max(1, -(-ancho(t) // max(1, ancho_det))))
-                        for _e, t, _p, tope, _c in bloques]
+                bloques = bloques_panel(rows[cur], d, ult, hay_ruta)
+                base_campos, base_ruta, n_ruta, hay_ruta, cuotas = reparto_panel(
+                    fila0, fondo, len(campos), bloques, len(ruta),
+                    len(alertas_ruta), ancho_det, hay_ruta)
                 fila = fila0
-                for (etiq, txt, par, _t, cop), q in zip(bloques, pide):
+                for (etiq, txt, par, _t, cop), cuota in zip(bloques, cuotas):
                     if fila >= base_ruta - 2:
                         break          # cabecera sin ni una linea debajo no informa
-                    cuota = q if sum(pide) <= libre else max(
-                        1, min(q, round(libre * q / max(1, sum(pide)))))
                     # La zona va en la CABECERA y no sobre el texto: el texto ocupa
                     # varias lineas y se recorta, asi que subrayarlo entero seria un
                     # parrafo subrayado —ilegible— y ademas dejaria la mitad de la
@@ -5872,7 +5914,7 @@ def _T():
 _T()
 
 
-VERSION = "1.35.1"
+VERSION = "1.35.2"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

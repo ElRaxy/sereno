@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.35.2
+
+**El panel lateral se reparte donde se puede leer.** Las tres piezas que lo componen
+vivian dentro de `pick_ui`, que son 1.200 lineas de curses, y la mas cara de las tres es
+la aritmetica que decide QUE SE VE cuando no cabe todo: si el recorrido entra, cuantos de
+sus pasos, y cuanto del prompt y de la respuesta sobrevive al recorte. Es la operacion
+que ya funciono con `lineas_now()` y `caja_now()`, repetida aqui:
+
+- **`reparto_panel()`** — donde empieza cada zona y cuantas lineas se lleva cada bloque.
+- **`campos_panel()`** — los pares etiqueta/valor, en orden y sin los vacios.
+- **`bloques_panel()`** — los bloques de texto, en el orden en que se leen.
+
+El bloque `if lateral:` baja de **203 a 94 lineas** y `pick_ui` de 1.241 a 1.132.
+
+**No cambia una sola cosa de lo que se pinta, y eso no se razona.** Se comparo lo que la
+interfaz escribe en un pseudo-terminal, **byte a byte, en seis tamaños de ventana** —de
+40x200 a 12x40, que son los que encienden y apagan el panel y el recorrido— antes y
+despues de cada uno de los tres pasos. Cero diferencias en las dieciocho comparaciones.
+
+- **`tests/test_panel_lateral.py`** — el reparto se comprueba por barrido, **77.824
+  combinaciones** de altura, campos, bloques y recorrido, y no con un puñado de casos:
+  basta que falle una para que algo se pinte fuera del area, y curses no avisa cuando eso
+  pasa. Fija que las tres zonas no se pisan, que un recorrido que se anuncia trae al menos
+  un paso, que ninguna cabecera se queda sin una linea debajo, y que los campos ceden por
+  arriba antes que salirse por abajo.
+
+- **Nueve mutantes nuevos** en el catalogo (80 -> 89). Y aqui esta la razon de que el
+  test exista: de esos nueve cambios minimos, **cinco pasaban la bateria anterior en
+  verde** — un bloque quedandose con cero lineas bajo su cabecera, un recorrido sin sitio
+  pintando su cabecera sola, los campos vacios llegando al panel como etiquetas en blanco,
+  y "ahora mismo" repitiendo lo que el recorrido ya cuenta. Los cuatro que si se cazaban
+  no se cazaban como lo que son: `test_panel_geometria.py` los veia como un desbordamiento
+  del marco, que es el sintoma, no el reparto equivocado que lo causa.
+
+Alcance, dicho antes de que lo pregunte nadie: esto fija el REPARTO y la COMPOSICION.
+Que lo repartido acabe en la pantalla sin solaparse lo sigue cubriendo
+`test_panel_geometria.py`, con su doble de curses, y que la interfaz arranque de verdad,
+`test_tui_arranca.py`.
+
 ## 1.35.1
 
 **Los emoji que se escriben con dos piezas ya no descuadran la fila.** El ancho del texto
