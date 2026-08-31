@@ -2170,6 +2170,68 @@ def _abre_en_tmux(pestanas):
     return hechas
 
 
+def _abre_en_iterm(pestanas):
+    """Una ventana de iTerm2 por pestana, via AppleScript.
+
+    Misma via que Terminal.app y distinta orden: iTerm2 no entiende `do script`, quiere
+    `create window with default profile command`. Va DELANTE de Terminal.app porque no
+    arrastra su restauracion de ventanas al reiniciar.
+
+    Sin nombre de ventana a proposito: `set name of current session` se acepta y devuelve
+    `missing value` —medido, no supuesto—, y ademas el titulo lo pisa el proceso que
+    lanza el guion en cuanto arranca. Terminal.app tampoco lo pone; tmux si, porque alli
+    el nombre es de la ventana y no del proceso.
+    """
+    hechas = 0
+    for _titulo, cmd, cwd in pestanas:
+        orden = "sh %s" % shlex.quote(str(_guion(cmd, cwd)))
+        try:
+            r = subprocess.run(
+                ["osascript", "-e",
+                 'tell application "iTerm" to create window with default profile '
+                 'command %s' % json.dumps(orden)],
+                capture_output=True)
+        except OSError:
+            continue
+        hechas += r.returncode == 0
+    return hechas
+
+
+def _abre_en_kitty(pestanas):
+    """Una ventana de kitty por pestana, con su directorio y su titulo.
+
+    Dos cosas que hay que saber y que solo salen probandolo, no leyendo el `--help`:
+
+      · **`open -n`, y no `kitty` a secas.** Lanzado directamente, kitty se queda en
+        primer plano hasta que su orden termina, asi que `subprocess.run` bloquearia el
+        selector entero mientras haya una sesion abierta. En macOS la via es
+        `open -na kitty.app --args`, que devuelve al momento — igual que Warp.
+      · **`-n` y NO `-1`.** Con `--single-instance` la segunda llamada y la tercera se
+        las traga la instancia ya viva: `open` devuelve **0 en las tres y solo se abre
+        una**. Un `open` que sale bien no prueba que haya pasado nada, que es justo por
+        lo que aqui se cuenta lo que sale y no lo que se intenta.
+
+    El precio de `-n` es una instancia de kitty por ventana. Se paga: la alternativa
+    —control remoto, `kitty @ launch`— exige que el usuario haya activado
+    `allow_remote_control` en su configuracion, y un lanzador que solo funciona si te
+    han configurado la maquina no es un lanzador.
+
+    Solo macOS: en Linux la via seria `kitty --detach`, y en este repo los lanzadores no
+    se ponen a ojo. Falta una maquina Linux con escritorio donde comprobarlo.
+    """
+    hechas = 0
+    for titulo, cmd, cwd in pestanas:
+        try:
+            r = subprocess.run(["open", "-na", "kitty.app", "--args",
+                                "-d", cwd, "-T", str(titulo)[:40],
+                                "sh", str(_guion(cmd, cwd))],
+                               capture_output=True)
+        except OSError:
+            continue
+        hechas += r.returncode == 0
+    return hechas
+
+
 def _abre_en_terminal(pestanas):
     """Una ventana de Terminal.app por pestana, via AppleScript.
 
@@ -2196,6 +2258,21 @@ def hay_tmux_alrededor():
     return bool(os.environ.get("TMUX")) and bool(shutil.which(TMUX_BIN))
 
 
+def _hay_app(nombre):
+    """Si esa `.app` esta en alguno de los dos sitios donde se instalan en macOS."""
+    return sys.platform == "darwin" and any(
+        (base / nombre).is_dir()
+        for base in (pathlib.Path("/Applications"), HOME / "Applications"))
+
+
+def hay_iterm():
+    return _hay_app("iTerm.app")
+
+
+def hay_kitty():
+    return _hay_app("kitty.app")
+
+
 def hay_terminal_app():
     return sys.platform == "darwin" and pathlib.Path(
         "/System/Applications/Utilities/Terminal.app").is_dir()
@@ -2204,14 +2281,19 @@ def hay_terminal_app():
 # Como se abren VARIAS sesiones a la vez, en orden de preferencia. La clave es el nombre
 # que se ensena; el valor es (esta disponible, abrelas y di cuantas salieron).
 #
-# Warp primero porque abre ventanas de verdad sin efectos raros. tmux despues porque es
-# el unico que funciona fuera de macOS. Terminal.app el ultimo, por lo de la restauracion.
+# El orden sale de dos criterios, no del gusto: abrir ventanas de VERDAD, y no dejar nada
+# raro detras. Warp primero. iTerm2 y kitty despues, que tambien abren ventanas de verdad
+# —iTerm antes porque reutiliza su proceso y kitty gasta uno por ventana—. tmux luego,
+# porque es el unico que funciona fuera de macOS. Y Terminal.app el ultimo, por lo de la
+# restauracion de ventanas al reiniciar.
 #
-# Anadir iTerm2, kitty o gnome-terminal es una linea AQUI, pero ninguno esta instalado en
-# esta maquina y no se ponen a ojo: la forma exacta de pedirles una ventana con una orden
-# dentro se comprueba antes, como se hizo con estos tres.
+# gnome-terminal sigue fuera, y no por olvido: aqui los lanzadores no se ponen a ojo. La
+# forma exacta de pedirle una ventana con una orden dentro se comprueba antes —como se
+# hizo con estos cinco, uno a uno— y para eso hace falta una maquina Linux con escritorio.
 LANZADORES = {
     "warp": (lambda: hay_warp(), None),          # el suyo va por YAML, no por guion
+    "iterm": (hay_iterm, _abre_en_iterm),
+    "kitty": (hay_kitty, _abre_en_kitty),
     "tmux": (hay_tmux_alrededor, _abre_en_tmux),
     "terminal": (hay_terminal_app, _abre_en_terminal),
 }
@@ -2219,6 +2301,8 @@ LANZADORES = {
 
 _QUE_ABRE = {
     "warp": lambda: _("a real window each"),
+    "iterm": lambda: _("an iTerm2 window each"),
+    "kitty": lambda: _("a kitty window each"),
     "tmux": lambda: _("a tmux window each, where you already are"),
     "terminal": lambda: _("a Terminal.app window each"),
 }
@@ -5607,6 +5691,8 @@ def _T():
             "[1-9] abrir ah\u00ed    [otra tecla] cancelar",
         "Cancelled, nothing was opened.": "Cancelado, no se ha abierto nada.",
         "a real window each": "una ventana de verdad para cada una",
+        "an iTerm2 window each": "una ventana de iTerm2 para cada una",
+        "a kitty window each": "una ventana de kitty para cada una",
         "a tmux window each, where you already are":
             "una ventana de tmux para cada una, donde ya est\u00e1s",
         "a Terminal.app window each": "una ventana de Terminal.app para cada una",
@@ -5914,7 +6000,7 @@ def _T():
 _T()
 
 
-VERSION = "1.35.3"
+VERSION = "1.36.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

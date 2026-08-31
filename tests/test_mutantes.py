@@ -362,15 +362,45 @@ MUTANTES = [
      '    return [b for b in (\n        ((_("\\u25b8 another session is writing here too"),\n          _texto_colision(cl), 5, 3, False) if cl else None),\n',
      "    return [b for b in (\n", "test_panel_lateral.py"),
     # ── abrir varias por tmux, la unica via fuera de macOS ───────────────────
+    # Anclado por la funcion que le SIGUE, que es lo unico que distingue estos cuatro
+    # cuerpos identicos. Cuando se metieron iTerm2 y kitty entre medias, este mutante
+    # paso a romper kitty sin que nadie lo notara: seguia muriendo, pero por otro test.
     ("cuenta como abierta una ventana que tmux rechazo",
-     "        hechas += r.returncode == 0\n    return hechas\n\n\ndef _abre_en_terminal",
-     "        hechas += 1\n    return hechas\n\n\ndef _abre_en_terminal",
+     "        hechas += r.returncode == 0\n    return hechas\n\n\ndef _abre_en_iterm",
+     "        hechas += 1\n    return hechas\n\n\ndef _abre_en_iterm",
      "test_tmux_de_verdad.py"),
     ("el guion de la pestana no se borra antes del exec",
      '"rm -f -- %s\\n"', '"true %s\\n"', "test_tmux_de_verdad.py"),
     ("el titulo de la sesion no llega al nombre de la ventana",
      '"-n", str(titulo)[:40],\n                                "sh %s"',
      '"-n", "x",\n                                "sh %s"', "test_tmux_de_verdad.py"),
+    # ── iTerm2 y kitty: la forma exacta salio de medir, no del --help ────────
+    ("kitty vuelve a --single-instance y solo se abre una de las tres",
+     '["open", "-na", "kitty.app", "--args",', '["open", "-1a", "kitty.app", "--args",',
+     "test_lanzadores.py"),
+    ("kitty se lanza directo y se queda en primer plano bloqueando el selector",
+     '["open", "-na", "kitty.app", "--args",\n                                "-d", cwd, "-T", str(titulo)[:40],',
+     '["kitty",\n                                "-d", cwd, "-T", str(titulo)[:40],',
+     "test_lanzadores.py"),
+    ("a iTerm2 se le manda `do script`, que es la orden de Terminal.app",
+     "'tell application \"iTerm\" to create window with default profile '\n                 'command %s' % json.dumps(orden)",
+     "'tell application \"iTerm\" to do script %s' % json.dumps(orden)",
+     "test_lanzadores.py"),
+    ("kitty pierde el directorio de la sesion",
+     '                                "-d", cwd, "-T", str(titulo)[:40],',
+     '                                "-T", str(titulo)[:40],', "test_lanzadores.py"),
+    ("iTerm2 cuenta como abierta una ventana que el sistema rechazo",
+     "        hechas += r.returncode == 0\n    return hechas\n\n\ndef _abre_en_kitty",
+     "        hechas += 1\n    return hechas\n\n\ndef _abre_en_kitty",
+     "test_lanzadores.py"),
+    ("iTerm2 y kitty se declaran disponibles fuera de macOS",
+     '    return sys.platform == "darwin" and any(\n        (base / nombre).is_dir()',
+     '    return any(\n        (base / nombre).is_dir()', "test_lanzadores.py"),
+    ("un lanzador se queda sin decir que abre en el cuadro de elegir",
+     '    "kitty": lambda: _("a kitty window each"),\n', '',
+     "test_lanzadores.py"),
+    ("_QUE_ABRE describe un lanzador que ya no esta en la tabla",
+     '    "kitty": (hay_kitty, _abre_en_kitty),\n', '', "test_lanzadores.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

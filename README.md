@@ -989,11 +989,24 @@ appears. `SERENO_LANZADOR` pins one:
 | | what it opens | needs |
 |---|---|---|
 | **Warp** | a real window per session | macOS with Warp installed |
+| **iTerm2** | an iTerm2 window per session | macOS with iTerm2 installed |
+| **kitty** | a kitty window per session, with its title and its directory | macOS with kitty installed |
 | **tmux** | a tmux window per session, in the session you are already in | being *inside* tmux — the only one that works off macOS |
 | **Terminal.app** | a Terminal window per session | macOS |
 
 Terminal.app goes last on purpose: macOS **restores** its windows on reboot, so a day of
-handovers leaves windows coming back at you at startup.
+handovers leaves windows coming back at you at startup. iTerm2 comes before kitty because it
+reuses its process: kitty is launched with `open -n` and spends one instance per window.
+
+That `-n` is not an oversight. With `--single-instance` the second and third calls are swallowed
+by the instance already running and **`open` returns 0 for all three while opening a single
+window** — an `open` that exits fine does not prove anything happened. And it goes through `open`
+rather than calling `kitty` directly because that way it stays in the foreground until its command
+finishes, which would block the whole picker for as long as a session is open.
+
+**gnome-terminal** is not there, and that is not an oversight either: launchers in this program
+are not added by eye. The exact way to ask for a window with a command inside is measured first —
+as it was for all five, one at a time — and that needs a Linux machine with a desktop.
 
 VS Code is **not** in there, and that is a measured decision rather than an oversight: it has no
 way to run a command in its integrated terminal from outside. The one route that exists — a task
@@ -1005,8 +1018,9 @@ With none of them, `r` and `c` say so and stop, rather than announcing tabs nobo
 is what they did until 1.24.0, when they did not crash outright: `open` is a macOS command, and
 on Linux the call raised.
 
-For the two that are not Warp the command travels in a **script on disk** rather than inline:
-`do script` and `tmux new-window` take the order as one string, and a handover briefing has
+For the four that are not Warp the command travels in a **script on disk** rather than inline:
+`do script`, `create window ... command` and `tmux new-window` take the order as one string, and a
+handover briefing has
 newlines and quotes in it — inline is the same bug that used to break Warp's YAML, wearing a
 different suit. The script `cd`s to the session's directory (and **aborts** if it is gone rather
 than carrying on in `~`), unsets `TMUX` (reattaching is `tmux attach`, which inside tmux refuses
@@ -1270,7 +1284,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks ninety-two real guards, one at a time, on a copy of the tree, and
+  `tests/test_mutantes.py` breaks one hundred real guards, one at a time, on a copy of the tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.
 - **A test that isn't wired in doesn't count either.** The CI runs `tests/todos.py`, which

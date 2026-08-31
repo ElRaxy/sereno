@@ -964,11 +964,24 @@ ningún cuadro. `SERENO_LANZADOR` fija uno:
 | | qué abre | necesita |
 |---|---|---|
 | **Warp** | una ventana de verdad por sesión | macOS con Warp instalado |
+| **iTerm2** | una ventana de iTerm2 por sesión | macOS con iTerm2 instalado |
+| **kitty** | una ventana de kitty por sesión, con su título y su directorio | macOS con kitty instalado |
 | **tmux** | una ventana de tmux por sesión, en la que ya estás | estar *dentro* de tmux — el único que funciona fuera de macOS |
 | **Terminal.app** | una ventana de Terminal por sesión | macOS |
 
 Terminal.app va último a propósito: macOS **restaura** sus ventanas al reiniciar, así que un día
-de relevos deja ventanas resucitando al arrancar.
+de relevos deja ventanas resucitando al arrancar. iTerm2 va antes que kitty porque reutiliza su
+proceso: kitty se lanza con `open -n` y gasta una instancia por ventana.
+
+Ese `-n` no es un descuido. Con `--single-instance`, la segunda llamada y la tercera se las traga
+la instancia que ya está viva y **`open` devuelve 0 en las tres abriendo una sola ventana** — un
+`open` que sale bien no prueba que haya pasado nada. Y va por `open` y no llamando a `kitty`
+directamente porque así se queda en primer plano hasta que su orden termina, que bloquearía el
+selector entero mientras hubiera una sesión abierta.
+
+**gnome-terminal** no está, y aquí tampoco es un olvido: los lanzadores de este programa no se
+ponen a ojo. La forma exacta de pedir una ventana con una orden dentro se mide primero —como se
+hizo con los cinco, uno a uno— y para eso hace falta una máquina Linux con escritorio.
 
 VS Code **no** está, y no es un olvido sino una decisión medida: no tiene forma de ejecutar un
 comando en su terminal integrada desde fuera. La única vía que existe —una tarea con
@@ -976,12 +989,12 @@ comando en su terminal integrada desde fuera. La única vía que existe —una t
 con una que VS Code ya conocía. Abrir la carpeta sin enganchar la sesión sería justo la media
 verdad que este programa existe para no contar.
 
-Sin ninguno de los tres, `r` y `c` lo dicen y paran, en vez de anunciar pestañas que nadie abrió —
+Sin ninguno de los cinco, `r` y `c` lo dicen y paran, en vez de anunciar pestañas que nadie abrió —
 que es lo que hacían hasta la 1.24.0, cuando no reventaban directamente: `open` es un comando de
 macOS y en Linux la llamada lanzaba excepción.
 
-Para los dos que no son Warp, la orden viaja en un **guion en disco** y no inline: `do script` y
-`tmux new-window` reciben la orden como una sola cadena, y el briefing de un relevo lleva saltos
+Para los cuatro que no son Warp, la orden viaja en un **guion en disco** y no inline: `do script`,
+`create window ... command` y `tmux new-window` reciben la orden como una sola cadena, y el briefing de un relevo lleva saltos
 de línea y comillas — inline es el mismo fallo que rompía el YAML de Warp con otro traje. El guion
 hace `cd` al directorio de la sesión (y **aborta** si ya no está, en vez de seguir en `~`), quita
 `TMUX` del entorno (reenganchar es `tmux attach`, que dentro de tmux se niega con *sessions should
@@ -1236,7 +1249,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe noventa y dos guardas de verdad, una a una, sobre una copia del árbol, y
+  `tests/test_mutantes.py` rompe cien guardas de verdad, una a una, sobre una copia del árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.
 - **Un test que no está cableado tampoco vale.** El CI corre `tests/todos.py`, que recoge la
