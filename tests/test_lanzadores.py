@@ -192,18 +192,36 @@ def main():
     #       adorno —en un Linux normal no hay `/Applications`— pero `~/Applications` es
     #       una carpeta que cualquiera puede crear, y un lanzador que se ofrece donde no
     #       puede abrir nada deja al usuario con "0 de 3 abiertas" y sin explicacion.
-    plataforma_de_verdad = ns3["sys"].platform
+    #       Se falsean las DOS cosas: la plataforma y la existencia de las carpetas. Con
+    #       solo la plataforma, el caso pasaba en verde en una maquina sin iTerm2 ni
+    #       kitty —el CI, sin ir mas lejos— porque el `is_dir()` ya devolvia False por su
+    #       cuenta: el test aprobaba el guard sin haberlo ejercitado, y solo cazaba el
+    #       fallo en la maquina donde ambas apps estaban instaladas.
+    home_de_verdad = ns3["HOME"]
+
+    class SiempreEsta:
+        def __truediv__(self, otro):
+            return self
+        def is_dir(self):
+            return True
+    class TodoExiste:
+        Path = staticmethod(lambda *a, **k: SiempreEsta())
     class OtroSistema:
         platform = "linux"
         def __getattr__(self, k):
             return getattr(sys, k)
-    ns3["sys"] = OtroSistema()
+    ns3["sys"], ns3["pathlib"], ns3["HOME"] = OtroSistema(), TodoExiste(), SiempreEsta()
     for nombre in ("hay_iterm", "hay_kitty", "hay_terminal_app", "hay_warp"):
         if ns3[nombre]():
-            fallos.append(f"{nombre} dice que si fuera de macOS")
+            fallos.append(f"{nombre} dice que si fuera de macOS, con la carpeta ahi")
+    # Y con la plataforma de verdad: si las carpetas estan, los de macOS dicen que si.
+    # Sin este contraste el caso de arriba lo aprobaria tambien un `return False` pelado.
     ns3["sys"] = sys
-    if plataforma_de_verdad != sys.platform:
-        fallos.append("el doble de sys se quedo puesto")
+    if sys.platform == "darwin":
+        for nombre in ("hay_iterm", "hay_kitty", "hay_terminal_app", "hay_warp"):
+            if not ns3[nombre]():
+                fallos.append(f"{nombre} dice que no con su carpeta delante")
+    ns3["pathlib"], ns3["HOME"] = pathlib, home_de_verdad
 
     # 7c. Y ninguno de los dos cuenta como abierta una ventana que el sistema rechazo:
     #     `open` con una app que no esta y `osascript` con una app que no existe salen

@@ -46,6 +46,15 @@ macOS, 2026-08-31.
   `_QUE_ABRE` con un `.get()`, asi que a uno sin texto no le pasa nada — sale con el nombre
   pelado, sin explicacion, en la unica pantalla donde hay que elegir.
 
+**Un test que solo funcionaba en la maquina donde se escribio.** El caso que comprueba
+que iTerm2 y kitty no se ofrecen fuera de macOS falseaba la plataforma pero no la
+existencia de las carpetas, asi que en una maquina sin las dos apps —el CI, sin ir mas
+lejos— el `is_dir()` ya devolvia False por su cuenta: el guard se aprobaba sin haberlo
+ejercitado. Lo canto el propio catalogo al correr en el CI, con el mutante VIVO en los
+seis jobs y muerto en local. Ahora se falsean las dos cosas, y ademas se comprueba el
+contraste —con la plataforma de verdad y la carpeta delante, los de macOS dicen que si—,
+sin el cual un `return False` pelado tambien pasaria.
+
 **Y `tests/test_cifras_de_la_doc.py` aprendio a contar hasta mas de cien.** El catalogo
 cruzo los 99 con esta tanda y el lector de numeros en letras se quedaba corto: "cien" no
 era un numero que supiera leer, asi que la doc se quedaba sin vigilante justo al pasar la
