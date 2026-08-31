@@ -334,8 +334,34 @@ MUTANTES = [
     ("rellena cuenta caracteres en vez de columnas",
      '    return s + " " * max(0, cols - ancho(s))',
      '    return s + " " * max(0, cols - len(s))', "test_ancho_en_columnas.py"),
+    # ── el reparto del panel lateral ─────────────────────────────────────────
+    ("el recorrido no reserva su sitio y se lo come lo de arriba",
+     "    base_ruta = base_campos - alto_ruta", "    base_ruta = base_campos",
+     "test_panel_lateral.py"),
+    ("los pasos del recorrido no se acotan al sitio que queda",
+     "min(RUTA_VISIBLE, n_ruta_total, sitio)", "min(RUTA_VISIBLE, n_ruta_total)",
+     "test_panel_lateral.py"),
+    ("un bloque puede quedarse con cero lineas bajo su cabecera",
+     "else max(1, min(q, round(libre * q / max(1, total))))",
+     "else min(q, round(libre * q / max(1, total)))",
+     "test_panel_lateral.py"),
+    ("los campos ceden por abajo y se salen del area",
+     "fondo - n_campos + 1", "fondo - n_campos + 3", "test_panel_lateral.py"),
+    ("un recorrido que no cabe pinta su cabecera sola",
+     "        hay_ruta = n_ruta > 0", "        hay_ruta = True",
+     "test_panel_lateral.py"),
+    ("los campos sin valor llegan al panel como etiquetas en blanco",
+     "    return [c for c in campos if c[1]]", "    return list(campos)",
+     "test_panel_lateral.py"),
+    ("'ahora mismo' se pinta ademas del recorrido, diciendo lo mismo dos veces",
+     'if (not hay_ruta and (r.get("pulso") or {}).get("herramienta"))',
+     'if ((r.get("pulso") or {}).get("herramienta"))', "test_panel_lateral.py"),
+    ("los bloques sin texto se pintan como cabeceras huecas",
+     "    ) if b and b[1]]", "    ) if b]", "test_panel_lateral.py"),
+    ("el choque deja de ir el primero de todos",
+     '    return [b for b in (\n        ((_("\\u25b8 another session is writing here too"),\n          _texto_colision(cl), 5, 3, False) if cl else None),\n',
+     "    return [b for b in (\n", "test_panel_lateral.py"),
 ]
-
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 
 
