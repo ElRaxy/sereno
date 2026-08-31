@@ -361,6 +361,16 @@ MUTANTES = [
     ("el choque deja de ir el primero de todos",
      '    return [b for b in (\n        ((_("\\u25b8 another session is writing here too"),\n          _texto_colision(cl), 5, 3, False) if cl else None),\n',
      "    return [b for b in (\n", "test_panel_lateral.py"),
+    # ── abrir varias por tmux, la unica via fuera de macOS ───────────────────
+    ("cuenta como abierta una ventana que tmux rechazo",
+     "        hechas += r.returncode == 0\n    return hechas\n\n\ndef _abre_en_terminal",
+     "        hechas += 1\n    return hechas\n\n\ndef _abre_en_terminal",
+     "test_tmux_de_verdad.py"),
+    ("el guion de la pestana no se borra antes del exec",
+     '"rm -f -- %s\\n"', '"true %s\\n"', "test_tmux_de_verdad.py"),
+    ("el titulo de la sesion no llega al nombre de la ventana",
+     '"-n", str(titulo)[:40],\n                                "sh %s"',
+     '"-n", "x",\n                                "sh %s"', "test_tmux_de_verdad.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

@@ -1085,7 +1085,7 @@ runs, and it's where to report anything exploitable.
 | | |
 |:--|:--|
 | **macOS** | works, and it's where it was built |
-| **Linux** | works — CI runs the real TUI in a pty on Ubuntu |
+| **Linux** | works — CI runs the real TUI in a pty on Ubuntu, and opens tabs by calling tmux for real, which is the only route there |
 | **Windows** | no. `curses` isn't in the Python standard library there. **WSL is fine** |
 | **Python** | 3.8 or newer, no packages |
 | **Terminal** | any. Uses 256 colours when available, degrades cleanly when not |
@@ -1227,7 +1227,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are fifty-eight
+collects the whole folder, prints a line per file and ends with the count. There are fifty-nine
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1270,7 +1270,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks eighty-nine real guards, one at a time, on a copy of the tree, and
+  `tests/test_mutantes.py` breaks ninety-two real guards, one at a time, on a copy of the tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.
 - **A test that isn't wired in doesn't count either.** The CI runs `tests/todos.py`, which
