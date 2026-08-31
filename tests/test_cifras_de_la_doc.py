@@ -32,10 +32,26 @@ VEINTIS = {"veintiuno": 21, "veintiuna": 21, "veintidos": 22, "veintidós": 22,
 
 
 def a_numero(txt):
-    """"forty-eight" -> 48, "cuarenta y ocho" -> 48, "veinticinco" -> 25. None si no cuela."""
-    t = txt.strip().lower()
+    """"forty-eight" -> 48, "cuarenta y ocho" -> 48, "cien" -> 100. None si no cuela.
+
+    Las centenas llegaron el dia que el catalogo de mutantes paso de 99: hasta entonces
+    "cien" no era un numero que este test supiera leer, y la doc quedaba sin vigilante
+    justo al cruzar la cifra redonda.
+    """
+    t = " ".join(txt.strip().lower().split())
+    if t in ("cien", "one hundred", "a hundred"):
+        return 100
+    for cabeza, largo in (("ciento ", 100), ("one hundred and ", 100),
+                          ("a hundred and ", 100), ("one hundred ", 100)):
+        if t.startswith(cabeza):
+            resto = a_numero(t[len(cabeza):])
+            return None if resto is None else largo + resto
     if t in VEINTIS:
         return VEINTIS[t]
+    if t in UNIDADES_ES:
+        return UNIDADES_ES[t]
+    if t in UNIDADES_EN:
+        return UNIDADES_EN[t]
     if t in DECENAS_EN:
         return DECENAS_EN[t]
     if t in DECENAS_ES:
@@ -58,13 +74,13 @@ AFIRMACIONES = [
      "el README castellano anuncia cuantos tests hay"),
     ("CONTRIBUTING.md", r"\b([\w-]+) tests,", "tests",
      "CONTRIBUTING anuncia cuantos tests hay"),
-    ("README.md", r"breaks ([\w-]+) real guards", "mutantes",
+    ("README.md", r"breaks ([\w -]+?) real guards", "mutantes",
      "el README ingles anuncia cuantos mutantes rompe el catalogo"),
-    ("README.es.md", r"rompe ((?:\w+ y \w+|\w+)) guardas", "mutantes",
+    ("README.es.md", r"rompe ((?:\w+ y \w+|\w+ \w+|\w+)) guardas", "mutantes",
      "el README castellano anuncia cuantos mutantes rompe el catalogo"),
-    ("CONTRIBUTING.md", r"breaks ([\w-]+) real guards", "mutantes",
+    ("CONTRIBUTING.md", r"breaks ([\w -]+?) real guards", "mutantes",
      "CONTRIBUTING anuncia cuantos mutantes rompe el catalogo"),
-    ("CONTRIBUTING.md", r"tests, ([\w-]+) mutants", "mutantes",
+    ("CONTRIBUTING.md", r"tests, ([\w -]+?) mutants", "mutantes",
      "CONTRIBUTING los repite en la nota sobre codigo asistido"),
 ]
 

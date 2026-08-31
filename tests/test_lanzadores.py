@@ -85,10 +85,24 @@ def main():
     # 5. La tabla: el ORDEN de verdad, el de `LANZADORES`, no el del sustituto de abajo.
     #    Sin esto, invertir tmux y Terminal.app en el programa pasaba el test entero: los
     #    casos de eleccion montan su propia tabla y no verian el cambio.
-    if list(ns["LANZADORES"]) != ["warp", "tmux", "terminal"]:
+    if list(ns["LANZADORES"]) != ["warp", "iterm", "kitty", "tmux", "terminal"]:
         fallos.append(f"el orden de LANZADORES cambio: {list(ns['LANZADORES'])} "
-                      "(Warp abre ventanas de verdad; Terminal.app va ultimo porque "
-                      "macOS restaura sus ventanas al reiniciar)")
+                      "(los que abren ventanas de verdad primero —iTerm antes que kitty, "
+                      "que gasta un proceso por ventana—; tmux luego, que es el unico "
+                      "que va fuera de macOS; Terminal.app ultimo porque macOS restaura "
+                      "sus ventanas al reiniciar)")
+
+    # 5b. Todo lanzador de la tabla dice QUE abre. El cuadro tira de `_QUE_ABRE` con
+    #      un `.get(n, lambda: n)`, asi que a uno sin texto no le pasa nada: sale con
+    #      el nombre pelado y sin explicacion, en la unica pantalla donde hay que
+    #      elegir entre varios. Un lanzador nuevo es exactamente cuando se olvida.
+    sin_texto = [n for n in ns["LANZADORES"] if n not in ns["_QUE_ABRE"]]
+    if sin_texto:
+        fallos.append(f"lanzadores sin decir que abren: {sin_texto}")
+    sobran = [n for n in ns["_QUE_ABRE"] if n not in ns["LANZADORES"]]
+    if sobran:
+        fallos.append(f"_QUE_ABRE describe lanzadores que ya no existen: {sobran}")
+
 
     # 6. Se elige el primero disponible, y `SERENO_LANZADOR` fuerza.
     ns["hay_warp"] = lambda: False
@@ -119,7 +133,8 @@ def main():
             raise FileNotFoundError(2, "No such file or directory")
     ns2["subprocess"] = SinBinario
     pest = [("t", "echo x", str(tmp))]
-    for nombre in ("_abre_en_tmux", "_abre_en_terminal"):
+    for nombre in ("_abre_en_tmux", "_abre_en_terminal", "_abre_en_iterm",
+                   "_abre_en_kitty"):
         try:
             n = ns2[nombre](pest)
         except Exception as e:
@@ -127,6 +142,82 @@ def main():
             continue
         if n != 0:
             fallos.append(f"{nombre} dice haber abierto {n} sin binario")
+
+    # 7b. Lo que se le pide EXACTAMENTE a iTerm2 y a kitty, que no es cosmetica: las dos
+    #     formas se eligieron midiendo, y una tabla de argumentos que se toque sin volver
+    #     a medir rompe el lanzador sin que nada se queje.
+    #
+    #     kitty lleva `-n` y **no** `-1`: con `--single-instance` la segunda llamada y la
+    #     tercera se las traga la instancia ya viva, y `open` devuelve **0 en las tres**
+    #     abriendo una sola ventana (medido 2026-08-31, kitty 0.48.2). Contar ese 0 como
+    #     exito es justo el fallo que `abre_varias` existe para no tener.
+    #
+    #     Y va por `open`, no por `kitty` a secas: lanzado directo se queda en primer
+    #     plano hasta que su orden termina, y `subprocess.run` colgaria el selector
+    #     entero mientras hubiera una sesion abierta.
+    ns3 = carga(tmp / "lanzar3")
+    vistas = []
+    class Apunta:
+        @staticmethod
+        def run(argv, *a, **k):
+            vistas.append(argv)
+            class R: returncode = 0
+            return R()
+    ns3["subprocess"] = Apunta
+    ns3["_abre_en_kitty"]([("t", "echo x", str(tmp))])
+    argv = vistas[-1] if vistas else []
+    if argv[:4] != ["open", "-na", "kitty.app", "--args"]:
+        fallos.append(f"kitty no se lanza por `open -na kitty.app --args`: {argv[:4]}")
+    if "-1" in argv or "--single-instance" in argv:
+        fallos.append("kitty lleva --single-instance: la 2a y la 3a ventana no se abren "
+                      "y `open` devuelve 0 igual")
+    if "-d" not in argv or argv[argv.index("-d") + 1] != str(tmp):
+        fallos.append("kitty no recibe el directorio de la sesion en `-d`")
+    if "-T" not in argv:
+        fallos.append("kitty no recibe el titulo en `-T`")
+
+    vistas.clear()
+    ns3["_abre_en_iterm"]([("t", "echo x", str(tmp))])
+    argv = vistas[-1] if vistas else []
+    guion = " ".join(argv)
+    if argv[:2] != ["osascript", "-e"]:
+        fallos.append(f"iTerm2 no se pide por osascript: {argv[:2]}")
+    if "create window with default profile command" not in guion:
+        fallos.append("iTerm2 no recibe `create window with default profile command`; "
+                      "`do script` es de Terminal.app y iTerm2 no lo entiende")
+    if "do script" in guion:
+        fallos.append("a iTerm2 se le manda `do script`, que es la orden de Terminal.app")
+
+    # 7bis. iTerm2 y kitty son de macOS y aqui se declaran de macOS. El guard parece de
+    #       adorno —en un Linux normal no hay `/Applications`— pero `~/Applications` es
+    #       una carpeta que cualquiera puede crear, y un lanzador que se ofrece donde no
+    #       puede abrir nada deja al usuario con "0 de 3 abiertas" y sin explicacion.
+    plataforma_de_verdad = ns3["sys"].platform
+    class OtroSistema:
+        platform = "linux"
+        def __getattr__(self, k):
+            return getattr(sys, k)
+    ns3["sys"] = OtroSistema()
+    for nombre in ("hay_iterm", "hay_kitty", "hay_terminal_app", "hay_warp"):
+        if ns3[nombre]():
+            fallos.append(f"{nombre} dice que si fuera de macOS")
+    ns3["sys"] = sys
+    if plataforma_de_verdad != sys.platform:
+        fallos.append("el doble de sys se quedo puesto")
+
+    # 7c. Y ninguno de los dos cuenta como abierta una ventana que el sistema rechazo:
+    #     `open` con una app que no esta y `osascript` con una app que no existe salen
+    #     los dos con rc distinto de 0 (medido), asi que el contador puede fiarse de el.
+    class Rechaza:
+        @staticmethod
+        def run(*a, **k):
+            class R: returncode = 1
+            return R()
+    ns3["subprocess"] = Rechaza
+    for nombre in ("_abre_en_iterm", "_abre_en_kitty"):
+        n_ab = ns3[nombre]([("t", "echo x", str(tmp))] * 3)
+        if n_ab != 0:
+            fallos.append(f"{nombre} dice haber abierto {n_ab} con el sistema diciendo que no")
 
     # 8. El eslabon de en medio: `abre_varias` PROPAGA lo que cuenta el abridor, no el
     #    numero de pestanas que le pidieron. Es la pieza entera de la 1.24.0 —que la

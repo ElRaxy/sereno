@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.36.0
+
+**iTerm2 y kitty abren sesiones.** Eran dos de los tres que el codigo llevaba meses
+anunciando como "una linea AQUI", con la condicion de que la forma exacta de pedirles una
+ventana con una orden dentro se midiera antes. Se ha medido, y la linea son dos.
+
+| | que abre | necesita |
+|---|---|---|
+| **iTerm2** | una ventana por sesion | macOS con iTerm2 |
+| **kitty** | una ventana por sesion, con su titulo y su directorio | macOS con kitty |
+
+Van detras de Warp y delante de tmux: abren ventanas de verdad y no arrastran la
+restauracion de ventanas de Terminal.app. iTerm2 antes que kitty porque reutiliza su
+proceso.
+
+**Las dos cosas que solo salen probandolo, no leyendo el `--help`:**
+
+- **kitty lleva `-n` y NO `--single-instance`.** Con `-1`, la segunda llamada y la tercera
+  se las traga la instancia que ya esta viva: **`open` devuelve 0 en las tres y se abre
+  una sola ventana**. Un `open` que sale bien no prueba que haya pasado nada — es el mismo
+  fallo que la 1.24.0 arreglo en otra puerta. El precio de `-n` es una instancia de kitty
+  por ventana, y se paga: la alternativa es el control remoto (`kitty @ launch`), que exige
+  que el usuario haya activado `allow_remote_control` en su configuracion, y un lanzador
+  que solo funciona si te han configurado la maquina no es un lanzador.
+- **Va por `open` y no llamando a `kitty`.** Lanzado directo se queda en primer plano hasta
+  que su orden termina, asi que `subprocess.run` colgaria el selector entero mientras
+  hubiera una sesion abierta.
+
+iTerm2 no entiende `do script` —esa es la orden de Terminal.app— sino `create window with
+default profile command`. Y va sin nombre de ventana a proposito: `set name of current
+session` se acepta y devuelve `missing value`, y ademas el titulo lo pisa el proceso que
+lanza el guion en cuanto arranca.
+
+**Verificado abriendo ventanas de verdad**, llamando a las funciones del programa y no a
+un comando suelto: tres pestañas por lanzador, las seis abiertas, cada orden ejecutandose
+**en el directorio que se pidio**, y cero guiones sin borrar. iTerm2 3.6.11 y kitty 0.48.2,
+macOS, 2026-08-31.
+
+- **Ocho mutantes nuevos** en el catalogo (92 -> 100), y uno **reanclado**: el que rompe el
+  contador de tmux apuntaba al cuerpo por lo que venia detras, y al meter estos dos entre
+  medias paso a romper kitty sin que nadie lo notara. Seguia muriendo, pero por otro test.
+  Ahora `tests/test_lanzadores.py` fija ademas la forma exacta de cada orden, que es lo que
+  se midio, y que **todo lanzador de la tabla diga que abre**: el cuadro de elegir tira de
+  `_QUE_ABRE` con un `.get()`, asi que a uno sin texto no le pasa nada — sale con el nombre
+  pelado, sin explicacion, en la unica pantalla donde hay que elegir.
+
+**Y `tests/test_cifras_de_la_doc.py` aprendio a contar hasta mas de cien.** El catalogo
+cruzo los 99 con esta tanda y el lector de numeros en letras se quedaba corto: "cien" no
+era un numero que supiera leer, asi que la doc se quedaba sin vigilante justo al pasar la
+cifra redonda — y el aviso, encima, se leia como que alguien habia reescrito la frase.
+
+**gnome-terminal sigue fuera**, y por la misma regla que hasta hoy dejaba fuera a estos
+dos: no se pone a ojo, y para medirlo hace falta una maquina Linux con escritorio.
+
 ## 1.35.3
 
 **Abrir varias por tmux ya se prueba llamando a tmux.** Era la unica pieza del programa
