@@ -4286,6 +4286,51 @@ def reparto_panel(fila0, fondo, n_campos, bloques, n_ruta_total, n_alertas,
     return base_campos, base_ruta, n_ruta, hay_ruta, cuotas
 
 
+def leer_sgr(win, ungetch, espera, restaurar=None):
+    """Parsea `CSI < boton ; x ; y M|m` a mano -> (boton, x, y, pulsado).
+
+    El ncurses que trae macOS es el 6.0 de 2015 y solo conoce el raton x11 de
+    `kmous=\\E[M`: medido en esta maquina, un evento SGR le llega como teclas
+    sueltas (27, 91, 60, 48...) y se pierde entero. El terminal SI habla SGR,
+    asi que se pide y se parsea aqui. Con un ncurses moderno esto ni se ejecuta:
+    el evento sale por KEY_MOUSE antes de llegar.
+
+    Vivia dentro de `pick_ui` y salio de ahi para poder probarla: dentro no habia forma
+    de darle una secuencia de teclas y mirar que entiende. `ungetch` y `espera` se le
+    pasan porque son lo unico que tomaba del entorno de `pick_ui`, y `curses.ungetch`
+    exige un `initscr()` previo: recibirlo en vez de llamarlo la deja probable sin
+    arrancar ninguna interfaz, y quien la llama ya tiene las dos cosas a mano.
+    """
+    win.timeout(30)          # la secuencia viaja de una pieza; 30 ms sobran
+    try:
+        k = win.getch()
+        if k != ord("["):
+            if k != -1:
+                ungetch(k)
+            return None
+        if win.getch() != ord("<"):
+            return None
+        campos, num = [], ""
+        for _ in range(24):
+            k = win.getch()
+            if k == ord(";"):
+                campos.append(num)
+                num = ""
+            elif k in (ord("M"), ord("m")):
+                campos.append(num)
+                if len(campos) != 3 or not all(c.isdigit() for c in campos):
+                    return None
+                b, mx, my = (int(c) for c in campos)
+                return b, mx - 1, my - 1, k == ord("M")
+            elif 48 <= k <= 57:
+                num += chr(k)
+            else:
+                return None
+    finally:
+        win.timeout(espera if restaurar is None else restaurar)
+    return None
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -4383,44 +4428,6 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             sys.stdout.flush()
         espera = 2500 if recargar else -1
 
-        def leer_sgr(win, restaurar=None):
-            """Parsea `CSI < boton ; x ; y M|m` a mano -> (boton, x, y, pulsado).
-
-            El ncurses que trae macOS es el 6.0 de 2015 y solo conoce el raton x11 de
-            `kmous=\\E[M`: medido en esta maquina, un evento SGR le llega como teclas
-            sueltas (27, 91, 60, 48...) y se pierde entero. El terminal SI habla SGR,
-            asi que se pide y se parsea aqui. Con un ncurses moderno esto ni se ejecuta:
-            el evento sale por KEY_MOUSE antes de llegar.
-            """
-            win.timeout(30)          # la secuencia viaja de una pieza; 30 ms sobran
-            try:
-                k = win.getch()
-                if k != ord("["):
-                    if k != -1:
-                        curses.ungetch(k)
-                    return None
-                if win.getch() != ord("<"):
-                    return None
-                campos, num = [], ""
-                for _ in range(24):
-                    k = win.getch()
-                    if k == ord(";"):
-                        campos.append(num)
-                        num = ""
-                    elif k in (ord("M"), ord("m")):
-                        campos.append(num)
-                        if len(campos) != 3 or not all(c.isdigit() for c in campos):
-                            return None
-                        b, mx, my = (int(c) for c in campos)
-                        return b, mx - 1, my - 1, k == ord("M")
-                    elif 48 <= k <= 57:
-                        num += chr(k)
-                    else:
-                        return None
-            finally:
-                win.timeout(espera if restaurar is None else restaurar)
-            return None
-
         def tecla_limpia(win):
             """Una pulsacion de verdad: descarta el raton. Sin esto, pasar el raton por
             encima de un dialogo lo cerraba — y en el de cerrar sesiones, lo cancelaba."""
@@ -4429,7 +4436,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 if k == curses.KEY_MOUSE:
                     continue
                 if k == 27 and raton:
-                    if leer_sgr(win, -1) is None:
+                    if leer_sgr(win, curses.ungetch, espera, -1) is None:
                         return 27          # ESC de verdad: cierra el dialogo
                     continue               # era el raton: seguimos esperando
                 return k
@@ -5053,7 +5060,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                       bool(bs & (curses.BUTTON1_PRESSED | curses.BUTTON1_CLICKED)),
                       bool(bs & (curses.BUTTON3_PRESSED | curses.BUTTON3_CLICKED)))
             elif c == 27 and raton:                   # ncurses no sabe: SGR a mano
-                sgr = leer_sgr(stdscr)
+                sgr = leer_sgr(stdscr, curses.ungetch, espera)
                 if not sgr:
                     continue
                 b, mx, my, pulsado = sgr
@@ -5987,7 +5994,7 @@ def _T():
 _T()
 
 
-VERSION = "1.36.2"
+VERSION = "1.36.3"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
