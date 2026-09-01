@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.36.4
+
+**La fila de "(nada coincide)" tenia una guarda sin red.** Cuando el filtro no casa con
+nada, la lista no se queda sin filas: se pinta una de mentira que lo dice. Eso evita
+dividir por cero al mover el cursor, pero pone al alcance del dedo una fila que no es una
+sesion, con el `name` vacio. Marcarla mete una cadena vacia en la seleccion, y a partir
+de ahi el programa cree que tienes algo marcado: deja de avisarte de que marques y los
+contadores cuentan un fantasma.
+
+La guarda que lo impide ya estaba, y esta bien puesta. Lo que no estaba era la red:
+**romperla dejaba los 65 tests en verde**. Ahora tiene tres mutantes, y por sus dos
+lados, porque descartar de mas es igual de malo que descartar de menos — si se come la
+`q` te quedas encerrado en una lista sin nada, y si se come el borrar no puedes deshacer
+el filtro que te dejo ahi: la unica salida seria matar el proceso.
+
+**Con reloj, ademas.** El doble de curses devuelve `q` cuando se le acaban las teclas,
+asi que el mutante que se come esa tecla dejaba el bucle dando vueltas hasta el tope de
+300 s del catalogo. Moria —colgarse tambien es quejarse— pero tardaba cinco minutos, y
+eso lo pagan doce jobs en cada pull request. Con una alarma de diez segundos el catalogo
+entero baja de **247 s a 74 s**, y el fallo dice ademas que se colgo, que es un
+diagnostico distinto de "no marco lo que debia".
+
+**66 tests y 120 mutantes**, los 120 muertos.
+
 ## 1.36.3
 
 **El parser del raton sale de `pick_ui` y por fin se puede probar.** `leer_sgr` vivia

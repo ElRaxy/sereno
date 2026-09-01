@@ -107,6 +107,20 @@ MUTANTES = [
      "        for _ in range(24):", "            while True:",
      "test_raton_sgr.py"),
 
+    # ── la fila de "(nada coincide)" no es una sesion ────────────────────────
+    ("las teclas de seleccion llegan a la fila que no es una sesion",
+     '            if rows and rows[0].get("_vacio"):\n                if c in (ord("q"), ord("Q")):',
+     '            if False:\n                if c in (ord("q"), ord("Q")):',
+     "test_lista_vacia.py"),
+    ("con la lista vacia la guarda se come tambien la tecla de salir",
+     '                if c in (ord("q"), ord("Q")):\n                    return\n                if c in (curses.KEY_BACKSPACE, 127, 8):\n                    filtro = ""',
+     '                if c in (curses.KEY_BACKSPACE, 127, 8):\n                    filtro = ""',
+     "test_lista_vacia.py"),
+    ("con la lista vacia ya no se puede deshacer el filtro",
+     '                if c in (curses.KEY_BACKSPACE, 127, 8):\n                    filtro = ""\n                continue',
+     '                continue',
+     "test_lista_vacia.py"),
+
     # ── nada de codigo que no llama nadie ────────────────────────────────────
     ("vuelve a colarse una funcion que no llama nadie",
      "def hook_line(rows, items):",
