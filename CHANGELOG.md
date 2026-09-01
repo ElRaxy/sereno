@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.36.3
+
+**El parser del raton sale de `pick_ui` y por fin se puede probar.** `leer_sgr` vivia
+dentro de la funcion de 1.132 lineas, y ahi dentro no habia forma de darle una secuencia
+de teclas y mirar que entiende: de sus 27 lineas ejecutables, los tests tocaban **una**.
+Ahora esta a nivel de modulo con **27 de 27**, dos tests y siete mutantes encima.
+`pick_ui` baja a **1.094 lineas** y el fichero entero sube del 75,6% al **76,6%**.
+
+Es la misma operacion que se hizo con `lineas_now` y con el reparto del panel: sacar una
+pieza pura y probarla sin curses. La unica diferencia esta en la firma — `ungetch` y
+`espera` se le pasan en vez de tomarlos del entorno, porque **`curses.ungetch` exige un
+`initscr()` previo** y llamandolo por su cuenta la funcion no se puede probar sin
+arrancar una interfaz de verdad. Quien la llama ya tiene las dos cosas a mano.
+
+**Por que importa lo que hace esa funcion.** El ncurses que trae macOS es el 6.0 de 2015
+y solo conoce el raton x11: un evento SGR le llega como teclas sueltas y se pierde
+entero. El terminal si habla SGR, asi que el programa lo pide y lo parsea a mano. Y
+corre **detras de un ESC**, que es tambien la tecla que cierra un dialogo: si se traga
+la tecla siguiente creyendo que era un raton, la interfaz se come pulsaciones; si
+devuelve coordenadas de una secuencia a medias, el click cae en la fila equivocada — y
+en esta lista la fila equivocada es la sesion equivocada.
+
+**Dos tests, y el segundo existe por lo que el primero no puede ver:**
+
+- `test_raton_sgr.py` le da secuencias a una ventana de mentira: los cinco eventos que
+  si son un evento —incluida una columna que el protocolo viejo no sabe decir, que es
+  justo por lo que se pide SGR— y ocho que no lo son y no pueden inventarse. Ademas
+  vigila que la tecla ajena vuelva al buffer y que la espera corta de 30 ms se restaure
+  siempre, tambien cuando la secuencia esta rota.
+- `test_raton_en_la_tui.py` abre un pseudo-terminal, arranca el programa y le **escribe
+  la secuencia como la escribiria el terminal**. Es lo unico que comprueba el enlace:
+  los argumentos que el bucle de teclas le pasa no los ve ningun test unitario, asi que
+  un cambio de firma que deje un sitio sin actualizar pasaria con el parser en verde y
+  reventaria al primer click. Probado: con un solo sitio en la firma vieja, el test cae
+  con la traza.
+
+**65 tests y 117 mutantes**, los 117 muertos.
+
 ## 1.36.2
 
 **Fuera `_fecha_corta`.** Once lineas que no llamaba nadie: entraron con el volcado
