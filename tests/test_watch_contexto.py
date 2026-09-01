@@ -161,6 +161,21 @@ def main():
         if nivel(fila(None)) != 0:
             fallos.append("avisa de una sesion cuyo contexto no consta")
 
+        # ── el escalon se cruza AL llegar, no al pasarse ─────────────────────
+        # 160.000 de 200.000 es el 80,0% clavado. Con la comparacion mal puesta —un
+        # `>` donde va un `>=`— el aviso del 80 no sale hasta el 80,1%, y el del 90
+        # hasta el 90,1%: no se pierde el aviso, se pierde el momento en que sirve, y
+        # eso no lo ve ningun caso que pruebe con 85% y 95%. Los dos escalones, porque
+        # el ultimo es el que decide cual gana cuando se cruzan dos a la vez.
+        for tokens, escalon in ((160_000, 80), (180_000, 90)):
+            if nivel(fila(tokens)) != escalon:
+                fallos.append("justo en el %d%% el escalon es %d, se esperaba %d: el "
+                              "aviso llega tarde" % (escalon, nivel(fila(tokens)), escalon))
+        # Y una micra por debajo NO cuenta, que es la otra mitad de la frontera.
+        if nivel(fila(159_999)) != 0:
+            fallos.append("justo por debajo del 80%% ya avisa: da %d"
+                          % nivel(fila(159_999)))
+
         # ── los escalones son configurables, y se pueden apagar ────────────────
         casos = {"": (80, 90), "70,85": (70, 85), "0": (), "off": (),
                  "95": (95,), "90,70": (70, 90), "150,60": (60,)}
