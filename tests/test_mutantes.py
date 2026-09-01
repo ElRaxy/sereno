@@ -107,6 +107,27 @@ MUTANTES = [
      "        for _ in range(24):", "            while True:",
      "test_raton_sgr.py"),
 
+    # ── las pastillas del pie: donde pinchas es lo que se ejecuta ────────────
+    ("las zonas de las pastillas del pie se solapan con la vecina",
+     "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))",
+     "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) + 1))",
+     "test_zonas_del_pie.py"),
+    ("las pastillas se pintan pegadas y su zona se come la de al lado",
+     "        hx += ancho(pastilla) + sep", "        hx += ancho(pastilla)",
+     "test_zonas_del_pie.py"),
+    ("el pie sigue pintando pastillas que no caben en la ventana",
+     "        if hx + ancho(pastilla) >= w - 2:\n            break",
+     "        if False:\n            break",
+     "test_zonas_del_pie.py"),
+    ("un click cuenta para la zona de la fila de al lado",
+     "    return next((z for z in zonas if z[0] == my and z[1] <= mx <= z[2]), None)",
+     "    return next((z for z in zonas if z[1] <= mx <= z[2]), None)",
+     "test_zonas_del_pie.py"),
+    ("la ultima columna de una zona deja de contar como suya",
+     "    return next((z for z in zonas if z[0] == my and z[1] <= mx <= z[2]), None)",
+     "    return next((z for z in zonas if z[0] == my and z[1] <= mx < z[2]), None)",
+     "test_zonas_del_pie.py"),
+
     # ── los cinco que encontro el barrido de mutacion del 2026-09-01 ─────────
     ("`git clean` se anuncia sin mirar si lleva -f, o un -f de otro subcomando lo dispara",
      '            elif sub == "clean" and any(re.match(r"-[a-zA-Z]*f", a) for a in resto):',

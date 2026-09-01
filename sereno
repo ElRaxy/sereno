@@ -4331,6 +4331,49 @@ def leer_sgr(win, ungetch, espera, restaurar=None):
     return None
 
 
+def pastillas_pie(w, x0=2, sep=2):
+    """Las pastillas del pie que CABEN en `w` columnas: [(tecla, texto, cod, x, xf)].
+
+    `x` es la primera columna que ocupa la pastilla y `xf` la ultima — la de dentro, no
+    la siguiente. De ahi sale su zona clicable, y por eso la resta importa: sumar en vez
+    de restar la solapa dos columnas con la vecina y un click en el borde ejecuta la
+    tecla de al lado. Una de esas teclas es cerrar.
+
+    El orden NO es decorativo: va de mas esencial a menos, porque se para en la primera
+    que no cabe y a 80 columnas —que es media flota— solo entran cinco. `? ayuda` era la
+    sexta y la puerta al resto de teclas no se veia justo en la ventana donde mas falta
+    hace. `TAB` baja porque las pestanas ya salen pintadas arriba, con sus nombres.
+
+    Salio de `pick_ui` para poder probarla: ahi dentro la tabla de zonas no se puede
+    mirar desde fuera, asi que nada impedia que dos pastillas se pisaran.
+    """
+    out, hx = [], x0
+    for tecla, txt, cod in ((_("ENTER"), _("open"), 10),
+                            (_("SPACE"), _("mark"), 32),
+                            ("x", _("close"), ord("x")),
+                            ("?", _("help"), ord("?")),
+                            ("/", _("filter"), ord("/")),
+                            ("s", _("sort"), ord("s")),
+                            ("TAB", "CLI", 9),
+                            ("q", _("quit"), ord("q"))):
+        pastilla = f" {tecla} {txt} "
+        if hx + ancho(pastilla) >= w - 2:
+            break
+        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))
+        hx += ancho(pastilla) + sep
+    return out
+
+
+def zona_en(zonas, mx, my):
+    """La primera zona que contiene el punto, o None. `zonas` = (y, x0, x1, que, dato).
+
+    Es lo unico que traduce "donde has pinchado" a "que has pinchado", asi que decide
+    tanto el click como el simple pasar por encima. Vale la PRIMERA que contiene el
+    punto: si dos se solapan gana la que se anadio antes, que es como se pinto.
+    """
+    return next((z for z in zonas if z[0] == my and z[1] <= mx <= z[2]), None)
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -4926,27 +4969,11 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # Pastillas con fondo en vez de texto suelto: se leen como botones, que es
             # lo que ya son — se pinchan y hacen lo mismo que su tecla.
             hx2 = 2
-            # El orden NO es decorativo: va de mas esencial a menos, porque el bucle
-            # para en la primera que no cabe y a 80 columnas —que es media flota— solo
-            # entran cinco. Antes `? ayuda` era la sexta: la puerta al resto de teclas
-            # no se veia justo en la ventana donde mas falta hace. Y `TAB` baja porque
-            # las pestanas ya salen pintadas arriba, con sus nombres.
-            for tecla, txt, cod in ((_("ENTER"), _("open"), 10),
-                                    (_("SPACE"), _("mark"), 32),
-                                    ("x", _("close"), ord("x")),
-                                    ("?", _("help"), ord("?")),
-                                    ("/", _("filter"), ord("/")),
-                                    ("s", _("sort"), ord("s")),
-                                    ("TAB", "CLI", 9),
-                                    ("q", _("quit"), ord("q"))):
-                pastilla = f" {tecla} {txt} "
-                if hx2 + ancho(pastilla) >= w - 2:
-                    break
-                stdscr.addnstr(y + 2, hx2, f" {tecla} ", w - 1 - hx2,
+            for tecla, txt, cod, px, pxf in pastillas_pie(w, x0=hx2):
+                stdscr.addnstr(y + 2, px, f" {tecla} ", w - 1 - px,
                                CF(7) | curses.A_BOLD)
-                stdscr.addnstr(y + 2, hx2 + len(tecla) + 2, f"{txt} ", w - 1 - hx2, CF(0))
-                zonas.append((y + 2, hx2, hx2 + ancho(pastilla) - 1, "tecla", cod))
-                hx2 += ancho(pastilla) + 2
+                stdscr.addnstr(y + 2, px + len(tecla) + 2, f"{txt} ", w - 1 - px, CF(0))
+                zonas.append((y + 2, px, pxf, "tecla", cod))
             stdscr.refresh()
 
             if vista_now:
@@ -5079,7 +5106,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                            else min(max(0, len(rows) - alto), top + 3))
                     cur = max(top, min(cur, top + alto - 1))
                     continue
-                golpe = next((z for z in zonas if z[0] == my and z[1] <= mx <= z[2]), None)
+                golpe = zona_en(zonas, mx, my)
                 if not (pulsa or dcha):          # solo esta pasando por encima
                     nuevo = golpe[4] if golpe and golpe[3] in ("fila", "marca") else None
                     if nuevo == sobre:
@@ -5994,7 +6021,7 @@ def _T():
 _T()
 
 
-VERSION = "1.36.5"
+VERSION = "1.36.6"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
