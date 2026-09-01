@@ -131,6 +131,14 @@ def main():
                 "content": [{"type": "tool_use", "id": "tu_1", "name": "Bash",
                              "input": {"command": "pytest"}}]}}]) + "\n")
         os.utime(hoy, (ahora - 1800,) * 2)          # corriendo, tocada hace media hora
+        # `vieja` arrastra el mtime del caso 2 —`corte - 3600`—, y aqui el corte se pasa
+        # a mano (`corte=0`), asi que entra igual. Cuanto lleva parada depende de la HORA
+        # A LA QUE SE CORRA: a las 06:00 son dos horas y sale como tercera fila; a las
+        # 11:00 son siete y la descarta el corte de las seis. El test pasaba por la
+        # tarde y fallaba por la manana —tambien en CI, que corre en UTC—, que es la
+        # peor forma de fallar: parece un fallo intermitente y es el reloj. Se la manda
+        # fuera a proposito, que es lo que este caso quiere.
+        os.utime(vieja, (ahora - 7 * 3600,) * 2)
         # Cinco minutos y no uno: por debajo de 90 segundos el transcript esta "caliente"
         # y `escribe` la da por trabajando, asi que las dos serian de las que trabajan y
         # el caso no separaria nada.

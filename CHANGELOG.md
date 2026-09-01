@@ -49,6 +49,14 @@ cuatro que ese criterio daba por cubiertos.
   entero. Por eso once de los catorce casos son de lo que NO debe salir: un filtro solo
   se puede probar con lo que tiene que dejar fuera.
 
+**Y `test_hoy.py`, que fallaba segun la hora a la que se corriera.** Su caso del orden
+dejaba una tercera sesion arrastrando el mtime de un caso anterior: cuanto llevaba
+parada dependia del reloj, asi que entraba en "a medias" entre las cinco y las diez de
+la manana y no el resto del dia. Pasaba por la tarde en la maquina de casa y fallaba en
+CI, que corre en UTC. Probado en los dos sentidos —sin el arreglo pasa en dos husos
+horarios y falla en el tercero; con el arreglo pasa en los tres—, porque un fallo que
+depende del reloj se lee como intermitente y se acaba ignorando.
+
 **62 tests y 109 mutantes**, los 109 muertos.
 
 ## 1.36.0
