@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.36.2
+
+**Fuera `_fecha_corta`.** Once lineas que no llamaba nadie: entraron con el volcado
+inicial de la 1.0.0 y no han tenido un solo llamador en toda la historia publica del
+repo. Formateaba una fecha como "hoy" / "ayer" / `dd/mm`, y donde el programa pinta
+fechas usa otras funciones.
+
+Salio de recorrer el AST buscando definiciones sin uso mientras se median los huecos de
+cobertura de la 1.36.1 — un barrido que cuesta lo mismo y contesta la otra pregunta: no
+"que no se prueba", sino **que no se ejecuta porque no existe quien lo llame**. Era la
+unica del fichero.
+
+No se le escribio test a proposito: un test sobre codigo muerto lo convierte en codigo
+vivo que nadie usa, y ata la mano al que venga a borrarlo.
+
+**Y la red para que no vuelva:** `tests/test_sin_codigo_muerto.py` recorre el arbol de
+sintaxis y falla si alguna funcion se queda sin quien la llame. Cuenta como uso hasta
+una mencion del nombre dentro de una cadena —hay tablas que despachan por nombre—: es
+laxo a proposito, porque la unica forma de que se equivoque es dando por viva una
+muerta, nunca al reves, y un test que acusa en falso se acaba desactivando. Lo que el
+programa no llama pero existe por algo va en `PERMITIDAS` con su motivo escrito, y la
+lista tambien se vigila: si nadie usa ya lo que hay ahi, el test lo dice.
+
+**63 tests y 110 mutantes**, los 110 muertos.
+
 ## 1.36.1
 
 **Red para los cuatro huecos que el criterio por nombre no veia.** Tres tests nuevos y
