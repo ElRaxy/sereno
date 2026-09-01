@@ -982,13 +982,14 @@ Both optional. Without them everything works except the memory column — which 
 at all, rather than sitting there empty — and `ENTER` execs into the session in the current
 terminal.
 
-**Several at once** — `r` and `c` open a window per session — goes through one of these. `r`
-asks which, when more than one is around; with a single one there is nothing to choose and no box
-appears. `SERENO_LANZADOR` pins one:
+**Several at once** — `r` and `c` — goes through one of these. `r` asks which, when more than
+one is around; with a single one there is nothing to choose and no box appears.
+`SERENO_LANZADOR` pins one. **Warp is the only one that keeps them together**: a single
+window with one tab per session. The rest open a window per session:
 
 | | what it opens | needs |
 |---|---|---|
-| **Warp** | a real window per session | macOS with Warp installed |
+| **Warp** | **one single window**, with a tab per session | macOS with Warp installed |
 | **iTerm2** | an iTerm2 window per session | macOS with iTerm2 installed |
 | **kitty** | a kitty window per session, with its title and its directory | macOS with kitty installed |
 | **tmux** | a tmux window per session, in the session you are already in | being *inside* tmux — the only one that works off macOS |
@@ -1284,7 +1285,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and thirty-three real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and thirty-four real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.
