@@ -108,6 +108,14 @@ MUTANTES = [
      "test_raton_sgr.py"),
 
     # ── las pastillas del pie: donde pinchas es lo que se ejecuta ────────────
+    ("el pie se pinta pero sus pastillas dejan de poder pincharse",
+     '                zonas.append((y + 2, px, pxf, "tecla", cod))',
+     '                pass',
+     "test_click_en_el_pie.py"),
+    ("las zonas del pie se comen la separacion entre pastillas",
+     '                zonas.append((y + 2, px, pxf, "tecla", cod))',
+     '                zonas.append((y + 2, px, pxf + 2, "tecla", cod))',
+     "test_click_en_el_pie.py"),
     ("las zonas de las pastillas del pie se solapan con la vecina",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) + 1))",
