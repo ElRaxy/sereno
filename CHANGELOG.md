@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.37.2
+
+**`/ filtrar` vuelve delante de `r reabrir`.** La 1.37.0 metio `r` la quinta y eso
+empujaba al filtro fuera del pie a 80 columnas en castellano. Filtrar es de todos los
+dias; abrir varias marcadas, no. Orden: `ENTER · SPACE · x · ? · / · r · s · TAB · q`.
+
+**El precio esta medido y se dice:** en castellano a 80 columnas `r` no sale, y vuelve a
+partir de 90. En ingles cabe ya a 80. El test comprueba las **seis** primeras por su
+nombre —no cuantas caben—, porque el orden es una decision y no el resultado de sumar
+anchos: `/` delante a proposito, y `r` sin poder caer mas atras.
+
 ## 1.37.1
 
 **Dos comentarios que afirmaban de mas.** Decian que `warpctrl` "no existe en esta

@@ -4366,11 +4366,13 @@ def pastillas_pie(w, x0=2, sep=2):
     sexta y la puerta al resto de teclas no se veia justo en la ventana donde mas falta
     hace. `TAB` baja porque las pestanas ya salen pintadas arriba, con sus nombres.
 
-    `r` entra la quinta, delante de `/ filtrar`, porque es la unica tecla que abre
-    VARIAS sesiones de una vez —y con Warp las deja en una sola ventana, en pestanas—.
-    Vivia solo en la ayuda, y sin pastilla nadie la encontraba: se llego a pedir como
-    funcion que faltaba teniendola hecha desde antes de la 1.18.0. Filtrar y ordenar se buscan
-    cuando ya conoces el programa; esta es la que hay que tropezarse.
+    `r` entra la sexta, detras de `/ filtrar`. Abre VARIAS sesiones de una vez —con
+    Warp, en una sola ventana— y vivia solo en la ayuda: se llego a pedir como funcion
+    que faltaba teniendola hecha desde antes de la 1.18.0. Estuvo un rato la quinta,
+    pero delante del filtro se comia `/ filtrar` a 80 columnas en castellano, y filtrar
+    es de todos los dias. El precio de esta decision esta medido y es este: **en
+    castellano a 80 columnas `r` no sale**, y vuelve a partir de 90. En ingles cabe
+    ya a 80.
 
     Salio de `pick_ui` para poder probarla: ahi dentro la tabla de zonas no se puede
     mirar desde fuera, asi que nada impedia que dos pastillas se pisaran.
@@ -4380,8 +4382,8 @@ def pastillas_pie(w, x0=2, sep=2):
                             (_("SPACE"), _("mark"), 32),
                             ("x", _("close"), ord("x")),
                             ("?", _("help"), ord("?")),
-                            ("r", _("reopen"), ord("r")),
                             ("/", _("filter"), ord("/")),
+                            ("r", _("reopen"), ord("r")),
                             ("s", _("sort"), ord("s")),
                             ("TAB", "CLI", 9),
                             ("q", _("quit"), ord("q"))):
@@ -6053,7 +6055,7 @@ def _T():
 _T()
 
 
-VERSION = "1.37.1"
+VERSION = "1.37.2"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
