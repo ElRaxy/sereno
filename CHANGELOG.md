@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.36.6
+
+**La tabla de zonas sale de `pick_ui`, y con ella el ultimo hueco que quedaba dicho.**
+Las pastillas del pie —`ENTER abrir`, `x cerrar`, `q salir`— no son texto: son botones,
+se pinchan y hacen lo que su tecla. Cada una apunta una zona clicable en una tabla, y
+esa tabla vivia dentro de la funcion de mil lineas, donde no se puede mirar desde fuera.
+Resultado: **nada impedia que dos zonas se pisaran**, y cambiar el `- 1` que calcula la
+ultima columna por un `+ 1` pasaba los 66 tests en verde.
+
+No es un fallo cosmetico. Un solape mete dos columnas de una pastilla dentro de la
+vecina, todo se sigue pintando igual, y un click en ese borde ejecuta la tecla de al
+lado. Entre esas teclas esta cerrar sesiones.
+
+Salen dos piezas puras, con el patron de `lineas_now` y `leer_sgr`:
+
+| | qué hace |
+|---|---|
+| `pastillas_pie(w)` | las pastillas que CABEN en `w` columnas, cada una con su sitio: `(tecla, texto, codigo, x, x_final)` |
+| `zona_en(zonas, mx, my)` | traduce "donde has pinchado" a "que has pinchado" — lo unico que decide tanto el click como el pasar por encima |
+
+`pick_ui` baja a **1.078 lineas**. Y `test_zonas_del_pie.py` comprueba en **once anchos
+de ventana** (de 200 a 4 columnas) que ninguna pastilla pisa a la siguiente, que ninguna
+se sale de la pantalla, que su zona mide exactamente lo que se pinta, y que un click en
+**cualquier** columna de una pastilla devuelve su tecla y no la de al lado. `zona_en` se
+prueba aparte con una tabla escrita a mano, porque es la otra mitad: unas zonas
+perfectas con un resolutor que se equivoca de fila dan el mismo click en el sitio que no
+era.
+
+**Cinco mutantes, y uno costo un caso mas.** Pintar las pastillas pegadas —quitandoles
+la separacion— no solapa ninguna zona y sobrevivio a la primera version del test. No es
+un fallo de clicks pero si de lectura: el fondo de una entra en el de la siguiente y el
+pie deja de leerse como botones para parecer una barra continua. La separacion es parte
+del dibujo, no un margen que sobre, y ahora esta escrito.
+
+De paso, `test_cifras_de_la_doc.py` aprende a leer cuatro palabras: "ciento treinta y
+una" se le escapaba al patron de dos, el mismo escalon que ya tapo "cien" al cruzar
+el 99.
+
+**68 tests y 131 mutantes**, los 131 muertos.
+
 ## 1.36.5
 
 **Cuatro guardas que se podian romper sin que nadie se enterase.** No salieron de leer el

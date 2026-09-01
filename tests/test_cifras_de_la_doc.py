@@ -77,13 +77,16 @@ def a_numero(txt):
 AFIRMACIONES = [
     ("README.md", r"There are ([\w-]+)\b", "tests",
      "el README ingles anuncia cuantos tests hay"),
-    ("README.es.md", r"Hoy son ((?:\w+ y \w+|\w+))\b", "tests",
+    ("README.es.md", r"Hoy son ((?:\w+ \w+ y \w+|\w+ y \w+|\w+))\b", "tests",
      "el README castellano anuncia cuantos tests hay"),
     ("CONTRIBUTING.md", r"\b([\w-]+) tests,", "tests",
      "CONTRIBUTING anuncia cuantos tests hay"),
     ("README.md", r"breaks ([\w -]+?) real guards", "mutantes",
      "el README ingles anuncia cuantos mutantes rompe el catalogo"),
-    ("README.es.md", r"rompe ((?:\w+ y \w+|\w+ \w+|\w+)) guardas", "mutantes",
+    # Cuatro palabras desde "ciento treinta y una": una centena puede llevar detras
+    # una decena compuesta, y el patron de dos palabras se quedaba corto justo al
+    # cruzar el 130 — el mismo escalon que ya tapo "cien" en el 99.
+    ("README.es.md", r"rompe ((?:\w+ \w+ y \w+|\w+ y \w+|\w+ \w+|\w+)) guardas", "mutantes",
      "el README castellano anuncia cuantos mutantes rompe el catalogo"),
     ("CONTRIBUTING.md", r"breaks ([\w -]+?) real guards", "mutantes",
      "CONTRIBUTING anuncia cuantos mutantes rompe el catalogo"),
