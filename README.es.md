@@ -1057,6 +1057,13 @@ ventana de Terminal.app por sesión, y —bajo `--watch`— el aviso de escritor
 tu locale en macOS) y `notify-send` para ese mismo aviso fuera de macOS. Sin telemetría, sin
 analíticas, sin comprobación de actualizaciones.
 
+**La orden que reabre una sesión la ejecuta tu terminal, no `sereno`** — Warp la escribe en una
+shell *interactiva*, donde mandan tus alias. Por eso el CLI entra con su ruta absoluta
+(`shutil.which`) y nunca con el nombre pelado: un alias llamado `claude` no puede colar flags
+que tú no pediste en una sesión que acabas de reabrir. Pasó una vez, en la máquina del autor, y
+el flag era `--allow-dangerously-skip-permissions`. El fichero de arranque decía
+`claude --resume <id>` y el `ps` decía otra cosa.
+
 Una cosa que conviene decir clara: un aviso de `--watch` mete el **título de la sesión** en el
 centro de notificaciones del sistema, que en una máquina compartida o mientras compartes
 pantalla es un sitio donde igual no lo quieres. El aviso lleva el título y el proyecto, nunca la
@@ -1127,8 +1134,13 @@ socket que vigila (`SERENO_TMUX_SOCK`, por defecto `claude-code`). Lo demás sig
 
 Lee la **cola** de 40 transcripts como mucho y cachea por fecha de modificación: 4 ms para los
 vivos, 16 ms para el historial completo, medido sobre 1.248 transcripts y 3,8 GB. Nunca escribe
-en un transcript. Lo único que escribe es un fichero de arranque de Warp, y solo cuando pulsas
-`ENTER` en una máquina que tiene Warp.
+en un transcript, ni en nada que pertenezca a una sesión.
+
+Sí escribe cuatro cosas suyas, todas pequeñas y todas tuyas para borrarlas: su registro en
+`~/.claude/warp-sessions/` (`SERENO_REGISTRY`), un `preferencias.json` al lado que recuerda tu
+orden y dónde abriste pestañas la última vez, un fichero de arranque en
+`~/.warp/launch_configurations/` cuando reabres con `ENTER` o con `r`, y un guion de usar y
+tirar en `~/.sereno/lanzar/` cuando las pestañas van a tmux o a Terminal.app en vez de a Warp.
 
 </details>
 
@@ -1138,10 +1150,13 @@ en un transcript. Lo único que escribe es un fichero de arranque de Warp, y sol
 <br>
 
 ```bash
-rm ~/.local/bin/sereno
+brew uninstall sereno          # o: rm ~/.local/bin/sereno, si instalaste el fichero
+rm -rf ~/.sereno               # los guiones de arranque de usar y tirar
+rm -rf ~/.claude/warp-sessions # su registro y tus preferencias guardadas
 ```
 
-Ya está. No crea configuración, ni caché, ni carpeta de estado propia.
+Con la primera línea deja de existir; las otras dos están porque decir que no deja nada detrás
+sería mentira. No toca ningún dotfile tuyo, y todo lo que lee lo deja como estaba.
 
 </details>
 
@@ -1215,7 +1230,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son sesenta y nueve,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1250,7 +1265,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento treinta y cuatro guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento treinta y nueve guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

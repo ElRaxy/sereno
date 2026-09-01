@@ -1082,6 +1082,13 @@ per session, and — under `--watch` — the desktop alert), `defaults` (read yo
 `notify-send` for that same alert off macOS. No telemetry, no analytics, no
 update check, nothing phoning home.
 
+**The command that reopens a session is run by your terminal, not by `sereno`** — Warp writes
+it into an *interactive* shell, where your aliases apply. So the CLI goes in as its absolute
+path (`shutil.which`), never as a bare name: an alias called `claude` cannot slip flags you
+never asked for into a session you reopened. It happened once, on the author's own machine, and
+the flag was `--allow-dangerously-skip-permissions`. The launch file said `claude --resume <id>`
+and `ps` said otherwise.
+
 One thing worth saying plainly: a `--watch` alert puts the **session title** into your system's
 notification centre, which on a shared or screen-shared machine is a place you may not want it.
 The alert carries the title and the project, never the conversation.
@@ -1152,8 +1159,13 @@ socket it watches (`SERENO_TMUX_SOCK`, default `claude-code`). Everything else s
 
 It reads the **tail** of at most 40 transcripts and caches by mtime — 4 ms for the live ones,
 16 ms for the full history, measured against 1.248 transcripts and 3,8 GB. It never writes to a
-transcript. The only thing it ever writes is a Warp launch file, and only when you press
-`ENTER` on a machine that has Warp.
+transcript, and it never writes anything that belongs to a session.
+
+It does write four things of its own, all small and all yours to delete: its registry under
+`~/.claude/warp-sessions/` (`SERENO_REGISTRY`), a `preferencias.json` beside it remembering
+your sort order and where you last opened tabs, a launch file in `~/.warp/launch_configurations/`
+when you reopen with `ENTER` or `r`, and a throwaway shell script in `~/.sereno/lanzar/` when
+the tabs go to tmux or Terminal.app instead of Warp.
 
 </details>
 
@@ -1163,10 +1175,14 @@ transcript. The only thing it ever writes is a Warp launch file, and only when y
 <br>
 
 ```bash
-rm ~/.local/bin/sereno
+brew uninstall sereno          # or: rm ~/.local/bin/sereno, if you installed the file
+rm -rf ~/.sereno               # the throwaway launch scripts
+rm -rf ~/.claude/warp-sessions # its registry and your saved preferences
 ```
 
-That's it. It creates no config, no cache and no state directory of its own.
+The first line is enough to stop it running; the other two are only there because it would be
+dishonest to say it leaves nothing behind. It touches no dotfile of yours, and everything it
+reads it leaves exactly as it found it.
 
 </details>
 
@@ -1242,7 +1258,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are sixty-nine
+collects the whole folder, prints a line per file and ends with the count. There are seventy
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1285,7 +1301,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and thirty-four real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and thirty-nine real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

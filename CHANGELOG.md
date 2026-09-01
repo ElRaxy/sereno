@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.38.0
+
+**Las ordenes llevan la RUTA del CLI, no su nombre.** Sereno no ejecuta lo que compone:
+la orden acaba dentro de la launch configuration de Warp, y **Warp la escribe en una
+shell interactiva**, donde mandan los alias del `.zshrc` que un `sh -c` no llega a ver.
+Comprobar "esto es el binario" desde el proceso de Sereno no dice nada sobre lo que se
+ejecutara alli.
+
+Encontrado abriendo tres sesiones del historial con `r` el 2026-09-01: salieron
+corriendo con `--allow-dangerously-skip-permissions`, que Sereno **no pide en ningun
+sitio**. `claude` era un alias a un wrapper que lo anadia. El YAML estaba limpio
+(`claude --resume <id>`) y el `ps` no — un fallo que no se ve en lo que escribe el
+programa, solo en lo que acaba corriendo.
+
+`bin_cli()` resuelve el nombre a su ruta absoluta, y por ahi pasan **los tres** sitios
+que componen ordenes: `_comando_de` (historial de Claude y de los otros CLI),
+`write_launch_config` (las huerfanas del registro) y `ARNESES` (el relevo). Los tres o
+ninguno: basta uno con el nombre pelado para que el alias vuelva a colarse, y por eso
+hay **un mutante por sitio** en vez de uno solo.
+
+Si el CLI no esta en el PATH se sigue devolviendo el nombre pelado, que es lo que habia
+antes: peor que la ruta, pero mejor que no abrir nada. Mismo patron que `TMUX_BIN`.
+
+**Y de paso, tres afirmaciones de la documentacion que el codigo desmentia**, encontradas
+releyendo el README con esto en la mano:
+
+- *"Lo unico que escribe es un fichero de arranque de Warp, y solo cuando pulsas ENTER"*.
+  Falso: tambien con `r` y con `c`, tambien un `preferencias.json` con tu orden y tu ultimo
+  lanzador, y tambien un guion de usar y tirar en `~/.sereno/lanzar/` cuando las pestanas van
+  a tmux o a Terminal.app.
+- *"No crea configuracion, ni cache, ni carpeta de estado propia"*, en la pregunta de como
+  desinstalarlo. Crea las dos cosas de arriba. Ahora la respuesta trae las tres ordenes que
+  lo dejan todo limpio, y dice que la primera basta para que deje de existir.
+- El `rm ~/.local/bin/sereno` de esa respuesta no era el inverso del `brew install` que
+  ensena el propio README dos pantallas antes.
+
+`SECURITY.md` recoge los dos ficheros que faltaban en su lista de escrituras y la frase de
+"no hay fichero de configuracion", que era verdad a medias.
+
+**El test falsifica el PATH a proposito.** Comparar contra el literal `"claude"` pasaria
+en verde en cualquier maquina sin Claude instalada —el CI, sin ir mas lejos—, donde
+`bin_cli` devuelve justo el nombre pelado: verde sin haber comprobado nada. Se planta un
+`claude` de mentira en un temporal, se pone delante del PATH y se exige ESA ruta; el
+control negativo, con el PATH vacio, exige la caida al nombre pelado.
+
 ## 1.37.2
 
 **`/ filtrar` vuelve delante de `r reabrir`.** La 1.37.0 metio `r` la quinta y eso
