@@ -37,7 +37,7 @@ COL_AYUDA = 46                         # dentro de ` ? help `, que a 150 va de l
 # el de antes, ampliar las zonas lo tapa la pastilla ` x close `, que abre otra cosa, y
 # el caso pasa en verde sin haber comprobado nada. A la derecha lo tapa la de la ayuda,
 # que es la que este test sabe ver.
-COL_HUECO = 50                         # entre ` ? help ` (acaba en la 48) y ` r reopen `
+COL_HUECO = 50                         # entre ` ? help ` (acaba en la 48) y ` / filter `
 # Palabras que solo salen con el cuadro de ayuda abierto, en ingles.
 DE_LA_AYUDA = ("wheel", "mouse", "keys")
 

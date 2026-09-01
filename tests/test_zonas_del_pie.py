@@ -74,18 +74,18 @@ def main():
                                   % (w, mx, tecla, chr(golpe[4]) if golpe[4] > 31 else golpe[4]))
 
     # ── caben las que caben, y en el orden que importa ───────────────────────
-    if [p[2] for p in pastillas_pie(200)] != [10, 32, ord("x"), ord("?"), ord("r"),
-                                              ord("/"), ord("s"), 9, ord("q")]:
+    if [p[2] for p in pastillas_pie(200)] != [10, 32, ord("x"), ord("?"), ord("/"),
+                                              ord("r"), ord("s"), 9, ord("q")]:
         fallos.append("con sitio de sobra no salen las nueve en su orden: %r"
                       % ([p[0] for p in pastillas_pie(200)],))
-    # Cinco, y las cinco por su nombre: el orden de las primeras es una decision, no
-    # el resultado de sumar anchos. `r` es la unica tecla que abre VARIAS de una vez y
-    # vivio casi veinte versiones escondida en la ayuda; si vuelve a caerse del pie a 80
-    # columnas, vuelve a ser invisible justo donde el pie ya va apretado.
-    if [p[0] for p in pastillas_pie(80)][:5] != ["ENTER", "SPACE", "x", "?", "r"]:
-        fallos.append("a 80 columnas —media flota— el pie empieza por %r y tiene que "
-                      "empezar por ENTER, SPACE, x, ? y r"
-                      % ([p[0] for p in pastillas_pie(80)][:5],))
+    # Las seis primeras por su NOMBRE: el orden es una decision, no el resultado de
+    # sumar anchos. `/` va delante de `r` a proposito —filtrar es de todos los dias—, y
+    # `r` no puede caer mas atras: es la unica tecla que abre VARIAS de una vez y vivio
+    # casi veinte versiones escondida en la ayuda.
+    if [p[0] for p in pastillas_pie(80)][:6] != ["ENTER", "SPACE", "x", "?", "/", "r"]:
+        fallos.append("a 80 columnas el pie empieza por %r y tiene que empezar por "
+                      "ENTER, SPACE, x, ?, / y r"
+                      % ([p[0] for p in pastillas_pie(80)][:6],))
     anchas = [len(pastillas_pie(w)) for w in (200, 150, 120, 80, 60, 40, 20)]
     if anchas != sorted(anchas, reverse=True):
         fallos.append("al estrechar la ventana no salen menos pastillas: %r" % (anchas,))
