@@ -78,6 +78,45 @@ MUTANTES = [
      '    cual, hechas = abre_varias(pestanas, config)\n    archive(archivar, "restored")',
      "test_huerfanas_no_se_archivan_sin_abrir.py"),
 
+    # ── los MB de una sesion: el arbol, contado una vez y sin colgarse ───────
+    ("los MB de una sesion son solo los del pid raiz, sin sus descendientes",
+     "        return rss.get(pid, 0) + sum(suma(h, visto) for h in hijos.get(pid, ()))",
+     "        return rss.get(pid, 0)",
+     "test_ram_por_arbol.py"),
+    ("la recursion de la RAM pierde la marca de por donde ha pasado",
+     "        if pid in visto:\n            return 0\n        visto.add(pid)",
+     "        if pid in visto:\n            return 0",
+     "test_ram_por_arbol.py"),
+    ("un pid que no es un numero llega a int() y revienta la vista",
+     '    return {p: suma(int(p), set()) / 1024 for p in pids if str(p).isdigit()}',
+     "    return {p: suma(int(p), set()) / 1024 for p in pids}",
+     "test_ram_por_arbol.py"),
+
+    # ── el panel de la fila bajo el cursor ───────────────────────────────────
+    ("un subagente pisa lo que respondio la sesion en el panel",
+     '            if j.get("isSidechain") or j.get("type") != "assistant":',
+     '            if j.get("type") != "assistant":',
+     "test_detalles_del_cursor.py"),
+    ("el panel se queda con las lineas crudas del transcript pegadas a la fila",
+     '        d["ruta"] = recorrido(crudos)', '        d["ruta"] = crudos',
+     "test_detalles_del_cursor.py"),
+    ("el panel vuelve a abrir el transcript aunque la fila ya tenga el dato",
+     '    if "_det" in r:\n        return r["_det"]', '    if False:\n        return r["_det"]',
+     "test_detalles_del_cursor.py"),
+
+    # ── lo dicho por el usuario, y el cwd que sale de la cabecera ────────────
+    ("lo que escribe un subagente cuenta como escrito por el usuario",
+     '        if d.get("type") != "user" or d.get("isSidechain"):',
+     '        if d.get("type") != "user":',
+     "test_lo_dicho_y_la_cabecera.py"),
+    ("los comandos que se expanden solos cuentan como lo que se tecleo",
+     '        if not t or t.startswith("<"):', "        if not t:",
+     "test_lo_dicho_y_la_cabecera.py"),
+    ("la cabecera deja de acotarse y el barrido lee 880 ficheros enteros",
+     "                if i > tope:\n                    break",
+     "                if False:\n                    break",
+     "test_lo_dicho_y_la_cabecera.py"),
+
     # ── abrir varias: la pantalla no puede mentir sobre cuantas se abrieron ──
     ("abre_varias devuelve las pedidas en vez de las abiertas",
      "    return cual, LANZADORES[cual][1](pestanas)",

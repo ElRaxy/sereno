@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.36.1
+
+**Red para los cuatro huecos que el criterio por nombre no veia.** Tres tests nuevos y
+nueve mutantes sobre `rss_por_arbol`, `detalles`, `_cwd_de_cabecera` y `_user_texts`.
+
+Lo que cambio no fue el codigo, fue **como se busca lo que falta**. Hasta ahora "esta
+funcion no tiene test" queria decir "su nombre no aparece en `tests/`", y eso mide otra
+cosa: de las seis funciones que ese criterio senalaba como descubiertas, cinco
+—`_troceado`, `_clave_orden`, `recorta`, `reparto`, `_ausente`— estaban al **100%**,
+probadas por sus llamadores. Medida la ejecucion de verdad, los huecos eran otros
+cuatro que ese criterio daba por cubiertos.
+
+| | antes | ahora |
+|---|---|---|
+| `rss_por_arbol` | 1/21 | 21/21 |
+| `detalles` | 3/36 | 33/36 |
+| `_cwd_de_cabecera` | 10/16 | 16/16 |
+| `_user_texts` | 21/26 | 26/26 |
+| el fichero entero | 74,0% | **75,6%** |
+
+**Lo que protege cada uno:**
+
+- **`rss_por_arbol`** son los MB que ordenan el modo `memory` y contestan a "cual
+  sobra". Un proceso de Claude Code no es uno, es un arbol, asi que la cifra buena es la
+  suma de los descendientes: mirar solo el pid raiz da 1 MB donde Activity Monitor
+  ensena 7, y ordena acusando a la sesion equivocada. Los tres fallos con red propia son
+  sumar de menos, contar dos veces un pid que cuelga de dos sitios, y **colgarse**: `ps`
+  devuelve ciclos padre-hijo con los pids reciclados, y sin la marca de por donde ha
+  pasado la recursion no vuelve. La salida de `ps` se inyecta a proposito — un test que
+  lee la RAM de la maquina no puede afirmar nada, porque no sabe cuanto deberia salir.
+- **`detalles`** es el panel de la fila bajo el cursor, y tiene dos contratos que se
+  rompen por separado: **lo que dice** (la rama es la ultima de la cola, no la primera; y
+  un subagente escribe en el MISMO transcript, con la misma forma, distinguido solo por
+  una bandera — si se cuela, el panel atribuye a la sesion algo que dijo otro) y **lo que
+  se queda en memoria**, que se mide: un transcript con una linea de 200 KB dentro tiene
+  que dejar en `_det` menos de 8 KB, porque ese objeto se queda pegado a la fila hasta el
+  proximo refresco.
+- **`_cwd_de_cabecera`** contesta "¿este historial pertenece a algo que todavia existe?"
+  leyendo la cabecera y no la cola, porque son 880 ficheros. Su contrato es **el tope**:
+  si deja de acotarse la respuesta sigue siendo correcta y el barrido pasa de 114 ms a
+  leerlos enteros. El coste es parte del contrato.
+- **`_user_texts`** decide que cuenta como escrito por una persona, y alimenta `--find`.
+  Un transcript guarda con `"type": "user"` mucho mas que lo que alguien teclea: los
+  resultados de cada herramienta, los recordatorios inyectados, los errores del propio
+  CLI y lo que piden los subagentes. Si algo de eso pasa el filtro, `--find "factura"`
+  empieza a casar el CONTENIDO de los ficheros que se leyeron y devuelve el proyecto
+  entero. Por eso once de los catorce casos son de lo que NO debe salir: un filtro solo
+  se puede probar con lo que tiene que dejar fuera.
+
+**62 tests y 109 mutantes**, los 109 muertos.
+
 ## 1.36.0
 
 **iTerm2 y kitty abren sesiones.** Eran dos de los tres que el codigo llevaba meses
