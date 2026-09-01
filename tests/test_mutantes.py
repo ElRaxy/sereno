@@ -78,6 +78,12 @@ MUTANTES = [
      '    cual, hechas = abre_varias(pestanas, config)\n    archive(archivar, "restored")',
      "test_huerfanas_no_se_archivan_sin_abrir.py"),
 
+    # ── nada de codigo que no llama nadie ────────────────────────────────────
+    ("vuelve a colarse una funcion que no llama nadie",
+     "def hook_line(rows, items):",
+     "def _fecha_corta(epoch):\n    return \"?\"\n\n\ndef hook_line(rows, items):",
+     "test_sin_codigo_muerto.py"),
+
     # ── los MB de una sesion: el arbol, contado una vez y sin colgarse ───────
     ("los MB de una sesion son solo los del pid raiz, sin sus descendientes",
      "        return rss.get(pid, 0) + sum(suma(h, visto) for h in hijos.get(pid, ()))",

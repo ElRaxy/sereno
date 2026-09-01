@@ -21,7 +21,14 @@ DECENAS_EN = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen":
               "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
               "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
               "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
-DECENAS_ES = {"veinte": 20, "treinta": 30, "cuarenta": 40, "cincuenta": 50,
+# Del diez al diecinueve llegaron con "ciento diez": hasta entonces el castellano
+# empezaba a contar en el veinte, y "ciento diez" no se podia leer aunque "ciento
+# nueve" si. Es la misma laguna que tapo "cien" al cruzar los 99, un escalon mas
+# arriba.
+DECENAS_ES = {"diez": 10, "once": 11, "doce": 12, "trece": 13, "catorce": 14,
+              "quince": 15, "dieciseis": 16, "dieciséis": 16, "diecisiete": 17,
+              "dieciocho": 18, "diecinueve": 19,
+              "veinte": 20, "treinta": 30, "cuarenta": 40, "cincuenta": 50,
               "sesenta": 60, "setenta": 70, "ochenta": 80, "noventa": 90}
 UNIDADES_ES = {"uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
                "seis": 6, "siete": 7, "ocho": 8, "nueve": 9}

@@ -3202,19 +3202,6 @@ def label(e, width=34):
     return e.get("title") or "claude"
 
 
-def _fecha_corta(epoch):
-    if not epoch:
-        return "?"
-    d = datetime.date.fromtimestamp(epoch)
-    hoy = datetime.date.today()
-    dias = (hoy - d).days
-    if dias <= 0:
-        return "hoy"
-    if dias == 1:
-        return "ayer"
-    return d.strftime("%d/%m")
-
-
 def hook_line(rows, items):
     """Al abrir una terminal, una linea. El menu solo si se pide.
 
@@ -6000,7 +5987,7 @@ def _T():
 _T()
 
 
-VERSION = "1.36.1"
+VERSION = "1.36.2"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
