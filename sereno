@@ -6021,7 +6021,7 @@ def _T():
 _T()
 
 
-VERSION = "1.36.6"
+VERSION = "1.36.7"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

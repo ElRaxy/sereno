@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.36.7
+
+**Y ahora se pincha el boton de verdad.** La 1.36.6 saco las dos piezas puras del pie y
+probo que ninguna pastilla pisa a la vecina. Lo que ninguna pieza pura puede ver es el
+**cableado**: que lo que `pastillas_pie` calcula sea lo mismo que se pinta, que sus zonas
+acaben en la tabla, y que el codigo que devuelve `zona_en` se ejecute como si lo hubieras
+tecleado. Las tres cosas se rompen sin que un test puro se entere — la pieza sigue verde
+y el boton deja de funcionar.
+
+`test_click_en_el_pie.py` abre un pseudo-terminal, arranca el programa y le escribe un
+click SGR como lo escribiria el terminal, sobre ` ? help `: un boton que abre un cuadro
+que se ve desde fuera y no toca ninguna sesion.
+
+**Con su reverso, que es la mitad que cuesta acertar.** Un click en el HUECO entre dos
+pastillas no puede abrir nada. Y el hueco tiene que ser el de la DERECHA de la pastilla
+que se mira: buscandolo a la izquierda, ampliar las zonas lo tapa ` x close `, que abre
+otra cosa, y el caso pasa en verde sin haber comprobado nada. Se descubrio rompiendo el
+codigo a proposito y viendo que el test no se quejaba.
+
+Los dos fallos son ahora mutantes fijos: el pie que se pinta pero deja de poder
+pincharse, y las zonas que se comen la separacion.
+
+**69 tests y 133 mutantes**, los 133 muertos.
+
 ## 1.36.6
 
 **La tabla de zonas sale de `pick_ui`, y con ella el ultimo hueco que quedaba dicho.**
