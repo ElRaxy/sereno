@@ -15,7 +15,7 @@ ns = {"__name__": "sereno_test"}
 exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
 
 recorrido, sintomas, alertas = ns["recorrido"], ns["sintomas"], ns["alertas"]
-linea_ruta, ancho = ns["linea_ruta"], ns["ancho"]
+linea_ruta, ancho, _seg = ns["linea_ruta"], ns["ancho"], ns["_seg"]
 RUTA_FIJO, MAX_EVENTOS = ns["RUTA_FIJO"], ns["MAX_EVENTOS"]
 
 T0 = 1_756_000_000                       # un epoch cualquiera, fijo
@@ -52,6 +52,21 @@ def main():
     def igual(caso, dado, esperado):
         if dado != esperado:
             fallos.append(f"{caso}: {dado!r} != {esperado!r}")
+
+    # ── cuanto duro, escrito para que quepa en una columna ─────────────────────
+    # `_seg` es lo que convierte la duracion medida en lo que se lee en el panel. Un
+    # fallo aqui no revienta nada: pinta "0s" en todas las filas, que se lee como
+    # "todo fue instantaneo" y tapa justo el dato que interesa — la llamada que lleva
+    # dos minutos colgada. Medido: sustituir el `or 0` por un `and 0` —que devuelve
+    # siempre cero— pasaba los 66 tests en verde.
+    for secs, txt, por_que in ((0, "0s", "cero segundos"), (3, "3s", "segundos"),
+                               (59, "59s", "justo antes del minuto"),
+                               (60, "1m", "el minuto en punto"),
+                               (3599, "59m", "justo antes de la hora"),
+                               (3600, "1h", "la hora en punto"),
+                               (7250, "2h", "dos horas largas"),
+                               (None, "0s", "lo que no se pudo medir")):
+        igual("_seg(%r) — %s" % (secs, por_que), _seg(secs), txt)
 
     # ── emparejamiento y duracion ───────────────────────────────────────────────
     ev = recorrido([uso("a", "Bash", 0, command="npm test"), res("a", 12, "ok\n")])

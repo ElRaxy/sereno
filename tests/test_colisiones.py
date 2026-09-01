@@ -59,6 +59,14 @@ ANCHAS = [
     ("git reset --hard origin/main",            [("repo", "", "git reset")]),
     ("git reset HEAD src/a.py",                 []),
     ("git clean -fd",                           [("repo", "", "git clean")]),
+    # Sin `-f`, `git clean` no borra: lista lo que borraria. Y un `-f` de otro
+    # subcomando no es un clean. Los dos casos existen porque la condicion es un `and`
+    # de dos mitades, y sin ellos cambiarlo por un `or` pasaba en verde: `git push -f`
+    # se anunciaba como "git clean" y el aviso mas caro del programa senalaba algo que
+    # no estaba pasando.
+    ("git clean -n",                            []),
+    ("git clean --dry-run",                     []),
+    ("git push -f origin main",                 []),
     ("git stash",                               [("repo", "", "git stash")]),
     ("git stash list",                          []),
     ("git push origin main",                    []),

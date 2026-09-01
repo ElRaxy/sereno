@@ -69,6 +69,21 @@ def main():
         os.environ["SERENO_JORNADA"] = "9"
         if corte_jornada(epoch(20, 8, 0)) != epoch(19, 9):
             fallos.append("SERENO_JORNADA=9 no mueve el corte")
+        # Las dos horas de los extremos valen, y son las que se pierden con un `<`
+        # donde va un `<=`: quien trabaja de madrugada y pone 23 se encontraria el
+        # corte en la hora de casa sin que nada se lo dijera.
+        # A las 13:00, con el corte a las 0 la jornada es la de hoy y con el corte a
+        # las 23 todavia es la de ayer — que es justo lo que hace el escalon de abajo.
+        for hora, dia in (("0", 20), ("23", 19)):
+            os.environ["SERENO_JORNADA"] = hora
+            if corte_jornada(epoch(20, 13, 0)) != epoch(dia, int(hora)):
+                fallos.append("SERENO_JORNADA=%s no vale y deberia: el corte queda en %s"
+                              % (hora, time.strftime("%d %H:%M", time.localtime(
+                                  corte_jornada(epoch(20, 13, 0))))))
+        # Y las de fuera del reloj no, que es la otra mitad de la frontera.
+        os.environ["SERENO_JORNADA"] = "24"
+        if corte_jornada(epoch(20, 13, 0)) != epoch(20, 5):
+            fallos.append("SERENO_JORNADA=24 se acepta y no existe esa hora")
         os.environ["SERENO_JORNADA"] = "no-es-una-hora"
         if corte_jornada(epoch(20, 13, 0)) != epoch(20, 5):
             fallos.append("una SERENO_JORNADA invalida no cae a la hora de casa")

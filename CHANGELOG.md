@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.36.5
+
+**Cuatro guardas que se podian romper sin que nadie se enterase.** No salieron de leer el
+codigo: salieron de un **barrido de mutacion automatico**. Se cambia una cosa minima —un
+`>=` por un `>`, un `and` por un `or`, un `not` que desaparece— y se mira si algun test
+se queja. El que no se queja de nada senala una guarda sin red: no dice que haya un bug,
+dice que si lo hubiera nadie lo veria.
+
+De 200 mutantes generados sobre lineas que los tests SI ejecutan, 95 sobrevivieron a una
+primera pasada y 80 a correr todos los tests que tocan su linea. La mayoria son
+equivalentes —cambios que no alteran nada observable— asi que el triaje fue a mano, por
+lo que costaria que se rompieran de verdad:
+
+| lo que se podia romper | y nadie lo veia |
+|---|---|
+| **`git clean`** en el aviso de choque | con un `or`, `git push -f` se anunciaba como `git clean` y un `git clean -n` —que no borra nada, solo lista— tambien. La tabla solo tenia el caso positivo (`git clean -fd`) |
+| **el escalon de contexto** | `>=` por `>` y el aviso del 80% no sale hasta el 80,1%. Los casos probaban con 85% y 95%: la frontera exacta no la miraba nadie |
+| **la duracion de cada paso** | `int(secs or 0)` por `and 0` pinta "0s" en todas las filas: se lee como "todo fue instantaneo" y tapa justo la llamada que lleva dos minutos colgada |
+| **`SERENO_JORNADA=23`** | un `<=` por un `<` y la hora 23 deja de valer en silencio, cayendo a la de casa |
+
+Los cuatro tienen ahora caso y mutante.
+
+**Y una que el barrido acuso en falso, que tambien cuenta.** Dijo que la guarda de
+`tmux_list` estaba sin red; corriendo la bateria ENTERA, `test_tmux_de_verdad` la caza.
+El barrido excluye los tests lentos para poder probar 200 mutantes, y ese es uno de
+ellos: **lo que un barrido rapido llama "sin red" es una sospecha, no un hecho**, y hay
+que confirmarla contra todo antes de escribir nada. De rebote salio algo que si faltaba:
+el **parseo de `list-panes`** no tenia un solo test. Ahora lo tiene —el titulo del panel,
+el hostname que se descarta por generico, el adorno del principio, el segundo panel de
+la misma sesion que no cuenta dos veces, y una llamada que devolvio error cuyas sesiones
+no pueden acabar en la lista.
+
+**Uno queda sin red, y se dice:** las zonas clicables de las pastillas del pie
+(`" ENTER abrir "`, `" x cerrar "`…) se calculan restando uno, y sumarlo las solapa dos
+columnas con la vecina — un click en el borde ejecutaria la tecla de al lado, y una de
+esas teclas es cerrar. Probarlo exige leer la tabla de zonas desde fuera del bucle, que
+hoy no se puede sin partir `pick_ui`.
+
+**67 tests y 126 mutantes**, los 126 muertos.
+
 ## 1.36.4
 
 **La fila de "(nada coincide)" tenia una guarda sin red.** Cuando el filtro no casa con
