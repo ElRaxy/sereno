@@ -10,7 +10,7 @@ Este test no mira el texto del YAML por gusto: mira que el comando de cada pesta
 que `_comando_de()` da para ESA fila. Es la unica garantia que se rompio, y se rompe sin
 que falle nada visible.
 """
-import os, pathlib, re, sys, tempfile
+import os, pathlib, re, shlex, sys, tempfile
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
@@ -83,8 +83,13 @@ def main():
         ruta_cfg, _pest = ns["write_launch_config"](huerfanas)
         texto = ruta_cfg.read_text()
         ordenes = re.findall(r"^ {12}- exec: (.+)$", texto, re.M)
-        if ordenes != ["claude --resume aaaa1111 --model opus",
-                       "claude --resume bbbb2222"]:
+        # Con la RUTA de claude, no con el nombre: un nombre pelado lo secuestra un
+        # alias de la shell donde Warp escribe el comando. No se compara contra el
+        # literal "claude" porque en una maquina sin claude instalado `bin_cli`
+        # devuelve el nombre pelado y el literal pasaria en verde sin comprobar nada.
+        cl = shlex.quote(ns["bin_cli"]("claude"))
+        if ordenes != [f"{cl} --resume aaaa1111 --model opus",
+                       f"{cl} --resume bbbb2222"]:
             fallos.append(f"las huerfanas ya no se restauran bien: {ordenes}")
 
     for f in fallos:

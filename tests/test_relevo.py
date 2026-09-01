@@ -10,7 +10,13 @@ que sea seguro dejarlo puesto:
   2. una fila cuyo directorio ya no existe NO se releva, porque arrancaria en `~` con
      pinta de haber funcionado.
 """
-import os, pathlib, sys, tempfile
+import os, pathlib, shlex, sys, tempfile
+
+# La orden arranca con la RUTA del CLI, no con su nombre: un nombre pelado lo
+# secuestra un alias de la shell interactiva en la que Warp escribe el comando.
+# Por eso no se compara contra el literal "codex " — en una maquina sin codex
+# instalado `bin_cli` devuelve el nombre pelado y el literal pasaria en verde
+# sin haber comprobado nada. Se compara contra lo que `bin_cli` diga AHI.
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 SECRETO_P = "el precio que le pasamos a ese cliente"
@@ -57,15 +63,16 @@ def main():
         if len(pest) != 1 or len(sin) != 1:
             fallos.append(f"{len(pest)} pestanas y {len(sin)} descartadas, "
                           "se esperaba 1 y 1")
-        if pest and not pest[0][1].startswith("codex "):
-            fallos.append(f"la orden no arranca codex: {pest[0][1][:40]!r}")
+        arranca_codex = shlex.quote(ns["bin_cli"]("codex")) + " "
+        if pest and not pest[0][1].startswith(arranca_codex):
+            fallos.append(f"la orden no arranca por {arranca_codex!r}: "
+                          f"{pest[0][1][:60]!r}")
         if pest and pest[0][2] != str(vivo):
             fallos.append("la pestana no arranca en el directorio de la sesion")
 
         # 4. El briefing viaja DENTRO de la orden, entero y citado: si se partiera por
         #    un espacio, codex recibiria media frase como prompt y el resto como flags.
         if pest:
-            import shlex
             trozos = shlex.split(pest[0][1])
             if len(trozos) != 2:
                 fallos.append(f"la orden se parte en {len(trozos)} trozos, se esperaban 2")
@@ -136,8 +143,9 @@ def main():
         pest_c, sin_c, mismo_c = relevo_pest([propia], "claude")
         if len(pest_c) != 1 or mismo_c or sin_c:
             fallos.append("una sesion de codex no se puede relevar a claude")
-        elif not pest_c[0][1].startswith("claude "):
-            fallos.append(f"la orden no arranca claude: {pest_c[0][1][:40]!r}")
+        elif not pest_c[0][1].startswith(shlex.quote(ns["bin_cli"]("claude")) + " "):
+            fallos.append(f"la orden no arranca por la ruta de claude: "
+                          f"{pest_c[0][1][:60]!r}")
         brief_cx = briefing(propia)
         if "Codex" not in brief_cx or "Claude Code" in brief_cx:
             fallos.append("el briefing de una fila de Codex sigue diciendo que "

@@ -2101,18 +2101,49 @@ ABRIR_CONFIG = "claude-abrir"
 RELEVO_CONFIG = "claude-relevo"
 
 
+def bin_cli(nombre):
+    """La ruta ABSOLUTA de un CLI. Un nombre pelado lo puede secuestrar un alias.
+
+    Las ordenes que compone Sereno no las ejecuta Sereno: acaban dentro de la launch
+    configuration de Warp, y Warp las escribe en una shell **interactiva**. Ahi mandan
+    los alias del `.zshrc`, que un `sh -c` no llega a ver — asi que la comprobacion de
+    "esto es el binario" hecha desde aqui no dice nada sobre lo que se ejecutara alli.
+
+    En la maquina donde se descubrio, `claude` era un alias a un wrapper que ademas
+    anadia `--allow-dangerously-skip-permissions`: reabrir tres sesiones del historial
+    con `r` las levanto con los permisos saltados, cosa que Sereno no pide en ningun
+    sitio y que no debe poder pedir por accidente. Se vio en el `ps`, no en el YAML —
+    el YAML decia `claude --resume <id>`, limpio. Medido el 2026-09-01.
+
+    Si el CLI no esta en el PATH se devuelve el nombre pelado, que es lo que habia
+    antes: peor que la ruta, pero mejor que no abrir nada. Mismo patron que `TMUX_BIN`,
+    y por eso es funcion y no constante: el PATH de quien lanza no tiene por que ser el
+    del arranque.
+    """
+    return shutil.which(nombre) or nombre
+
+
 def _comando_de(r):
-    """(comando, cwd) con que se abre esta fila. None si no se sabe abrirla."""
+    """(comando, cwd) con que se abre esta fila. None si no se sabe abrirla.
+
+    El nombre del CLI pasa por `bin_cli()` SIEMPRE, aqui y en `write_launch_config` y
+    `ARNESES`, que son los otros dos sitios que componen una orden. Los tres, o
+    ninguno: basta uno con el nombre pelado para que un alias se cuele.
+    """
     e = r.get("meta") or {}
     if r.get("abrir"):                     # historial de otro CLI (codex, gemini...)
-        return " ".join(shlex.quote(x) for x in r["abrir"]), e.get("cwd") or str(HOME)
+        orden = [bin_cli(r["abrir"][0])] + list(r["abrir"][1:])
+        return " ".join(shlex.quote(x) for x in orden), e.get("cwd") or str(HOME)
     if str(r.get("name", "")).startswith("cc-"):
         return (f"{shlex.quote(TMUX_BIN)} -L {SOCK} attach -t {shlex.quote(r['name'])}",
                 e.get("cwd") or str(HOME))
     if e.get("id"):                        # sesion de Claude muerta: --resume
         flags = " ".join(shlex.quote(f) for f in (e.get("resume_flags__list") or []))
-        return (f"claude --resume {shlex.quote(e['id'])} {flags}".strip(),
-                e.get("cwd") or str(HOME))
+        # Con `%` y no con una f-string partida en dos lineas: eso es un SyntaxError
+        # en Python 3.8, que es el suelo del repo, y lo caza `test_suelo_38.py`.
+        cmd = "%s --resume %s %s" % (shlex.quote(bin_cli("claude")),
+                                     shlex.quote(e["id"]), flags)
+        return cmd.strip(), e.get("cwd") or str(HOME)
     return None
 
 
@@ -2491,11 +2522,12 @@ def pestanas_de(rows):
 # comprobar en su `--help` como se le pasa un prompt inicial y que abra sesion
 # INTERACTIVA: `gemini` no esta instalado en esta maquina, asi que no se pone a ojo.
 ARNESES = {
-    "codex": lambda prompt: "codex " + shlex.quote(prompt),
+    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " " + shlex.quote(prompt),
     # `claude [options] [command] [prompt]` -- "Your prompt", y sin `-p` la sesion es
     # interactiva. Verificado contra `claude --help` el 2026-08-28. Esta aqui para que
     # el relevo vaya en los dos sentidos: una sesion de Codex tambien se entrega.
-    "claude": lambda prompt: "claude " + shlex.quote(prompt),
+    # Por `bin_cli` y no por el nombre pelado, por lo mismo que en `_comando_de`.
+    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " " + shlex.quote(prompt),
 }
 
 # El CLI del que sale una fila. `fuente` tiene cinco valores y dos son el mismo arnes:
@@ -5657,7 +5689,8 @@ def write_launch_config(items):
     pestanas = []
     for e in items:
         flags = e.get("resume_flags__list") or []
-        cmd = " ".join(["claude", "--resume", e["id"]] + [shlex.quote(f) for f in flags])
+        cmd = " ".join([shlex.quote(bin_cli("claude")), "--resume", e["id"]]
+                       + [shlex.quote(f) for f in flags])
         pestanas.append((label(e), cmd, e["cwd"]))
     return _escribe_config(CONFIG_NAME, pestanas), pestanas
 
@@ -6055,7 +6088,7 @@ def _T():
 _T()
 
 
-VERSION = "1.37.2"
+VERSION = "1.38.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

@@ -107,6 +107,33 @@ MUTANTES = [
      "        for _ in range(24):", "            while True:",
      "test_raton_sgr.py"),
 
+    # ── la orden lleva la RUTA del CLI, no su nombre ─────────────────────────
+    # Warp escribe el comando en una shell INTERACTIVA, donde mandan los alias. Con el
+    # nombre pelado, `claude` puede ser un wrapper que anade flags que Sereno no pide —
+    # paso el 2026-09-01 con `--allow-dangerously-skip-permissions`. Son TRES sitios los
+    # que componen ordenes y basta uno mal para que el alias vuelva a colarse, asi que
+    # hay un mutante por sitio: uno solo no probaria que estan los tres.
+    ("el historial de Claude se reabre por el nombre y no por la ruta",
+     'shlex.quote(bin_cli("claude")),\n                                     shlex.quote',
+     '"claude",\n                                     shlex.quote',
+     "test_binario_no_alias.py"),
+    ("el historial de otro CLI se reabre por el nombre y no por la ruta",
+     '        orden = [bin_cli(r["abrir"][0])] + list(r["abrir"][1:])',
+     '        orden = list(r["abrir"])',
+     "test_binario_no_alias.py"),
+    ("las huerfanas del registro se reabren por el nombre y no por la ruta",
+     '        cmd = " ".join([shlex.quote(bin_cli("claude")), "--resume", e["id"]]',
+     '        cmd = " ".join(["claude", "--resume", e["id"]]',
+     "test_binario_no_alias.py"),
+    ("el relevo a Codex arranca por el nombre y no por la ruta",
+     '    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " " + shlex.quote(prompt),',
+     '    "codex": lambda prompt: "codex " + shlex.quote(prompt),',
+     "test_binario_no_alias.py"),
+    ("el relevo a Claude arranca por el nombre y no por la ruta",
+     '    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " " + shlex.quote(prompt),',
+     '    "claude": lambda prompt: "claude " + shlex.quote(prompt),',
+     "test_binario_no_alias.py"),
+
     # ── las pastillas del pie: donde pinchas es lo que se ejecuta ────────────
     ("el pie se pinta pero sus pastillas dejan de poder pincharse",
      '                zonas.append((y + 2, px, pxf, "tecla", cod))',

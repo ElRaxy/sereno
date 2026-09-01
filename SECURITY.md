@@ -20,8 +20,12 @@ Most of it is reading, but not all of it, so here is the whole list.
 **Writes**
 
 - `~/.claude/warp-sessions/` (override with `SERENO_REGISTRY`). Its own registry of live
-  sessions, and the archive it moves closed entries into. Nothing else lives there.
+  sessions, the archive it moves closed entries into, and a `preferencias.json` holding your
+  sort order and the launcher you last chose. Nothing else lives there.
 - `~/.warp/launch_configurations/*.yaml`, a launch file for Warp when reopening tabs.
+- `~/.sereno/lanzar/lanza-*.sh`, a throwaway script per tab when the tabs go to tmux or
+  Terminal.app, which take the command as one string. Outside `/tmp` on purpose: a handover
+  briefing carries conversation text, and `/tmp` is readable by every user on the machine.
 
 **Runs**
 
@@ -29,12 +33,21 @@ Most of it is reading, but not all of it, so here is the whole list.
   read a Warp setting, `osascript` (macOS) or `notify-send` (Linux) for `--watch` alerts.
 - `/bin/sh -c <the session's own command>` when you press ENTER outside Warp. It replaces
   itself with that shell so the session inherits your terminal.
+- Nothing else. But note what it does **not** run: the command that reopens a session is
+  executed by Warp, tmux or Terminal.app, in an *interactive* shell where your aliases apply.
+  That is why the CLI is written into the command as its absolute path (`shutil.which`) and
+  never as a bare name — otherwise an alias called `claude` can add flags to a session you
+  reopened. On the author's machine it added `--allow-dangerously-skip-permissions`: the launch
+  file read `claude --resume <id>` and `ps` read otherwise. `tests/test_binario_no_alias.py`
+  fakes the `PATH` and fails if any of the three places that compose a command drops back to
+  the bare name.
 - The processes you mark with SPACE get killed when you press `x`. Only those.
 
 `tests/test_sin_red.py` walks the source and fails the build if a binary outside that list
 shows up, or if anything opens a socket. There is no telemetry, no update check and no
-network code of any kind. No secrets, no credentials, no config file: everything is
-environment variables.
+network code of any kind. No secrets and no credentials. There is no config file to edit
+either — everything you can set is an environment variable; the `preferencias.json` above is
+written by the program, not by you, and deleting it only forgets your last sort order.
 
 ## Your session text is on screen
 
