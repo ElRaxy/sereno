@@ -2372,9 +2372,18 @@ def _dir_util(cwd):
 
 
 def hay_warp():
-    """Warp es la unica via que tenemos para abrir en una ventana NUEVA (`warpctrl`
-    no existe en esta version, verificado 2026-08-25). Sin el se reemplaza la terminal
-    actual: peor, pero es lo que hay en Linux, en iTerm o en Terminal.app."""
+    """Warp es la unica via que tenemos para abrir en una ventana NUEVA. Sin el se
+    reemplaza la terminal actual: peor, pero es lo que hay en Linux, en iTerm o en
+    Terminal.app.
+
+    Aqui ponia que `warpctrl` "no existe en esta version" y era media verdad. Revisado
+    el 2026-09-01 sobre v0.2026.08.26: el binario **si** lo lleva dentro —su parser
+    entero sale por `strings`, y la app trae hasta su skill en `Resources/bundled/
+    skills/warpctrl/`— pero **no se puede llamar**: invocarlo cae al parser de URLs, el
+    modo de control local viene apagado en los canales publicos y la ultima puerta es un
+    toggle de ajustes. Y aunque se encendiera no valdria para esto: su propia skill dice
+    que `input insert` solo DEJA ESCRITO el texto y que no existe accion que lo ejecute.
+    """
     return sys.platform == "darwin" and any(
         (base / "Warp.app").is_dir()
         for base in (pathlib.Path("/Applications"), HOME / "Applications"))
@@ -2386,7 +2395,14 @@ def abrir_sesion(r, callado=False):
     Antes hacia `exec` sobre el propio proceso: la sesion se comia la pestana desde
     la que se estaba mirando la lista, y con ella el hilo de lo que estabas haciendo.
     Se lanza por launch configuration, que es la unica via de Warp para abrir algo en
-    una ventana suya (`warpctrl` no existe en esta version, verificado 2026-08-25).
+    una ventana suya (el porque de `warpctrl`, en `hay_warp`).
+
+    Y cada ENTER abre una ventana, no una pestana mas, porque `warp://launch/` **nunca
+    reutiliza** la ventana viva: medido el 2026-09-01 abriendo dos veces seguidas la
+    misma config de una pestana, las ventanas de Warp fueron de 3 a 4 y de 4 a 5.
+    `warp://action/new_tab` si anade pestana a la ventana viva, pero no admite comando,
+    asi que no puede arrancar una sesion. Para juntarlas en una sola ventana esta la
+    tecla `r`, que manda las N de golpe en una sola launch configuration.
     """
     par = _comando_de(r)
     if not par:
@@ -6037,7 +6053,7 @@ def _T():
 _T()
 
 
-VERSION = "1.37.0"
+VERSION = "1.37.1"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

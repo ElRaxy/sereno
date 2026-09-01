@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.37.1
+
+**Dos comentarios que afirmaban de mas.** Decian que `warpctrl` "no existe en esta
+version". Revisado el 2026-09-01 sobre v0.2026.08.26: el binario **si** lo lleva dentro
+—su parser entero sale por `strings`, y la app trae hasta su skill en
+`Resources/bundled/skills/warpctrl/`—, pero **no se puede llamar**: invocarlo cae al
+parser de URLs, el modo de control local viene apagado en los canales publicos y la
+ultima puerta es un toggle de ajustes. Y aunque se encendiera no valdria para esto: su
+propia skill dice que `input insert` solo DEJA ESCRITO el texto y que no hay accion que
+lo ejecute.
+
+El comentario no cambia ni una linea de codigo, y por eso importa: "no existe" invita a
+no volver a mirar, y aqui lo que hay es "existe, no se puede llamar, y no haria lo que se
+le pediria" — tres cosas distintas, cada una con su fecha de caducidad.
+
+De paso queda escrito por que cada ENTER abre ventana y no pestana: `warp://launch/`
+**nunca** reutiliza la ventana viva (medido, dos llamadas seguidas: 3 -> 4 -> 5), y
+`warp://action/new_tab` si anade pestana pero no admite comando. Para juntarlas esta `r`.
+
 ## 1.37.0
 
 **El rotulo decia lo contrario de lo que hace.** Al abrir varias sesiones a la vez, el
