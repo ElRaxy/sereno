@@ -10,7 +10,7 @@ solapan**. La ultima columna de una pastilla se calcula restando uno; sumarlo la
 dos columnas dentro de la vecina, todo se sigue pintando igual, y un click en ese borde
 ejecuta la tecla de al lado. Entre esas teclas esta cerrar sesiones.
 
-Hasta la 1.37.0 no habia forma de probarlo: la tabla de zonas vivia dentro de `pick_ui`
+Hasta la 1.36.6 no habia forma de probarlo: la tabla de zonas vivia dentro de `pick_ui`
 y no se podia mirar desde fuera. Medido, ademas: cambiar ese `- 1` por un `+ 1` pasaba
 los 66 tests en verde.
 
@@ -74,14 +74,18 @@ def main():
                                   % (w, mx, tecla, chr(golpe[4]) if golpe[4] > 31 else golpe[4]))
 
     # ── caben las que caben, y en el orden que importa ───────────────────────
-    if [p[2] for p in pastillas_pie(200)] != [10, 32, ord("x"), ord("?"), ord("/"),
-                                              ord("s"), 9, ord("q")]:
-        fallos.append("con sitio de sobra no salen las ocho en su orden: %r"
+    if [p[2] for p in pastillas_pie(200)] != [10, 32, ord("x"), ord("?"), ord("r"),
+                                              ord("/"), ord("s"), 9, ord("q")]:
+        fallos.append("con sitio de sobra no salen las nueve en su orden: %r"
                       % ([p[0] for p in pastillas_pie(200)],))
-    if len(pastillas_pie(80)) < 5:
-        fallos.append("a 80 columnas —media flota— salen %d pastillas y tienen que "
-                      "caber cinco: la de ayuda es la puerta al resto de teclas"
-                      % len(pastillas_pie(80)))
+    # Cinco, y las cinco por su nombre: el orden de las primeras es una decision, no
+    # el resultado de sumar anchos. `r` es la unica tecla que abre VARIAS de una vez y
+    # vivio casi veinte versiones escondida en la ayuda; si vuelve a caerse del pie a 80
+    # columnas, vuelve a ser invisible justo donde el pie ya va apretado.
+    if [p[0] for p in pastillas_pie(80)][:5] != ["ENTER", "SPACE", "x", "?", "r"]:
+        fallos.append("a 80 columnas —media flota— el pie empieza por %r y tiene que "
+                      "empezar por ENTER, SPACE, x, ? y r"
+                      % ([p[0] for p in pastillas_pie(80)][:5],))
     anchas = [len(pastillas_pie(w)) for w in (200, 150, 120, 80, 60, 40, 20)]
     if anchas != sorted(anchas, reverse=True):
         fallos.append("al estrechar la ventana no salen menos pastillas: %r" % (anchas,))

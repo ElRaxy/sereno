@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.37.0
+
+**El rotulo decia lo contrario de lo que hace.** Al abrir varias sesiones a la vez, el
+cuadro que pregunta donde anunciaba `warp — una ventana de verdad para cada una`. Es
+falso desde que existe: la launch configuration que escribe Sereno declara **una ventana
+con una pestana por sesion**, y eso es exactamente lo que abre Warp.
+
+Medido el 2026-09-01 antes de tocar nada, que es como se descubrio: config de tres
+pestanas, ventanas de Warp de 2 a 3, y la nueva con las tres dentro — mirada en la
+barra lateral, no deducida del YAML. De paso quedan dos hechos mas sobre Warp:
+`warp://launch/` **siempre** abre ventana nueva y no reutiliza ninguna (dos llamadas
+seguidas, 3 -> 4 -> 5), y `warp://action/new_tab` si anade pestana a la ventana viva
+pero **no admite un comando**, asi que no sirve para lanzar una sesion.
+
+**Y por eso parecia una funcion que faltaba.** La tecla que hace eso es `r`, existe
+desde antes de la 1.18.0 y vivia **solo dentro de la ayuda**: no tenia pastilla en el pie. Entre
+un rotulo que promete lo contrario y una tecla que no se ve, la conclusion razonable es
+que el programa no sabe hacerlo. Ahora `r reabrir` sale en el pie, la quinta, delante de
+`/ filtrar`: es la unica tecla que abre VARIAS de una vez, y filtrar y ordenar se buscan
+cuando ya conoces el programa.
+
+A 80 columnas —media flota— entran cinco pastillas y `r` es una de ellas; el test las
+comprueba **por su nombre** y no por cuantas caben, porque el orden de las primeras es
+una decision y no el resultado de sumar anchos.
+
+- `_QUE_ABRE["warp"]` -> "una ventana de Warp, con una pestana para cada una".
+- Los dos README repetian la misma mentira en su tabla de lanzadores: Warp es el **unico** que
+  las junta.
+- Mutante nuevo (134): quitar `r` del pie. No rompe nada visible — solo la vuelve
+  invisible, que es como estaba.
+
 ## 1.36.7
 
 **Y ahora se pincha el boton de verdad.** La 1.36.6 saco las dos piezas puras del pie y

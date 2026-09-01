@@ -116,6 +116,13 @@ MUTANTES = [
      '                zonas.append((y + 2, px, pxf, "tecla", cod))',
      '                zonas.append((y + 2, px, pxf + 2, "tecla", cod))',
      "test_click_en_el_pie.py"),
+    # `r` es la unica tecla que abre VARIAS sesiones a la vez, y con Warp las deja en
+    # una sola ventana. Vivio casi veinte versiones solo en la ayuda y se llego a
+    # pedir como funcion que faltaba. Que se caiga del pie no rompe nada visible:
+    # vuelve a ser invisible, que es como estaba.
+    ("la tecla que abre varias a la vez desaparece del pie",
+     '                            ("r", _("reopen"), ord("r")),\n', '',
+     "test_zonas_del_pie.py"),
     ("las zonas de las pastillas del pie se solapan con la vecina",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) + 1))",

@@ -957,13 +957,14 @@ una **ventana nueva** en vez de quedarse con la que estás mirando.
 Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria — que entonces no
 ocupa nada, en vez de quedarse ahí vacía — y `ENTER` hace `exec` sobre la terminal actual.
 
-Abrir **varias a la vez** —`r` y `c` abren una ventana por sesión— va por uno de estos. `r`
-pregunta por cuál, cuando hay más de uno a mano; con uno solo no hay nada que elegir y no aparece
-ningún cuadro. `SERENO_LANZADOR` fija uno:
+Abrir **varias a la vez** —`r` y `c`— va por uno de estos. `r` pregunta por cuál, cuando hay más
+de uno a mano; con uno solo no hay nada que elegir y no aparece ningún cuadro.
+`SERENO_LANZADOR` fija uno. **Warp es el único que las junta**: una sola ventana con una
+pestaña por sesión. Los demás abren una ventana por sesión:
 
 | | qué abre | necesita |
 |---|---|---|
-| **Warp** | una ventana de verdad por sesión | macOS con Warp instalado |
+| **Warp** | **una sola ventana**, con una pestaña por sesión | macOS con Warp instalado |
 | **iTerm2** | una ventana de iTerm2 por sesión | macOS con iTerm2 instalado |
 | **kitty** | una ventana de kitty por sesión, con su título y su directorio | macOS con kitty instalado |
 | **tmux** | una ventana de tmux por sesión, en la que ya estás | estar *dentro* de tmux — el único que funciona fuera de macOS |
@@ -1249,7 +1250,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento treinta y tres guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento treinta y cuatro guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

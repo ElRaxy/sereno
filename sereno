@@ -2300,7 +2300,13 @@ LANZADORES = {
 
 
 _QUE_ABRE = {
-    "warp": lambda: _("a real window each"),
+    # Decia "una ventana de verdad para cada una" y era MENTIRA: la launch configuration
+    # que escribe `_escribe_config` declara UNA ventana con una pestana por sesion, y eso
+    # es exactamente lo que abre Warp. Medido el 2026-09-01 con tres pestanas: las
+    # ventanas de Warp pasaron de 2 a 3, y la nueva salio con las tres dentro. El rotulo
+    # prometia justo lo contrario de lo que hace, y por eso parecia que abrir varias en
+    # el mismo Warp era una funcion que faltaba.
+    "warp": lambda: _("one Warp window, a tab for each"),
     "iterm": lambda: _("an iTerm2 window each"),
     "kitty": lambda: _("a kitty window each"),
     "tmux": lambda: _("a tmux window each, where you already are"),
@@ -4344,6 +4350,12 @@ def pastillas_pie(w, x0=2, sep=2):
     sexta y la puerta al resto de teclas no se veia justo en la ventana donde mas falta
     hace. `TAB` baja porque las pestanas ya salen pintadas arriba, con sus nombres.
 
+    `r` entra la quinta, delante de `/ filtrar`, porque es la unica tecla que abre
+    VARIAS sesiones de una vez —y con Warp las deja en una sola ventana, en pestanas—.
+    Vivia solo en la ayuda, y sin pastilla nadie la encontraba: se llego a pedir como
+    funcion que faltaba teniendola hecha desde antes de la 1.18.0. Filtrar y ordenar se buscan
+    cuando ya conoces el programa; esta es la que hay que tropezarse.
+
     Salio de `pick_ui` para poder probarla: ahi dentro la tabla de zonas no se puede
     mirar desde fuera, asi que nada impedia que dos pastillas se pisaran.
     """
@@ -4352,6 +4364,7 @@ def pastillas_pie(w, x0=2, sep=2):
                             (_("SPACE"), _("mark"), 32),
                             ("x", _("close"), ord("x")),
                             ("?", _("help"), ord("?")),
+                            ("r", _("reopen"), ord("r")),
                             ("/", _("filter"), ord("/")),
                             ("s", _("sort"), ord("s")),
                             ("TAB", "CLI", 9),
@@ -5025,7 +5038,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     ("TAB", _("switch CLI: claude, history, codex, gemini, all")),
                     ("a / i", _("mark all / invert")),
                     ("d", _("mark the ones idle for over an hour")),
-                    ("r", _("reopen the marked ones as tabs")),
+                    ("r", _("open the marked ones as tabs of ONE window")),
                     ("c", _("hand the marked ones to another CLI (codex, claude...)")),
                     ("n", _("what they are ALL running, in one screen")),
                     ("q", _("quit without touching anything")),
@@ -5711,7 +5724,8 @@ def _T():
         "[1-9] open there    [any other key] cancel":
             "[1-9] abrir ah\u00ed    [otra tecla] cancelar",
         "Cancelled, nothing was opened.": "Cancelado, no se ha abierto nada.",
-        "a real window each": "una ventana de verdad para cada una",
+        "one Warp window, a tab for each": "una ventana de Warp, con una pestaña "
+                                          "para cada una",
         "an iTerm2 window each": "una ventana de iTerm2 para cada una",
         "a kitty window each": "una ventana de kitty para cada una",
         "a tmux window each, where you already are":
@@ -5983,7 +5997,9 @@ def _T():
         "quit": "salir",
         "quit without touching anything": "salir sin tocar nada",
         "range mode: drop an anchor, SPACE marks to the cursor": "modo rango: fija ancla, ESPACIO marca hasta el cursor",
-        "reopen the marked ones as tabs": "reabrir las marcadas en pestañas",
+        "reopen": "reabrir",
+        "open the marked ones as tabs of ONE window":
+            "abrir las marcadas en pestañas de UNA ventana",
         "right click, or click the bar on the left: mark": "click derecho o en la barra de la izquierda: marcar",
         "session": "sesión",
         "source": "origen",
@@ -6021,7 +6037,7 @@ def _T():
 _T()
 
 
-VERSION = "1.36.7"
+VERSION = "1.37.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
