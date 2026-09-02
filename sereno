@@ -26,6 +26,8 @@ optional and only add live process control; without them everything is read from
   sereno --dismiss       drop the orphan entries without reopening them
   sereno --close-sel "1,4-6"   close without opening the picker (for scripts)
   sereno --stop-sel  "idle"    stop them but leave them resumable
+  sereno --stop-all            stop every live session (for scripts)
+  sereno --stop <name>         stop one live session by name (for scripts)
 
 Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
 SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_CTX_AVISO=80,90 (the context thresholds
@@ -5453,7 +5455,11 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 vivas = sum(1 for r in sel if r["working"])
                 verbo_c = _("Discard") if muertas else _("Close")
                 muestra = sel[:5]
-                alto_c, ancho_c = len(muestra) + 6, min(74, w - 4)
+                # Acotar el alto a la pantalla, como los demas modales (ayuda, relevo):
+                # en un terminal de menos de ~11 filas, un newwin mas alto que `h` lanza
+                # curses.error, que el wrapper traga como "No changes" justo al cerrar.
+                alto_c, ancho_c = min(len(muestra) + 6, h), min(74, w - 4)
+                muestra = muestra[:max(0, alto_c - 6)]
                 win = curses.newwin(alto_c, ancho_c, max(0, (h - alto_c) // 2),
                                     max(0, (w - ancho_c) // 2))
                 win.box()
@@ -5923,6 +5929,7 @@ def _T():
         "Sessions that died": "Sesiones que murieron",
         "Stopped {n} sessions.": "Paradas {n} sesiones.",
         "Stopped {s}.": "Parada {s}.",
+        "--stop needs a session name.": "--stop necesita el nombre de una sesión.",
         "They all already have a tab open.": "Todas están ya abiertas en una pestaña.",
         "Those already have a tab open.": "Esas ya tienen pestaña abierta.",
         "[in a tab]": "[en una pestaña]",
@@ -6100,6 +6107,7 @@ _FLAGS = {
     "--demo": 0,
     "--all": 0, "--watch": 0, "--yes": 0, "--dismiss": 0, "--add": 1, "--cwd": 1,
     "--title": 1, "--every": 1, "--find": 1, "--close-sel": 1, "--stop-sel": 1,
+    "--stop": 1, "--stop-all": 0,
 }
 
 
@@ -6768,7 +6776,11 @@ def main():
         print(_("Stopped {n} sessions.", n=len(rows)))
         return 0
     if "--stop" in argv:
-        name = argv[argv.index("--stop") + 1]
+        try:
+            name = argv[argv.index("--stop") + 1]
+        except IndexError:
+            print(_("--stop needs a session name."))
+            return 2
         tmux_kill(name)
         apunta_cerradas([c for r in rows if r["name"] == name for c in _claves_de(r)])
         print(_("Stopped {s}.", s=name))

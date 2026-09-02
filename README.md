@@ -923,6 +923,19 @@ undoing it is an `mv`. And it never touches the transcript: the conversation sta
 
 Until 1.30.2 this flag did nothing if you had a session open — see the CHANGELOG.
 
+### `--stop` and `--stop-all` — stop live sessions from a script
+
+`--stop-all` stops every live session; `--stop <name>` stops one by its name. Both kill the tmux
+session and archive its registry entry — the same as marking and closing from the picker, but
+without opening it, for scripts and shortcuts.
+
+```bash
+sereno --stop-all         # Stopped 3 sessions.
+sereno --stop my-branch   # Stopped my-branch.
+```
+
+To stop sessions but leave them **resumable** instead of archiving them, use `--stop-sel "idle"`.
+
 ### 🎭 Try it without touching your data
 
 ```bash
