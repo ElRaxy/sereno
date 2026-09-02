@@ -25,11 +25,82 @@ def main():
     fallos = []
     for filas, cols in TAMANOS:
         fallos += prueba(filas, cols)
+    fallos += prueba_filtro_vacio()
     for f in fallos:
         print("FALLO:", f)
-    print(f"ok: el TUI arranca, pinta y sale en {len(TAMANOS)} tamanos de ventana"
-          if not fallos else f"{len(fallos)} fallo(s)")
+    print(f"ok: el TUI arranca, pinta y sale en {len(TAMANOS)} tamanos, y un filtro que "
+          "no casa nada no finge una sesion" if not fallos else f"{len(fallos)} fallo(s)")
     return 1 if fallos else 0
+
+
+def _pinta(entorno, filas, cols, teclas, segundos=6.0):
+    """Arranca el TUI, teclea `teclas` a los 2.5 s y `q` al final; devuelve lo pintado."""
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execve(sys.executable, [sys.executable, str(RAIZ / "sereno")], entorno)
+    try:
+        import fcntl, struct, termios
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", filas, cols, 0, 0))
+    except Exception:
+        pass
+    salida, fin = b"", time.time() + segundos
+    arranque, tecleado, enviado_q = time.time(), False, False
+    while time.time() < fin:
+        r, _, _ = select.select([fd], [], [], 0.3)
+        if r:
+            try:
+                trozo = os.read(fd, 65536)
+            except OSError:
+                break
+            if not trozo:
+                break
+            salida += trozo
+        pasado = time.time() - arranque
+        if not tecleado and pasado > 2.5:
+            for t in teclas:
+                os.write(fd, t)
+            tecleado = True
+        elif tecleado and not enviado_q and pasado > 4.5:
+            os.write(fd, b"q")
+            enviado_q = True
+    for _ in range(20):
+        hijo, _st = os.waitpid(pid, os.WNOHANG)
+        if hijo:
+            break
+        time.sleep(0.1)
+    else:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    t = salida.decode("utf-8", "replace")
+    t = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", t)     # CSI (color, posicion)
+    # `\x1b(B` (elegir juego de caracteres) se cuela ENTRE "0" y " open" y parte la
+    # cadena que se busca: curses lo emite alrededor de cada addnstr. Fuera tambien.
+    return re.sub(r"\x1b[()][0-9A-Za-z]", "", t)
+
+
+def prueba_filtro_vacio():
+    """Un filtro que no casa nada NO se inventa una fila. Antes, el cartel "(nada
+    coincide)" fluia como una sesion normal: el header decia "1 open" y "1 idle", el
+    cartel salia con panel de detalle ("NO TRANSCRIPT") y con un "?" en la columna de
+    tiempo. Se teclea `/zzzz` y se comprueba que la cuenta cae a CERO —la senal de que la
+    fila fantasma no se cuenta— y que el cartel aparece."""
+    entorno = dict(os.environ, SERENO_DEMO="1", SERENO_LANG="en",
+                   TERM="xterm-256color", SERENO_DEBUG="1",
+                   SERENO_TMUX_SOCK="no-existe", LINES="20", COLUMNS="100")
+    limpio = _pinta(entorno, 20, 100, [b"/", b"z", b"z", b"z", b"z"])
+    fallos = []
+    if "Traceback" in limpio:
+        fallos.append("filtrando a nada el TUI ha reventado:\n"
+                      + limpio[limpio.find("Traceback"):][:600])
+    if "nothing matches" not in limpio:
+        fallos.append("un filtro sin resultados no pinta el cartel '(nothing matches)'")
+    # La senal dura: con la fila fantasma contada salia "1 open"; sin contarla, "0 open".
+    if "0 open" not in limpio:
+        fallos.append("el filtro sin resultados no cuenta CERO sesiones: la fila "
+                      "'(nothing matches)' se sigue contando como una sesion")
+    if not fallos:
+        print("ok [filtro vacio]: cuenta cero y no finge una sesion")
+    return fallos
 
 
 def prueba(filas, cols):
