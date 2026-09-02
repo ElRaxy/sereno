@@ -134,6 +134,19 @@ MUTANTES = [
      '    "claude": lambda prompt: "claude " + shlex.quote(prompt),',
      "test_binario_no_alias.py"),
 
+    # ── el relevo es un traspaso: lleva con que seguir, y lee a Codex ────────
+    # Un relevo sin el ultimo intercambio deja a quien lo recibe sin saber que se
+    # estaba haciendo — el fallo que se vio relevando Codex a Claude. Por defecto va;
+    # `SERENO_RELEVO=seco` es la unica salida, para trabajo de cliente.
+    ("el briefing deja de llevar el ultimo intercambio por defecto",
+     '    if _env("RELEVO") != "seco":', '    if False:',
+     "test_relevo.py"),
+    # Y leer a Codex es lo que hace que el briefing DESDE Codex no salga vacio: sin la
+    # ultima respuesta, el receptor no tiene el plan ni el siguiente paso.
+    ("relevar desde Codex se queda sin la ultima respuesta de la sesion",
+     '                d["resp"] = _sin_tabla(txt)\n', '                pass\n',
+     "test_codex_rollout.py"),
+
     # ── las pastillas del pie: donde pinchas es lo que se ejecuta ────────────
     ("el pie se pinta pero sus pastillas dejan de poder pincharse",
      '                zonas.append((y + 2, px, pxf, "tecla", cod))',

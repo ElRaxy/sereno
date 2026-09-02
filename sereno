@@ -2563,9 +2563,14 @@ def briefing(r, con_conversacion=False):
     transcript, con sus ids de herramienta, y no hay forma de meterlo en otro CLI. Esto
     es un RELEVO: una sesion nueva plantada en el mismo sitio con lo que se sabe.
 
-    Por defecto NO lleva conversacion. El briefing acaba dentro del YAML de Warp, que se
-    queda en el disco: meter ahi el prompt y la respuesta es sacar trabajo de un cliente
-    a un fichero, y eso se hace a peticion (`SERENO_RELEVO=completo`), no por defecto.
+    Un relevo es un TRASPASO: quien lo recibe tiene que poder seguir. Por eso por defecto
+    lleva el ultimo intercambio —lo que se le pidio y lo ultimo que dijo, que suele ser el
+    plan o el siguiente paso— recortado. `SERENO_RELEVO=completo` (tecla `k`) alarga esos
+    trozos; `SERENO_RELEVO=seco` los quita del todo.
+
+    El aviso que esto NO borra: el briefing acaba dentro del YAML de launch de Warp, que
+    se queda en el disco. Si en la sesion que relevas hay trabajo de cliente, ese texto va
+    al fichero — `seco` es la salida para ese caso.
     """
     d = detalles(r)
     cwd = d.get("cwd") or (r.get("meta") or {}).get("cwd") or ""
@@ -2582,12 +2587,13 @@ def briefing(r, con_conversacion=False):
         for e in ruta:
             glifo, _par, dur, res = linea_ruta(e, 100)
             lineas.append("    %s %s  %s" % (glifo, dur, res))
-    if con_conversacion:
+    if _env("RELEVO") != "seco":
+        tope = 4000 if con_conversacion else 1000
         for etiq, txt in ((_("last thing asked of it"), d.get("lastPrompt")),
                           (_("last thing it said"), d.get("resp"))):
             if txt:
-                lineas += ["", "  " + etiq + ":", "    " + _clean(txt)[:1200]]
-    lineas += ["", _("Get your bearings in that directory before touching anything.")]
+                lineas += ["", "  " + etiq + ":", "    " + _clean(txt)[:tope]]
+    lineas += ["", _("Pick up that work; get your bearings in the directory first.")]
     return "\n".join(lineas)
 
 
@@ -2745,7 +2751,7 @@ def relevo(sel, arnes=None, con_conversacion=None, lanzador=None):
     if not arnes:
         return None, _("No other CLI found on your PATH.")
     if con_conversacion is None:
-        con_conversacion = _env("SERENO_RELEVO") == "completo"
+        con_conversacion = _env("RELEVO") == "completo"
     pestanas, sin_sitio_, mismo_ = pestanas_de_relevo(
         sel, arnes, con_conversacion=con_conversacion)
     if not pestanas:
@@ -3706,14 +3712,107 @@ def linea_ruta(e, cols):
             recorta(e["res"], max(1, cols - RUTA_FIJO)))
 
 
+def _texto_codex(content):
+    """El texto de un mensaje de Codex, que llega en bloques con `text` (input_text /
+    output_text). El mismo mensaje puede traer varios; se juntan."""
+    if not isinstance(content, list):
+        return ""
+    return _clean(" ".join(b.get("text") or "" for b in content
+                           if isinstance(b, dict) and b.get("text")))
+
+
+def _arg_codex(q):
+    """La orden que resume una llamada de Codex. Un `exec` guarda su comando dentro de un
+    trozo de JS —`await tools.exec_command({"cmd":"..."})`—, no como argumento suelto; el
+    resto trae `arguments` en JSON. Se saca el `cmd` si esta, y si no, lo que haya."""
+    inp = q.get("input")
+    if isinstance(inp, str):
+        m = re.search(r'"cmd"\s*:\s*"((?:[^"\\]|\\.)*)"', inp)
+        if m:
+            try:
+                return _clean(json.loads('"' + m.group(1) + '"'))
+            except Exception:
+                return _clean(m.group(1))
+        return _clean(inp)[:120]
+    args = q.get("arguments")
+    return _clean(args)[:120] if isinstance(args, str) and args.strip("{} ") else ""
+
+
+def _evento_codex(q, t0):
+    """Un evento de la traza a partir de una llamada de Codex, con la misma forma que los
+    de Claude para que `linea_ruta` los pinte igual. El rollout no marca fallo ni duracion
+    por llamada como el `tool_result` de Claude, asi que salen como hechos (`·`): la traza
+    dice QUE hizo, no si cada paso fue bien."""
+    nom = q.get("name") or q.get("type") or "?"
+    arg = _arg_codex(q)
+    return {"nom": nom, "res": (nom + " · " + arg) if arg else nom,
+            "t0": t0, "dur": None, "pend": False, "err": False,
+            "cod": None, "bytes": 0, "busca": False, "vacio": None}
+
+
+def _det_codex(r):
+    """Lo que `detalles()` saca del transcript de Claude, pero del rollout de Codex.
+
+    Otro esquema —`response_item` con `payload`— y ademas enorme: se han medido rollouts
+    de 61 MB. Se lee SOLO la cola, como en Claude, y solo para la fila del cursor o la que
+    se releva. El ultimo intercambio suele estar a un punado de lineas del final; si un
+    tramo largo de herramientas lo entierra mas alla de la cola, se pierde el texto pero la
+    traza —que es lo que dice que estaba haciendo— sigue saliendo.
+    """
+    d = {}
+    meta = r.get("meta") or {}
+    if meta.get("_rama"):
+        d["gitBranch"] = meta["_rama"]
+    if meta.get("cwd"):
+        d["cwd"] = meta["cwd"]
+    path = meta.get("_rollout")
+    if not path:
+        return d
+    try:
+        d["peso"] = path.stat().st_size
+    except OSError:
+        pass
+    eventos = []
+    for raw in ultimas_lineas(path, 400):
+        try:
+            j = json.loads(raw)
+        except Exception:
+            continue
+        if j.get("type") != "response_item":
+            continue
+        q = j.get("payload") or {}
+        tipo = q.get("type")
+        if tipo == "message":
+            txt = _texto_codex(q.get("content"))
+            if not txt:
+                continue
+            if q.get("role") == "user":
+                d["lastPrompt"] = txt
+            elif q.get("role") == "assistant":
+                d["resp"] = _sin_tabla(txt)
+        elif tipo in ("custom_tool_call", "function_call"):
+            eventos.append(_evento_codex(q, _iso(j.get("timestamp") or "")))
+    if eventos:
+        d["ruta"] = eventos[-MAX_EVENTOS:]
+    return d
+
+
 def detalles(r):
     """aiTitle / lastPrompt / rama / peso del transcript, de su cola.
 
     Se lee SOLO para la fila bajo el cursor: abrir 16 transcripts para pintar una
     lista costaria mas que todo lo demas junto, y 15 de esos datos no se miran.
+
+    Codex guarda su historia en otro formato y en otro sitio: esa rama va por
+    `_det_codex`, que rellena los mismos campos leyendo su rollout.
     """
     if "_det" in r:
         return r["_det"]
+    if cli_de(r) == "codex":
+        d = _det_codex(r)
+        d["fase"] = _fase(r)
+        r["_det"] = d
+        return d
     d = {}
     t = (r.get("meta") or {}).get("_transcript")
     if t:
@@ -5363,7 +5462,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                              else _("Those are already {c} sessions.",
                                     c=arneses_disponibles()[0]))
                     continue
-                con_conv = _env("SERENO_RELEVO") == "completo"
+                con_conv = _env("RELEVO") == "completo"
                 hay_donde = lanzadores_disponibles()
                 # Se abre por donde lo dejaste la ultima vez. Quien releva a Codex una
                 # vez suele relevar a Codex siempre, y empezar cada vez por el primero
@@ -5606,7 +5705,10 @@ def sesiones_codex(limite=40):
     out = out[:limite]
     donde = _cwd_codex([r["name"] for r in out])
     for r in out:
-        r["meta"]["cwd"] = donde.get(r["name"], "")
+        info = donde.get(r["name"]) or {}
+        r["meta"]["cwd"] = info.get("cwd", "")
+        r["meta"]["_rama"] = info.get("rama", "")
+        r["meta"]["_rollout"] = info.get("rollout")
     return out
 
 
@@ -5637,9 +5739,12 @@ def _cwd_codex(ids):
                 cab = json.loads(fh.readline())
         except Exception:
             continue
-        cwd = (cab.get("payload") or {}).get("cwd") or ""
-        if cwd:
-            fuera[sid] = cwd
+        pay = cab.get("payload") or {}
+        cwd = pay.get("cwd") or ""
+        rama = (pay.get("git") or {}).get("branch") or ""
+        # La ruta del rollout viaja con la fila para que `detalles()` lea su cola solo
+        # cuando hace falta —la fila del cursor o la que se releva—, nunca los 699.
+        fuera[sid] = {"cwd": cwd, "rama": rama, "rollout": f}
     return fuera
 
 
@@ -5836,8 +5941,8 @@ def _T():
         "its last tool calls:": "sus \u00faltimas llamadas a herramienta:",
         "last thing asked of it": "lo \u00faltimo que se le pidi\u00f3",
         "last thing it said": "lo \u00faltimo que dijo",
-        "Get your bearings in that directory before touching anything.":
-            "Ori\u00e9ntate en ese directorio antes de tocar nada.",
+        "Pick up that work; get your bearings in the directory first.":
+            "Retoma ese trabajo; ori\u00e9ntate primero en el directorio.",
         "{n} already had a tab": "{n} ya ten\u00edan pesta\u00f1a",
         "{n} cannot be opened from here": "{n} no se saben abrir desde aqu\u00ed",
         "None of those can be opened from here.":
