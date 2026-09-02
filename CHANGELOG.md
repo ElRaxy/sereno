@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.38.1
+
+**`--stop` y `--stop-all` no llegaban a ejecutarse.** Los dos flags tenian su handler
+completo, pero nunca se registraron en `_FLAGS`. El guard de flags desconocidos corre
+primero, asi que ambos salian con `exit 2` "opcion desconocida" ANTES de tocar su codigo.
+La ayuda (`--help`) y el CHANGELOG los daban por vivos: un handler escrito y jamas
+enganchado. Ahora estan en la tabla, documentados en el docstring y en los dos README.
+
+Y `--stop` leia `argv[index+1]` sin red: `sereno --stop` sin nombre reventaba con
+`IndexError`. Cae en un mensaje limpio y `exit 2`, como ya hacian `--stop-sel` y
+`--close-sel`.
+
+La grieta se colo porque el test de flags solo miraba en una direccion: docstring ->
+tabla. Se anade la inversa —los `--x` despachados en el cuerpo de `main()` tienen que
+estar en `_FLAGS`— que falla en rojo contra el codigo viejo nombrando exactamente estos
+dos, y blinda la clase entera: un handler nuevo cuyo flag nadie registre.
+
+**Y el modal de confirmar cierre no acotaba su alto a la pantalla**, el unico de los
+modales que no lo hacia. En un terminal de menos de ~11 filas, pulsar `x` con varias
+sesiones marcadas hacia un `newwin` mas alto que la pantalla -> `curses.error`, que el
+wrapper traga como "No changes" justo al cerrar. Ahora clampa a la altura y recorta la
+muestra, como los modales de ayuda y relevo.
+
 ## 1.38.0
 
 **Las ordenes llevan la RUTA del CLI, no su nombre.** Sereno no ejecuta lo que compone:
