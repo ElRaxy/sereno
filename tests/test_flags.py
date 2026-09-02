@@ -52,6 +52,22 @@ def main():
         if f not in FLAGS:
             fallos.append(f"{f} sale en --help y no esta en _FLAGS")
 
+    # Y la inversa: todo flag DESPACHADO en main() (por `"--x" in argv` o
+    # argv.index("--x")) tiene que estar en la tabla. El control de arriba mira
+    # docstring -> tabla; sin este, un handler nuevo cuyo flag nadie registro sale
+    # con exit 2 "opcion desconocida" ANTES de llegar a su codigo, y no se ve. Fue
+    # lo que paso con --stop y --stop-all.
+    fuente = (RAIZ / "sereno").read_text()
+    i = fuente.index("\ndef main(")
+    resto = fuente[i + 1:]
+    corte = re.search(r"\n(?:def |if __name__)", resto)
+    cuerpo = resto[:corte.start()] if corte else resto
+    despachados = (set(re.findall(r'"(--[a-z][a-z-]+)"\s+in argv', cuerpo))
+                   | set(re.findall(r'argv\.index\(\s*"(--[a-z][a-z-]+)"', cuerpo)))
+    for f in sorted(despachados):
+        if f not in FLAGS:
+            fallos.append(f"{f} se maneja en main() y no esta en _FLAGS")
+
     if fallos:
         print("FALLA:")
         for f in fallos:

@@ -898,6 +898,19 @@ la sesión se sigue pudiendo reanudar desde el historial (TAB en el selector, o
 
 Hasta la 1.30.2 este flag no hacía nada si tenías una sesión abierta — ver el CHANGELOG.
 
+### `--stop` y `--stop-all` — parar sesiones vivas desde un script
+
+`--stop-all` para todas las sesiones vivas; `--stop <nombre>` para una por su nombre. Las dos matan
+la sesión de tmux y archivan su entrada del registro — lo mismo que marcarla y cerrarla desde el
+selector, pero sin abrirlo, para scripts y atajos.
+
+```bash
+sereno --stop-all         # Paradas 3 sesiones.
+sereno --stop mi-rama     # Parada mi-rama.
+```
+
+Para parar sesiones pero dejarlas **reanudables** en vez de archivarlas, usa `--stop-sel "idle"`.
+
 ### 🎭 Probarlo sin tocar tus datos
 
 ```bash
