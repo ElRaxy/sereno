@@ -124,6 +124,29 @@ def main():
     if ns["lanzador_disponible"]() is not None:
         fallos.append("sin ninguno disponible sigue eligiendo uno")
 
+    # 6b. Dentro de tmux, `tmux` pasa al frente: es el unico que abre "donde ya estas"
+    #     —una pestana mas en la ventana viva— mientras que Warp abre SIEMPRE una ventana
+    #     nueva. Asi el relevo y el reabrir caen por defecto en el mismo Warp del que sales.
+    #     Fuera de tmux, el orden de siempre; y `SERENO_LANZADOR` manda incluso dentro.
+    nst = carga(tmp / "lanzar_tmux")
+    nst["LANZADORES"] = {k: (lambda: True, v[1]) for k, v in nst["LANZADORES"].items()}
+    nst["hay_tmux_alrededor"] = lambda: True
+    en_tmux = nst["lanzadores_disponibles"]()
+    if not en_tmux or en_tmux[0] != "tmux":
+        fallos.append(f"dentro de tmux el relevo no abre por defecto donde ya estas: "
+                      f"{en_tmux}")
+    nst["hay_tmux_alrededor"] = lambda: False
+    fuera = nst["lanzadores_disponibles"]()
+    if fuera != ["warp", "iterm", "kitty", "tmux", "terminal"]:
+        fallos.append(f"fuera de tmux el orden de siempre cambio (tmux no debe colarse "
+                      f"al frente): {fuera}")
+    nst["hay_tmux_alrededor"] = lambda: True
+    os.environ["SERENO_LANZADOR"] = "terminal"
+    forzado_en_tmux = nst["lanzadores_disponibles"]()
+    os.environ.pop("SERENO_LANZADOR")
+    if forzado_en_tmux != ["terminal"]:
+        fallos.append(f"SERENO_LANZADOR no manda dentro de tmux: {forzado_en_tmux}")
+
     # 7. Y ninguno revienta si su binario no esta: es el fallo de la 1.24.0 volviendo por
     #    la puerta de al lado. Cuentan 0 abiertas, que es la verdad.
     ns2 = carga(tmp / "lanzar2")

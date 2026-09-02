@@ -284,6 +284,12 @@ MUTANTES = [
      '    try:\n        subprocess.run([TMUX_BIN, "-L", SOCK] + orden, check=False)\n    except OSError:\n        pass',
      '    subprocess.run([TMUX_BIN, "-L", SOCK] + orden, check=False)',
      "test_lanzadores.py"),
+    # Dentro de tmux, el relevo tiene que abrir "donde ya estas": si tmux deja de pasar al
+    # frente, vuelve a caer en Warp —ventana nueva— y se pierde el "mismo Warp".
+    ("dentro de tmux, tmux deja de ponerse el primero de los lanzadores",
+     '            nombres = ["tmux"] + [n for n in nombres if n != "tmux"]\n',
+     '            pass\n',
+     "test_lanzadores.py"),
 
     # ── --dismiss: el flag vivia detras de la bifurcacion y no llegaba nunca ─
     ("--dismiss vuelve a quedar detras de la bifurcacion de main",

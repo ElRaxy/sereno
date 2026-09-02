@@ -2348,9 +2348,21 @@ _QUE_ABRE = {
 
 
 def lanzadores_disponibles():
-    """Los de `LANZADORES` que existen aqui, en orden. `SERENO_LANZADOR` deja uno."""
+    """Los de `LANZADORES` que existen aqui, en orden. `SERENO_LANZADOR` deja uno.
+
+    Dentro de tmux, `tmux` pasa al frente: es el unico que abre "donde ya estas" —una
+    pestana mas en la ventana actual— mientras que Warp abre SIEMPRE una ventana nueva
+    (`warp://launch/` no reutiliza la viva). Asi el relevo y el reabrir caen por defecto
+    en el mismo Warp del que sales. `SERENO_LANZADOR` y la preferencia guardada mandan
+    sobre este orden.
+    """
     forzado = _env("LANZADOR")
-    nombres = [forzado] if forzado in LANZADORES else list(LANZADORES)
+    if forzado in LANZADORES:
+        nombres = [forzado]
+    else:
+        nombres = list(LANZADORES)
+        if hay_tmux_alrededor():
+            nombres = ["tmux"] + [n for n in nombres if n != "tmux"]
     return [n for n in nombres if LANZADORES[n][0]()]
 
 
