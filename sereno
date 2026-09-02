@@ -4394,7 +4394,7 @@ def leer_sgr(win, ungetch, espera, restaurar=None):
     return None
 
 
-def pastillas_pie(w, x0=2, sep=2):
+def pastillas_pie(w, x0=2, sep=2, marcadas=0):
     """Las pastillas del pie que CABEN en `w` columnas: [(tecla, texto, cod, x, xf)].
 
     `x` es la primera columna que ocupa la pastilla y `xf` la ultima — la de dentro, no
@@ -4417,17 +4417,35 @@ def pastillas_pie(w, x0=2, sep=2):
 
     Salio de `pick_ui` para poder probarla: ahi dentro la tabla de zonas no se puede
     mirar desde fuera, asi que nada impedia que dos pastillas se pisaran.
+
+    Con sesiones marcadas el pie cambia: `x cerrar`, `r reabrir` y `c relevar` —lo que se
+    hace CON lo marcado— pasan al frente. `c` es la funcion estrella del selector y sin
+    marcar no entra en el pie a ningun ancho, asi que vivia solo en la ayuda y no la
+    encontraba quien no la leyera. Sin nada marcado el orden no se toca.
     """
+    if marcadas:
+        pares = ((_("ENTER"), _("open"), 10),
+                 (_("SPACE"), _("mark"), 32),
+                 ("x", _("close"), ord("x")),
+                 ("r", _("reopen"), ord("r")),
+                 ("c", _("relay"), ord("c")),
+                 ("/", _("filter"), ord("/")),
+                 ("s", _("sort"), ord("s")),
+                 ("?", _("help"), ord("?")),
+                 ("TAB", "CLI", 9),
+                 ("q", _("quit"), ord("q")))
+    else:
+        pares = ((_("ENTER"), _("open"), 10),
+                 (_("SPACE"), _("mark"), 32),
+                 ("x", _("close"), ord("x")),
+                 ("?", _("help"), ord("?")),
+                 ("/", _("filter"), ord("/")),
+                 ("r", _("reopen"), ord("r")),
+                 ("s", _("sort"), ord("s")),
+                 ("TAB", "CLI", 9),
+                 ("q", _("quit"), ord("q")))
     out, hx = [], x0
-    for tecla, txt, cod in ((_("ENTER"), _("open"), 10),
-                            (_("SPACE"), _("mark"), 32),
-                            ("x", _("close"), ord("x")),
-                            ("?", _("help"), ord("?")),
-                            ("/", _("filter"), ord("/")),
-                            ("r", _("reopen"), ord("r")),
-                            ("s", _("sort"), ord("s")),
-                            ("TAB", "CLI", 9),
-                            ("q", _("quit"), ord("q"))):
+    for tecla, txt, cod in pares:
         pastilla = f" {tecla} {txt} "
         if hx + ancho(pastilla) >= w - 2:
             break
@@ -5036,12 +5054,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             elif n:
                 stdscr.addnstr(y, 2,
                                _("{n} marked to discard", n=n) if muertas
-                               else _("{n} marked to close", n=n),
+                               else _("{n} marked", n=n),
                                w - 3, C(2) | curses.A_BOLD)
             # Pastillas con fondo en vez de texto suelto: se leen como botones, que es
             # lo que ya son — se pinchan y hacen lo mismo que su tecla.
             hx2 = 2
-            for tecla, txt, cod, px, pxf in pastillas_pie(w, x0=hx2):
+            for tecla, txt, cod, px, pxf in pastillas_pie(w, x0=hx2, marcadas=n):
                 stdscr.addnstr(y + 2, px, f" {tecla} ", w - 1 - px,
                                CF(7) | curses.A_BOLD)
                 stdscr.addnstr(y + 2, px + len(tecla) + 2, f"{txt} ", w - 1 - px, CF(0))
@@ -6082,8 +6100,9 @@ def _T():
         "{n} MB of history": "{n} MB de historial",
         "{n} are history, not processes: nothing to close. Unmark them.": "{n} son historial, no procesos: no hay nada que cerrar. Quítalas de la selección.",
         "{n} closed and archived. The history is still on disk.": "{n} cerrada(s) y archivada(s). El historial sigue en disco.",
-        "{n} marked to close": "{n} marcada(s) para cerrar",
+        "{n} marked": "{n} marcada(s)",
         "{n} marked to discard": "{n} marcada(s) para descartar",
+        "relay": "relevar",
         "{n} resumable session(s):": "{n} sesión(es) reanudables:",
         "{n} running something right now": "{n} ejecutando ahora mismo",
         "{n} session(s) closed. Their history is still on disk: `claude-sessions --list` won't list them again, but `claude --resume <id>` brings them back.": "{n} sesión(es) cerradas. Su historial sigue en disco: `claude-sessions --list` no las volverá a listar, pero `claude --resume <id>` las recupera.",
