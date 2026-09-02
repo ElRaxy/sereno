@@ -1,5 +1,64 @@
 # Changelog
 
+## 1.40.0
+
+**Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia
+con "sin datos": la sesion que lo recibia no sabia que se estaba haciendo. `detalles()` solo
+entendia el transcript de Claude, y a la fila de Codex ni se le pasaba su rollout —que es
+otro esquema (`response_item` con `payload`) y pesa megas, medidos 61-64 MB—. Ahora un
+extractor lee SOLO la cola del rollout (16 ms sobre 64 MB) y saca el ultimo prompt, la
+ultima respuesta y la traza de herramientas, igual que en Claude. Va en los dos sentidos.
+
+**Y el briefing es un TRASPASO, no una ficha.** Por defecto lleva el ultimo intercambio —lo
+que se le pidio y lo ultimo que dijo, que suele ser el plan o el siguiente paso— para que
+quien releva pueda seguir. `SERENO_RELEVO=completo` (tecla `k`) lo alarga; el nuevo
+`SERENO_RELEVO=seco` lo deja en solo hechos, para cuando en esa sesion hay trabajo de
+cliente (el briefing acaba en el YAML de Warp, en disco). De paso, `SERENO_RELEVO` como
+variable de entorno **por fin funciona**: se leia con doble prefijo (`SERENO_SERENO_RELEVO`)
+y solo la tecla `k` la activaba.
+
+**`c relevar` sale en el pie al marcar.** La tecla estrella del selector vivia solo en la
+ayuda `?`: no entraba en el pie a ningun ancho. Ahora, con sesiones marcadas, el pie ensena
+`x cerrar · r reabrir · c relevar` por delante —lo que se hace con lo marcado—, y se ve
+hasta a 80 columnas. Sin nada marcado, el orden de siempre.
+
+**Relevar (y reabrir) en la MISMA ventana de Warp, si corres dentro de tmux.** Warp no deja
+ejecutar un comando en su ventana viva por su API, asi que el relevo abria una ventana
+nueva. Cuando Sereno corre dentro de tmux, ahora el defecto es abrir "donde ya estas":
+`tmux new-window` en tu sesion, que en Warp es una pestana mas de la misma ventana. `[w]` y
+la preferencia siguen mandando.
+
+**Dos asperezas de la lista.** Un filtro que no casa nada ya no finge una sesion: antes la
+fila "(nada coincide)" se contaba en el header ("1 abierta · 1 en espera") y salia con panel
+de detalle; ahora cuenta cero y es solo un cartel. Y el total de memoria del header ya no se
+recorta a media cifra ("1.6" sin "GB"): o cabe entero o no sale.
+
+**El que releva ahora sabe quien es y donde leer el resto.** El briefing empieza diciendole
+que ES esa sesion y que siga donde la dejo, no que empiece de cero — el fallo era que la
+sesion nueva no se daba por enterada de que venia a relevar. Y como Sereno no resume (no
+lleva LLM), el traspaso acaba con la RUTA del transcript de verdad: quien releva es un agente
+con acceso a ficheros, asi que con esa ruta reconstruye TODO el contexto, no solo la cola que
+cabe en el briefing. Va bajo el mismo `seco`: es un puntero al trabajo, no un hecho suelto.
+
+**La ayuda `?` explica los simbolos de cada fila, no solo las teclas.** Estaba la leyenda de
+lo que hace cada tecla, pero no la de los simbolos: habia que adivinar que era un `●`, un `◐`,
+el `⧉` de dos sesiones en el mismo sitio, el `↻` de una dando vueltas o media barra en gris.
+Ahora la ayuda los nombra uno a uno.
+
+**El relevo cae en el mismo Warp sin que tengas que arrancar en tmux a mano.** Lo de "misma
+ventana" solo funcionaba si Sereno YA corria dentro de tmux, y lanzado en una pestana normal
+no lo estaba, asi que el relevo abria ventana nueva igual. Con `SERENO_TMUX_AUTO=1` el
+selector se re-lanza dentro de tmux al arrancar (fuera de tmux, en un tty y con tmux
+instalado), y a partir de ahi el relevo tiene donde caer. Opt-in a proposito: los modos que
+imprimen y salen (`--json`, `--watch`...) no se envuelven, y quien usa Sereno sin tmux no se
+ve metido dentro por sorpresa.
+
+**Una sesion que renombras con `/rename` sale con ese nombre, no con el viejo.** Claude Code
+no guarda el `/rename` en el transcript, sino en un fichero aparte (`<id>/custom-title.json`)
+que Sereno no leia; por eso seguia ganando el aiTitle y la sesion renombrada salia con su
+titulo de antes. Ahora ese fichero manda sobre cualquier titulo derivado, y se lee fuera de
+la cache para que renombrar una sesion parada tambien se note.
+
 ## 1.39.0
 
 **El relevo (`c`) ya entrega a Gemini.** Antes solo iba entre Claude y Codex; ahora una
