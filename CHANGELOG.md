@@ -33,6 +33,26 @@ fila "(nada coincide)" se contaba en el header ("1 abierta · 1 en espera") y sa
 de detalle; ahora cuenta cero y es solo un cartel. Y el total de memoria del header ya no se
 recorta a media cifra ("1.6" sin "GB"): o cabe entero o no sale.
 
+**El que releva ahora sabe quien es y donde leer el resto.** El briefing empieza diciendole
+que ES esa sesion y que siga donde la dejo, no que empiece de cero — el fallo era que la
+sesion nueva no se daba por enterada de que venia a relevar. Y como Sereno no resume (no
+lleva LLM), el traspaso acaba con la RUTA del transcript de verdad: quien releva es un agente
+con acceso a ficheros, asi que con esa ruta reconstruye TODO el contexto, no solo la cola que
+cabe en el briefing. Va bajo el mismo `seco`: es un puntero al trabajo, no un hecho suelto.
+
+**La ayuda `?` explica los simbolos de cada fila, no solo las teclas.** Estaba la leyenda de
+lo que hace cada tecla, pero no la de los simbolos: habia que adivinar que era un `●`, un `◐`,
+el `⧉` de dos sesiones en el mismo sitio, el `↻` de una dando vueltas o media barra en gris.
+Ahora la ayuda los nombra uno a uno.
+
+**El relevo cae en el mismo Warp sin que tengas que arrancar en tmux a mano.** Lo de "misma
+ventana" solo funcionaba si Sereno YA corria dentro de tmux, y lanzado en una pestana normal
+no lo estaba, asi que el relevo abria ventana nueva igual. Con `SERENO_TMUX_AUTO=1` el
+selector se re-lanza dentro de tmux al arrancar (fuera de tmux, en un tty y con tmux
+instalado), y a partir de ahi el relevo tiene donde caer. Opt-in a proposito: los modos que
+imprimen y salen (`--json`, `--watch`...) no se envuelven, y quien usa Sereno sin tmux no se
+ve metido dentro por sorpresa.
+
 ## 1.39.0
 
 **El relevo (`c`) ya entrega a Gemini.** Antes solo iba entre Claude y Codex; ahora una
