@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Entregar una sesion a otro CLI: es un relevo, no una migracion, y no lleva
-conversacion salvo que se pida.
+"""Entregar una sesion a otro CLI: es un relevo, no una migracion.
 
-El briefing acaba DENTRO del YAML de launch de Warp, que se queda en el disco. Por eso
-lo que vigila este test no es que el texto quede bonito, sino los dos cortes que hacen
-que sea seguro dejarlo puesto:
+Un relevo es un TRASPASO, asi que por defecto lleva el ultimo intercambio —lo que se le
+pidio y lo ultimo que dijo— para que quien lo reciba pueda seguir. El briefing acaba
+DENTRO del YAML de launch de Warp, que se queda en el disco, asi que hay una salida para
+el caso de trabajo de cliente: `SERENO_RELEVO=seco` lo deja en solo hechos.
 
-  1. por defecto no sale ni el prompt ni la respuesta de la sesion;
-  2. una fila cuyo directorio ya no existe NO se releva, porque arrancaria en `~` con
+Lo que vigila este test:
+
+  1. por defecto SI sale el ultimo intercambio; con `SERENO_RELEVO=seco`, no;
+  2. `con_conversacion` (tecla k) alarga esos trozos;
+  3. una fila cuyo directorio ya no existe NO se releva, porque arrancaria en `~` con
      pinta de haber funcionado.
 """
 import os, pathlib, shlex, sys, tempfile
@@ -43,19 +46,32 @@ def main():
                              "lastPrompt": SECRETO_P, "resp": SECRETO_R,
                              "fase": None, "tool": None, "ruta": []}}
 
-        # 1. Por defecto, cero conversacion.
-        seco = briefing(fila(vivo))
+        # 1. Por defecto, el ultimo intercambio SALE: es lo que deja seguir a quien releva.
+        base = briefing(fila(vivo))
         for aguja, que in ((SECRETO_P, "el ultimo prompt"), (SECRETO_R, "la respuesta")):
-            if aguja in seco:
-                fallos.append(f"el briefing por defecto lleva {que}")
-        if "main" not in seco or str(vivo) not in seco:
+            if aguja not in base:
+                fallos.append(f"el briefing por defecto ya no lleva {que}")
+        if "main" not in base or str(vivo) not in base:
             fallos.append("el briefing no lleva ni la rama ni el directorio")
 
-        # 2. Pedida, sale. Sin esto el caso 1 pasaria aunque el briefing fuera vacio.
-        con = briefing(fila(vivo), con_conversacion=True)
-        if SECRETO_P not in con or SECRETO_R not in con:
-            fallos.append("con conversacion pedida sigue sin salir: el caso de arriba "
-                          "no estaria probando nada")
+        # 1b. `SERENO_RELEVO=seco` lo quita — la salida para cuando en esa sesion hay
+        #     trabajo de cliente, porque el briefing se queda en el YAML de Warp en disco.
+        os.environ["SERENO_RELEVO"] = "seco"
+        seco = briefing(fila(vivo))
+        os.environ.pop("SERENO_RELEVO", None)
+        for aguja, que in ((SECRETO_P, "el ultimo prompt"), (SECRETO_R, "la respuesta")):
+            if aguja in seco:
+                fallos.append(f"con SERENO_RELEVO=seco el briefing sigue llevando {que}")
+        if "main" not in seco or str(vivo) not in seco:
+            fallos.append("SERENO_RELEVO=seco se lleva por delante tambien los hechos")
+
+        # 2. `con_conversacion` (tecla k) alarga los trozos: una respuesta larga se recorta
+        #    por defecto y sale mas entera cuando se pide. Sin esto, un briefing vacio
+        #    pasaria el caso 1.
+        largo = fila(vivo)
+        largo["_det"]["resp"] = "R" * 2000
+        if len(briefing(largo, con_conversacion=True)) <= len(briefing(largo)):
+            fallos.append("con_conversacion no alarga el briefing")
 
         # 3. Sin directorio no hay relevo.
         pest, sin, _mismo = relevo_pest(

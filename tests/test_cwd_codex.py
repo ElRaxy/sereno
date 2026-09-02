@@ -33,22 +33,30 @@ def main():
         dia = raiz / "2026" / "08" / "28"
         dia.mkdir(parents=True)
 
-        def rollout(sid, cwd, fecha="2026-08-28T10-00-00"):
+        def rollout(sid, cwd, fecha="2026-08-28T10-00-00", rama=""):
             f = dia / f"rollout-{fecha}-{sid}.jsonl"
+            pay = {"cwd": cwd, "id": sid}
+            if rama:
+                pay["git"] = {"branch": rama}
             f.write_text(json.dumps({"type": "session_meta", "ordinal": 0,
-                                     "payload": {"cwd": cwd, "id": sid}}) + "\n"
+                                     "payload": pay}) + "\n"
                          + json.dumps({"type": "event", "payload": {}}) + "\n")
             return f
 
-        rollout(ID_A, "/tmp/proyecto-a")
+        rollout(ID_A, "/tmp/proyecto-a", rama="feature/a")
         rollout(ID_B, "/tmp/proyecto-b", "2026-08-28T11-00-00")
         ns["CODEX_SESIONES"] = raiz
 
-        # 1. Cada id con el suyo. Dos ficheros a la vez, porque con uno solo un bug que
-        #    devuelva "el primero que encuentre" pasaria igual.
+        # 1. Cada id con el suyo —cwd, rama y la ruta del rollout—. Dos ficheros a la vez,
+        #    porque con uno solo un bug que devuelva "el primero que encuentre" pasaria.
         salida = ns["_cwd_codex"]([ID_A, ID_B])
-        if salida.get(ID_A) != "/tmp/proyecto-a" or salida.get(ID_B) != "/tmp/proyecto-b":
+        a, b = salida.get(ID_A) or {}, salida.get(ID_B) or {}
+        if a.get("cwd") != "/tmp/proyecto-a" or b.get("cwd") != "/tmp/proyecto-b":
             fallos.append(f"los cwd salen cruzados o vacios: {salida}")
+        if a.get("rama") != "feature/a":
+            fallos.append(f"la rama no sale de la cabecera: {a.get('rama')!r}")
+        if not str(a.get("rollout") or "").endswith(ID_A + ".jsonl"):
+            fallos.append("no devuelve la ruta del rollout de cada sesion")
 
         # 2. Un id sin rollout no aparece: la fila se queda sin sitio, que es lo que
         #    hace que el relevo la descarte en vez de abrirla en el directorio de otra.
@@ -62,7 +70,8 @@ def main():
         raro = raiz / "2026" / "08" / "28"
         (raro / f"rollout-2026-08-28T12-00-00-{ID_HUERFANO}.jsonl").write_text(
             json.dumps({"payload": {"cwd": "/tmp/con-fecha-larga"}}) + "\n")
-        if ns["_cwd_codex"]([ID_HUERFANO]).get(ID_HUERFANO) != "/tmp/con-fecha-larga":
+        if (ns["_cwd_codex"]([ID_HUERFANO]).get(ID_HUERFANO) or {}).get("cwd") \
+                != "/tmp/con-fecha-larga":
             fallos.append("el uuid no se lee del final del nombre del rollout")
 
         # 4. Sin carpeta de sesiones no revienta: devuelve vacio.
