@@ -147,6 +147,36 @@ def main():
     if forzado_en_tmux != ["terminal"]:
         fallos.append(f"SERENO_LANZADOR no manda dentro de tmux: {forzado_en_tmux}")
 
+    # 6c. Auto-tmux (opt-in): el SELECTOR se re-lanza dentro de tmux para que el relevo
+    #     caiga en la misma ventana. Solo con SERENO_TMUX_AUTO, fuera de tmux, en un tty y
+    #     con tmux instalado; nunca en los modos que imprimen y salen. Se prueba la
+    #     DECISION (`_plan_tmux`), no el `execvp`, que se llevaria el proceso del test.
+    npt = carga(tmp / "lanzar_plan")
+    which0 = npt["shutil"].which
+    npt["shutil"].which = lambda n: "/usr/bin/" + str(n)      # tmux "instalado"
+    os.environ.pop("TMUX", None)
+    os.environ.pop("SERENO_TMUX_AUTO", None)
+    try:
+        if npt["_plan_tmux"]([], True) is not None:
+            fallos.append("sin SERENO_TMUX_AUTO el selector se mete en tmux igual")
+        os.environ["SERENO_TMUX_AUTO"] = "1"
+        if npt["_plan_tmux"]([], False) is not None:
+            fallos.append("fuera de un tty se mete en tmux (romperia --json y los hooks)")
+        plan = npt["_plan_tmux"]([], True)
+        if (not plan or plan[0] != npt["TMUX_BIN"] or "new-session" not in plan
+                or plan[1] != "-L" or plan[2] != npt["SOCK"]):
+            fallos.append(f"con SERENO_TMUX_AUTO y tty no re-lanza en tmux (mismo socket): "
+                          f"{plan}")
+        if npt["_plan_tmux"](["--json"], True) is not None:
+            fallos.append("un modo que imprime y sale (--json) se mete en tmux")
+        os.environ["TMUX"] = "/tmp/fake,1,0"
+        if npt["_plan_tmux"]([], True) is not None:
+            fallos.append("ya dentro de tmux se vuelve a envolver: bucle de re-lanzado")
+    finally:
+        npt["shutil"].which = which0
+        os.environ.pop("TMUX", None)
+        os.environ.pop("SERENO_TMUX_AUTO", None)
+
     # 7. Y ninguno revienta si su binario no esta: es el fallo de la 1.24.0 volviendo por
     #    la puerta de al lado. Cuentan 0 abiertas, que es la verdad.
     ns2 = carga(tmp / "lanzar2")

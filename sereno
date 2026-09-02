@@ -2291,6 +2291,51 @@ def hay_tmux_alrededor():
     return bool(os.environ.get("TMUX")) and bool(shutil.which(TMUX_BIN))
 
 
+# Sin selector: modos que imprimen y salen —o que corren aparte, como `--watch`—. Ninguno
+# gana nada dentro de tmux, y envolverlos solo estorba.
+_SIN_SELECTOR = {"--list", "--json", "--now", "--disk", "--hoy", "--today", "--find",
+                 "--watch", "--dismiss", "--stop", "--stop-all", "--version", "-h",
+                 "--help", "--add", "--yes"}
+
+
+def _plan_tmux(argv, tty):
+    """El comando con el que sereno se re-lanza DENTRO de tmux, o None si no toca.
+
+    Es lo unico que hace que el relevo caiga en la MISMA ventana de Warp: Warp no ejecuta
+    un comando en su ventana viva, pero `tmux new-window` abre una pestana mas en la sesion
+    donde ya estas (ver `_abre_en_tmux`). Fuera de tmux no existe esa sesion, asi que el
+    relevo abre ventana nueva; envolver el selector en tmux la crea.
+
+    Opt-in con `SERENO_TMUX_AUTO`: meter a todo el mundo en tmux por sorpresa es una
+    opinion fuerte para una herramienta que muchos usan sin el. Solo el SELECTOR se
+    envuelve; los modos de `_SIN_SELECTOR` no. Devuelve el plan en vez de ejecutarlo para
+    poder probar la DECISION sin re-lanzar el proceso.
+    """
+    if (not _env("TMUX_AUTO") or os.environ.get("TMUX") or not tty
+            or not shutil.which(TMUX_BIN) or _SIN_SELECTOR & set(argv)):
+        return None
+    # Por la ruta REAL del fichero, no por `sys.argv[0]`: el alias es un symlink y tmux
+    # escribe el comando en una shell donde un nombre pelado se lo queda otro alias — el
+    # mismo motivo que `bin_cli`.
+    yo = os.path.realpath(sys.argv[0])
+    cmd = " ".join(shlex.quote(x) for x in [sys.executable, yo] + argv)
+    # En el MISMO socket que el resto (`-L {SOCK}`): ahi viven las sesiones del alias
+    # `claude`, y el relevo (que abre con `new-window` sobre el `$TMUX` de esta sesion)
+    # cae en el mismo servidor. Sin `-L` iria al socket por defecto, otro servidor aparte.
+    # Sesion sin nombre a proposito: si no relevas y sales, muere y vuelves a tu shell; si
+    # relevas, su ventana queda viva y te deja ahi, que es donde quieres estar.
+    return [TMUX_BIN, "-L", SOCK, "new-session", cmd]
+
+
+def _quiza_en_tmux(argv):
+    plan = _plan_tmux(argv, sys.stdin.isatty())
+    if plan:
+        try:
+            os.execvp(plan[0], plan)
+        except OSError:
+            pass                       # sin tmux utilizable, el selector sigue sin el
+
+
 def _hay_app(nombre):
     """Si esa `.app` esta en alguno de los dos sitios donde se instalan en macOS."""
     return sys.platform == "darwin" and any(
@@ -6813,6 +6858,9 @@ def nada_que_ensenar():
 
 def main():
     argv = sys.argv[1:]
+    # Antes que nada: con SERENO_TMUX_AUTO y fuera de tmux, el selector se re-lanza dentro
+    # de tmux para que el relevo abra en la MISMA ventana. Si toca, esto no vuelve.
+    _quiza_en_tmux(argv)
     if "--demo" in argv:
         # La variable de entorno escrita corta. Se toca la global en vez de reejecutar
         # el proceso: un `execv` perderia el nombre con el que te invocaron, y todos
