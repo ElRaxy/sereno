@@ -2587,8 +2587,10 @@ def briefing(r, con_conversacion=False):
     d = detalles(r)
     cwd = d.get("cwd") or (r.get("meta") or {}).get("cwd") or ""
     origen = NOMBRE_CLI.get(cli_de(r), cli_de(r))
-    lineas = [_("You are taking over from a {c} session. You do not have its history: "
-                "what follows is everything that is known about it.", c=origen), ""]
+    lineas = [_("You are taking over a {c} session and continuing its work — you ARE this "
+                "session now, so pick up where it left off instead of starting over. What "
+                "follows is where it was; its full transcript is on disk if you need more.",
+                c=origen), ""]
     campos = [(_("project"), cwd), (_("branch"), d.get("gitBranch") or ""),
               (_("title"), r.get("title_full") or r.get("title") or ""),
               (_("state"), ESTADO_LARGO(estado_estable(r)))]
@@ -2605,7 +2607,15 @@ def briefing(r, con_conversacion=False):
                           (_("last thing it said"), d.get("resp"))):
             if txt:
                 lineas += ["", "  " + etiq + ":", "    " + _clean(txt)[:tope]]
-    lineas += ["", _("Pick up that work; get your bearings in the directory first.")]
+        # El "algo mas": la ruta del transcript de verdad. Sereno no puede resumir la
+        # sesion (no lleva LLM), pero quien releva SI puede leerla — es un agente con
+        # acceso a ficheros. Con la ruta reconstruye TODO el contexto, no solo la cola
+        # que cabe aqui. Va bajo el mismo `seco`: es un puntero al trabajo, no un hecho.
+        trans = (r.get("meta") or {}).get("_transcript") or (r.get("meta") or {}).get("_rollout")
+        if trans:
+            lineas += ["", "  " + _("its full transcript is here — read it for the whole "
+                                    "story before you keep going:"), "    " + str(trans)]
+    lineas += ["", _("First get your bearings in that directory, then carry on the work above.")]
     return "\n".join(lineas)
 
 
@@ -5962,10 +5972,15 @@ def _T():
         "One at a time does work: ENTER on each one.":
             "De una en una s\u00ed: ENTER sobre cada una.",
         "Those are already {c} sessions.": "Esas ya son sesiones de {c}.",
-        "You are taking over from a {c} session. You do not have its history: "
-        "what follows is everything that is known about it.":
-            "Vienes a relevar a una sesi\u00f3n de {c}. No tienes su historial: "
-            "esto es todo lo que se sabe de ella.",
+        "You are taking over a {c} session and continuing its work \u2014 you ARE this "
+        "session now, so pick up where it left off instead of starting over. What "
+        "follows is where it was; its full transcript is on disk if you need more.":
+            "Est\u00e1s relevando a una sesi\u00f3n de {c} y contin\u00faas su trabajo \u2014 ERES t\u00fa esa "
+            "sesi\u00f3n ahora, as\u00ed que sigue donde la dej\u00f3 en vez de empezar de cero. Lo que "
+            "viene es d\u00f3nde iba; su transcripci\u00f3n completa est\u00e1 en disco si necesitas m\u00e1s.",
+        "its full transcript is here \u2014 read it for the whole story before you keep going:":
+            "su transcripci\u00f3n completa est\u00e1 aqu\u00ed \u2014 l\u00e9ela para tener toda la historia "
+            "antes de seguir:",
         "project": "proyecto",
         "branch": "rama",
         "title": "t\u00edtulo",
@@ -5973,8 +5988,8 @@ def _T():
         "its last tool calls:": "sus \u00faltimas llamadas a herramienta:",
         "last thing asked of it": "lo \u00faltimo que se le pidi\u00f3",
         "last thing it said": "lo \u00faltimo que dijo",
-        "Pick up that work; get your bearings in the directory first.":
-            "Retoma ese trabajo; ori\u00e9ntate primero en el directorio.",
+        "First get your bearings in that directory, then carry on the work above.":
+            "Ori\u00e9ntate primero en ese directorio y luego sigue con el trabajo de arriba.",
         "{n} already had a tab": "{n} ya ten\u00edan pesta\u00f1a",
         "{n} cannot be opened from here": "{n} no se saben abrir desde aqu\u00ed",
         "None of those can be opened from here.":
