@@ -53,6 +53,12 @@ instalado), y a partir de ahi el relevo tiene donde caer. Opt-in a proposito: lo
 imprimen y salen (`--json`, `--watch`...) no se envuelven, y quien usa Sereno sin tmux no se
 ve metido dentro por sorpresa.
 
+**Una sesion que renombras con `/rename` sale con ese nombre, no con el viejo.** Claude Code
+no guarda el `/rename` en el transcript, sino en un fichero aparte (`<id>/custom-title.json`)
+que Sereno no leia; por eso seguia ganando el aiTitle y la sesion renombrada salia con su
+titulo de antes. Ahora ese fichero manda sobre cualquier titulo derivado, y se lee fuera de
+la cache para que renombrar una sesion parada tambien se note.
+
 ## 1.39.0
 
 **El relevo (`c`) ya entrega a Gemini.** Antes solo iba entre Claude y Codex; ahora una
