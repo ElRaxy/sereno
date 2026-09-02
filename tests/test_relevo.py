@@ -73,6 +73,21 @@ def main():
         if len(briefing(largo, con_conversacion=True)) <= len(briefing(largo)):
             fallos.append("con_conversacion no alarga el briefing")
 
+        # 2b. El briefing da la RUTA del transcript: es lo que deja al agente que releva
+        #     leer TODA la historia (Sereno no la resume, pero el agente la lee). Sin esto
+        #     el receptor solo tenia la cola y "no sabia que estaba haciendo". Va bajo el
+        #     mismo `seco`: es un puntero al trabajo.
+        con_ruta = fila(vivo)
+        con_ruta["meta"]["_transcript"] = "/tmp/una-sesion/transcript.jsonl"
+        if "/tmp/una-sesion/transcript.jsonl" not in briefing(con_ruta):
+            fallos.append("el briefing no da la ruta del transcript para leer el contexto")
+        os.environ["SERENO_RELEVO"] = "seco"
+        seco_ruta = briefing(con_ruta)
+        os.environ.pop("SERENO_RELEVO", None)
+        if "/tmp/una-sesion/transcript.jsonl" in seco_ruta:
+            fallos.append("con SERENO_RELEVO=seco el briefing sigue soltando la ruta del "
+                          "transcript (que apunta al trabajo)")
+
         # 3. Sin directorio no hay relevo.
         pest, sin, _mismo = relevo_pest(
             [fila(vivo), fila(muerto, "cc-x-2222bbbb")], "codex")
