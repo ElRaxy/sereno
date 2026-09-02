@@ -143,12 +143,19 @@ MUTANTES = [
      '                zonas.append((y + 2, px, pxf, "tecla", cod))',
      '                zonas.append((y + 2, px, pxf + 2, "tecla", cod))',
      "test_click_en_el_pie.py"),
-    # `r` es la unica tecla que abre VARIAS sesiones a la vez, y con Warp las deja en
-    # una sola ventana. Vivio casi veinte versiones solo en la ayuda y se llego a
-    # pedir como funcion que faltaba. Que se caiga del pie no rompe nada visible:
-    # vuelve a ser invisible, que es como estaba.
+    # `r` (abre VARIAS a la vez) y `c` (releva a otro CLI) son las dos teclas que solo
+    # actuan sobre lo marcado. Las dos vivieron escondidas en la ayuda —`c` hasta que el
+    # pie se hizo sensible al contexto— y su caida no rompe nada VISIBLE: vuelven a ser
+    # invisibles, que es como estaban. Por eso cada una necesita su mutante. El de `r`
+    # borra su linea de la rama SIN marcar, donde va detras de `/ filtrar`; el par `/`+`r`
+    # solo sale ahi, asi que el ancla es unica pese a que `r` aparezca en las dos ramas.
     ("la tecla que abre varias a la vez desaparece del pie",
-     '                            ("r", _("reopen"), ord("r")),\n', '',
+     '                 ("/", _("filter"), ord("/")),\n'
+     '                 ("r", _("reopen"), ord("r")),\n',
+     '                 ("/", _("filter"), ord("/")),\n',
+     "test_zonas_del_pie.py"),
+    ("la tecla que releva a otro CLI desaparece del pie con marcadas",
+     '                 ("c", _("relay"), ord("c")),\n', '',
      "test_zonas_del_pie.py"),
     ("las zonas de las pastillas del pie se solapan con la vecina",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))",

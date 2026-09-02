@@ -92,6 +92,34 @@ def main():
     if pastillas_pie(4):
         fallos.append("en una ventana de 4 columnas se pinta algo: %r" % (pastillas_pie(4),))
 
+    # ── con sesiones marcadas, el pie ensena `c relevar` sin pisarse ─────────
+    # Es la razon de ser del estado marcado: `c` no cabe en el pie ocioso a ningun
+    # ancho y vivia solo en la ayuda. Al marcar tiene que salir, y delante, porque
+    # es lo que se hace con lo marcado.
+    for w in ANCHOS:
+        ps = pastillas_pie(w, marcadas=3)
+        for (t1, _x1, _c1, _a1, b1), (t2, _x2, _c2, a2, _b2) in zip(ps, ps[1:]):
+            if a2 <= b1 + 1:
+                fallos.append("w=%d (marcadas): %r y %r se pisan o se pegan (%d, %d): "
+                              "un click ahi ejecuta la tecla que no es" % (w, t1, t2, b1, a2))
+        zonas = [(9, a, b, "tecla", cod) for _t, _x, cod, a, b in ps]
+        for tecla, _txt, cod, a, b in ps:
+            for mx in (a, (a + b) // 2, b):
+                golpe = zona_en(zonas, mx, 9)
+                if golpe is None or golpe[4] != cod:
+                    fallos.append("w=%d (marcadas): pinchar la columna %d de %r no da "
+                                  "su tecla" % (w, mx, tecla))
+    marcado80 = [p[0] for p in pastillas_pie(80, marcadas=3)]
+    if "c" not in marcado80:
+        fallos.append("con marcadas y 80 columnas `c relevar` no sale: %r" % (marcado80,))
+    if marcado80[:5] != ["ENTER", "SPACE", "x", "r", "c"]:
+        fallos.append("con marcadas el pie no empieza por ENTER, SPACE, x, r, c: %r"
+                      % (marcado80,))
+    # Y sin marcar, el orden de siempre no se ha movido.
+    if [p[0] for p in pastillas_pie(80)][:5] != ["ENTER", "SPACE", "x", "?", "/"]:
+        fallos.append("sin marcar el pie a 80 columnas ha cambiado: %r"
+                      % ([p[0] for p in pastillas_pie(80)],))
+
     # ── el resolutor, con una tabla escrita a mano ───────────────────────────
     tabla = [(9, 2, 10, "tecla", 10), (9, 13, 22, "tecla", 32),
              (3, 0, 2, "marca", 7), (3, 3, 40, "fila", 7)]
