@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.39.0
+
+**El relevo (`c`) ya entrega a Gemini.** Antes solo iba entre Claude y Codex; ahora una
+sesion se puede relevar tambien a Gemini, y en los dos sentidos. La orden se compone con
+`gemini -i <briefing>` —el flag que "ejecuta el prompt y sigue en modo interactivo",
+verificado contra `gemini --help`— y por la ruta absoluta del binario (`bin_cli`), no por
+el nombre pelado, para que ningun alias del `.zshrc` se cuele como en el #71.
+
+**Antigravity sigue fuera de `ARNESES`, y ahora es el ejemplo de por que.** No es un
+olvido: no tiene binario que arrancar con un prompt inicial, solo un directorio de
+conversaciones que sereno lee para reanudarlas. El cuadro lo sigue mostrando en gris con
+su motivo ("no comprobado como sembrarlo"), distinto del de "no instalado" que le toca a
+un CLI que si esta en `ARNESES` pero falta en el PATH.
+
 ## 1.38.1
 
 **`--stop` y `--stop-all` no llegaban a ejecutarse.** Los dos flags tenian su handler

@@ -2530,6 +2530,12 @@ ARNESES = {
     # el relevo vaya en los dos sentidos: una sesion de Codex tambien se entrega.
     # Por `bin_cli` y no por el nombre pelado, por lo mismo que en `_comando_de`.
     "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " " + shlex.quote(prompt),
+    # `gemini [query]` arranca interactivo con ese prompt inicial; `-i/--prompt-interactive`
+    # es su forma explicita ("execute the provided prompt and continue in interactive mode")
+    # y evita que un briefing que empiece raro se lea como subcomando. Verificado contra
+    # `gemini --help` el 2026-09-02. Antigravity no entra: no hay binario que sembrar, solo
+    # se leen sus conversaciones para reanudarlas.
+    "gemini": lambda prompt: shlex.quote(bin_cli("gemini")) + " -i " + shlex.quote(prompt),
 }
 
 # El CLI del que sale una fila. `fuente` tiene cinco valores y dos son el mismo arnes:
@@ -2661,7 +2667,8 @@ def ausentes_de_relevo(destinos):
 
     Dos motivos y no uno solo, porque no se arreglan igual: uno se instala y el otro
     exige comprobar en su `--help` como se le pasa un prompt inicial — que es la regla
-    por la que `gemini` no esta en `ARNESES`, y no un olvido.
+    por la que `antigravity` no esta en `ARNESES`, y no un olvido: no tiene binario que
+    sembrar, solo un directorio de conversaciones que se leen para reanudar.
     """
     fuera = []
     for nombre in GLIFO_CLI:
@@ -6095,7 +6102,7 @@ def _T():
 _T()
 
 
-VERSION = "1.38.1"
+VERSION = "1.39.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag
