@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.40.0
+
+**Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia
+con "sin datos": la sesion que lo recibia no sabia que se estaba haciendo. `detalles()` solo
+entendia el transcript de Claude, y a la fila de Codex ni se le pasaba su rollout —que es
+otro esquema (`response_item` con `payload`) y pesa megas, medidos 61-64 MB—. Ahora un
+extractor lee SOLO la cola del rollout (16 ms sobre 64 MB) y saca el ultimo prompt, la
+ultima respuesta y la traza de herramientas, igual que en Claude. Va en los dos sentidos.
+
+**Y el briefing es un TRASPASO, no una ficha.** Por defecto lleva el ultimo intercambio —lo
+que se le pidio y lo ultimo que dijo, que suele ser el plan o el siguiente paso— para que
+quien releva pueda seguir. `SERENO_RELEVO=completo` (tecla `k`) lo alarga; el nuevo
+`SERENO_RELEVO=seco` lo deja en solo hechos, para cuando en esa sesion hay trabajo de
+cliente (el briefing acaba en el YAML de Warp, en disco). De paso, `SERENO_RELEVO` como
+variable de entorno **por fin funciona**: se leia con doble prefijo (`SERENO_SERENO_RELEVO`)
+y solo la tecla `k` la activaba.
+
+**`c relevar` sale en el pie al marcar.** La tecla estrella del selector vivia solo en la
+ayuda `?`: no entraba en el pie a ningun ancho. Ahora, con sesiones marcadas, el pie ensena
+`x cerrar · r reabrir · c relevar` por delante —lo que se hace con lo marcado—, y se ve
+hasta a 80 columnas. Sin nada marcado, el orden de siempre.
+
+**Relevar (y reabrir) en la MISMA ventana de Warp, si corres dentro de tmux.** Warp no deja
+ejecutar un comando en su ventana viva por su API, asi que el relevo abria una ventana
+nueva. Cuando Sereno corre dentro de tmux, ahora el defecto es abrir "donde ya estas":
+`tmux new-window` en tu sesion, que en Warp es una pestana mas de la misma ventana. `[w]` y
+la preferencia siguen mandando.
+
+**Dos asperezas de la lista.** Un filtro que no casa nada ya no finge una sesion: antes la
+fila "(nada coincide)" se contaba en el header ("1 abierta · 1 en espera") y salia con panel
+de detalle; ahora cuenta cero y es solo un cartel. Y el total de memoria del header ya no se
+recorta a media cifra ("1.6" sin "GB"): o cabe entero o no sale.
+
 ## 1.39.0
 
 **El relevo (`c`) ya entrega a Gemini.** Antes solo iba entre Claude y Codex; ahora una
