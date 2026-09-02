@@ -10,7 +10,8 @@ Dos cosas pequenas que se notan cada vez que se usa la tecla:
     nada mas: no habia forma de enterarse de que esto va con mas CLIs. Ahora los otros
     salen en gris, y con SU motivo — que no es el mismo: uno se arregla instalandolo y
     el otro exige comprobar en su `--help` como se le pasa un prompt inicial, que es la
-    regla por la que `gemini` no esta en `ARNESES` y no un olvido.
+    regla por la que `antigravity` no esta en `ARNESES` y no un olvido: no hay binario
+    que sembrar, solo conversaciones que se leen para reanudar.
 
 Las preferencias se guardan en un fichero, no en una variable de entorno: la gracia es
 no tener que decirlo cada vez, y una variable hay que ponerla igual.
@@ -54,24 +55,25 @@ def main():
     if ns["pref"]("relevo_arnes") != "claude":
         fallos.append("no se puede recuperar de un fichero roto")
 
-    # 4. Los ausentes, con su motivo. `gemini` esta en los CLI conocidos pero NO en
+    # 4. Los ausentes, con su motivo. `antigravity` esta en los CLI conocidos pero NO en
     #    `ARNESES`: su motivo tiene que ser el de "no se ha comprobado", no el de "no
     #    instalado" — son dos arreglos distintos.
     fuera = dict(ns["ausentes_de_relevo"](["codex"]))
     if "claude" not in fuera and "claude" in ns["ARNESES"]:
         pass                        # si `claude` esta en el PATH, no es un ausente
-    if "gemini" not in fuera:
-        fallos.append(f"gemini no sale como ausente: {fuera}")
-    elif fuera["gemini"] != ns["_"]("not checked how to seed it"):
-        fallos.append(f"el motivo de gemini es el equivocado: {fuera['gemini']!r}")
+    if "antigravity" not in fuera:
+        fallos.append(f"antigravity no sale como ausente: {fuera}")
+    elif fuera["antigravity"] != ns["_"]("not checked how to seed it"):
+        fallos.append(f"el motivo de antigravity es el equivocado: {fuera['antigravity']!r}")
     # Y lo que SI se ofrece no aparece como ausente.
     if "codex" in fuera:
         fallos.append("un destino ofrecido sale ademas como ausente")
 
     # 5. Un CLI de `ARNESES` que no esta en el PATH sale como "no instalado", que es el
     #    otro motivo. Sin este caso, los dos textos podrian ser el mismo y nadie lo veria.
+    #    `gemini` ya esta en ARNESES (relevo verificado), asi que basta con esconderlo del
+    #    PATH: no hace falta inyectar uno de mentira.
     real_which = ns["shutil"].which
-    ns["ARNESES"] = dict(ns["ARNESES"], gemini=lambda p: "gemini " + p)
     ns["shutil"].which = lambda n: None
     try:
         fuera2 = dict(ns["ausentes_de_relevo"]([]))

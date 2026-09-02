@@ -95,6 +95,7 @@ def main():
                 "_comando_de (historial de Codex)": ns["_comando_de"](fila_codex())[0],
                 "ARNESES['claude'] (relevo)": ns["ARNESES"]["claude"]("hola"),
                 "ARNESES['codex'] (relevo)": ns["ARNESES"]["codex"]("hola"),
+                "ARNESES['gemini'] (relevo)": ns["ARNESES"]["gemini"]("hola"),
             }
             ruta_cfg, _pest = ns["write_launch_config"](
                 [{"id": "aaaa1111", "cwd": "/tmp", "resume_flags__list": [],
@@ -103,8 +104,8 @@ def main():
                                                ruta_cfg.read_text(), re.M)):
                 ordenes["write_launch_config (huerfana %d)" % i] = cmd
 
-            if len(ordenes) != 5:
-                fallos.append("se esperaban 5 ordenes que comprobar y hay %d: %r"
+            if len(ordenes) != 6:
+                fallos.append("se esperaban 6 ordenes que comprobar y hay %d: %r"
                               % (len(ordenes), sorted(ordenes)))
 
             for donde, cmd in ordenes.items():
@@ -148,7 +149,7 @@ def main():
         for f in fallos:
             print("  -", f)
         return 1
-    print("ok: las 5 ordenes salen con la ruta del CLI, y sin el en el PATH caen al "
+    print("ok: las 6 ordenes salen con la ruta del CLI, y sin el en el PATH caen al "
           "nombre pelado en vez de no abrir")
     return 0
 
