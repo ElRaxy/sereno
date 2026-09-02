@@ -4720,7 +4720,11 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             cur = max(0, min(cur, len(rows) - 1))
             stdscr.erase()
             h, w = stdscr.getmaxyx()
-            trab = sum(1 for r in rows if r["working"])
+            # La fila "(nada coincide)" es un cartel, no una sesion: se cuenta como cero.
+            # Sin esto el header decia "1 abierta · 1 en espera" con un filtro que no casa
+            # nada, y el cartel salia con panel de detalle y todo, como si hubiera algo.
+            reales = [r for r in rows if not r.get("_vacio")]
+            trab = sum(1 for r in reales if r["working"])
             # Si lo que se esta mirando tiene sesiones de mas de un CLI. De aqui sale
             # tanto el glifo de cada fila como las dos columnas que cuesta.
             mezcla = len({cli_de(r) for r in rows if not r.get("_vacio")}) > 1
@@ -4730,7 +4734,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                    _("All sessions") if vista == "todas"
                    else _("{v} sessions", v=etiqueta_fuente(vista)))
             externa = vista not in ("claude", "todas")
-            ram_total = sum(r["mem_mb"] or 0 for r in rows)
+            ram_total = sum(r["mem_mb"] or 0 for r in reales)
             zonas = []          # (y, x0, x1, que, dato) — lo que el raton puede tocar
             hx = 2
             def cab_put(txt, par=0, extra=0):
@@ -4772,14 +4776,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # Las que nunca arrancaron no se cuentan como reanudables: reanudar una te
             # devuelve su error de arranque y nada mas. Solo se descuentan de ESE rotulo
             # — en "todas" el numero es el total de filas y ahi si es verdad.
-            vacias = sum(1 for r in rows if vacia(r))
+            vacias = sum(1 for r in reales if vacia(r))
             # Las que ya no tienen directorio tampoco son reanudables, y por el mismo
             # motivo que las vacias: reanudar una te deja en un `cd` a un sitio que no
             # esta. Se cuentan aparte de aquellas — una sesion sin arrancar Y sin sitio
             # se contaria dos veces y el rotulo dejaria de sumar.
-            sin_sitios = sum(1 for r in rows if sin_sitio(r) and not vacia(r))
+            sin_sitios = sum(1 for r in reales if sin_sitio(r) and not vacia(r))
             resumible = (muertas or externa) and vista != "todas"
-            cab_put(str(len(rows) - ((vacias + sin_sitios) if resumible else 0)), 6,
+            cab_put(str(len(reales) - ((vacias + sin_sitios) if resumible else 0)), 6,
                     curses.A_BOLD)
             # En "todas" conviven abiertas y reanudables: llamarlas "abiertas" a todas
             # decia que 46 sesiones muertas seguian corriendo.
@@ -4793,8 +4797,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cab_put("  \u00b7  ", 4)
                 cab_put(str(sin_sitios), 4, curses.A_BOLD)
                 cab_put(_(" with nowhere to go back to"), 4)
-            currando = sum(1 for r in rows if (r.get("pulso") or {}).get("herramienta"))
-            escriben = sum(1 for r in rows if (r.get("pulso") or {}).get("escribe")
+            currando = sum(1 for r in reales if (r.get("pulso") or {}).get("herramienta"))
+            escriben = sum(1 for r in reales if (r.get("pulso") or {}).get("escribe")
                            and not (r.get("pulso") or {}).get("herramienta"))
             if escriben:
                 cab_put("  \u00b7  ", 4)
@@ -4811,7 +4815,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # cuentan aqui: tienen su propio contador debajo. Desde que `historial`
                 # dejo de ser pestana, la vista `claude` trae las dos cosas, asi que
                 # esta cuenta ya no la afina el filtro — la afina este `== "claude"`.
-                quietas = sum(1 for r in rows if not r["working"]
+                quietas = sum(1 for r in reales if not r["working"]
                               and r.get("fuente", "claude") == "claude")
                 if quietas or vista != "todas":
                     cab_put("  \u00b7  ", 4)
@@ -4819,14 +4823,19 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     cab_put(_(" idle"), 4)
             # Y las paradas, que ahora comparten pestana con las vivas: sin este numero
             # una lista de veinte filas no dice cuantas de ellas siguen ahi de verdad.
-            reanud = sum(1 for r in rows if r.get("fuente", "claude") != "claude")
+            reanud = sum(1 for r in reales if r.get("fuente", "claude") != "claude")
             if reanud and not muertas:
                 cab_put("  \u00b7  ", 4)
                 cab_put(str(reanud), 4, curses.A_BOLD)
                 cab_put(_(" resumable"), 4)
             if ram_total:
-                cab_put("  \u00b7  ", 4)
-                cab_put(_mb(ram_total), 8, curses.A_BOLD)
+                # O cabe entero o no sale: un `_mb` recortado a media cifra dejaba un "1.6"
+                # colgando sin unidad a 100 columnas. Es el ultimo dato y el menos critico,
+                # asi que se cae limpio antes que mentir la memoria total.
+                pieza = "  \u00b7  " + _mb(ram_total)
+                if hx + ancho(pieza) <= w - 1:
+                    cab_put("  \u00b7  ", 4)
+                    cab_put(_mb(ram_total), 8, curses.A_BOLD)
 
             fondo = max(5, h - 6)          # ultima fila util del area de contenido
             alto = max(3, min(len(rows), fondo - 2))
@@ -4896,6 +4905,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 roza = sobre == i and not foco
                 zonas.append((fila_y, 0, 2, "marca", i))
                 zonas.append((fila_y, 3, max(3, ancho_lista - 1), "fila", i))
+
+                if r.get("_vacio"):
+                    # No es una sesion: ni estado, ni columnas, ni realce de cursor —solo
+                    # el cartel, en gris—. Antes se colaba por el camino normal y salia con
+                    # un "?" en la columna de tiempo (idle None) y con panel de detalle.
+                    stdscr.addnstr(fila_y, 3, recorta(r["title_full"], ancho_lista - 4),
+                                   max(1, ancho_lista - 4), C(4))
+                    continue
 
                 def put(txt, par=0, extra=0):
                     """Pinta un trozo con su propio color. Bajo el cursor solo cambia
@@ -5049,7 +5066,10 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 rows[cur]["name"],
             ) if x]
 
-            if lateral:
+            if rows[cur].get("_vacio"):
+                pass                   # el cartel "(nada coincide)" no lleva panel: ni el
+                #                        lateral ni el de abajo, que sacaba "SIN TRANSCRIPT"
+            elif lateral:
                 x0 = ancho_lista + 4
                 campos = campos_panel(rows[cur], d, cwd_cur)
                 ruta = d.get("ruta") or []
