@@ -175,6 +175,12 @@ MUTANTES = [
     ("la ayuda deja de explicar los simbolos de cada fila",
      '                    (_("symbols"), "\\u25cf " + _("writing a reply")),\n', '',
      "test_tui_arranca.py"),
+    # El /rename del usuario (custom-title.json) tiene que ganar al aiTitle. Si se deja
+    # de leer ese fichero, una sesion renombrada vuelve a salir con su titulo viejo y
+    # nadie se entera: es exactamente el bug que esto arreglo.
+    ("deja de leer el /rename y la sesion sale con su titulo viejo",
+     "    ct = custom_title(fila[\"meta\"])", '    ct = ""',
+     "test_rename.py"),
     ("las zonas de las pastillas del pie se solapan con la vecina",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) + 1))",

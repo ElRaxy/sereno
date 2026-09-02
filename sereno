@@ -862,6 +862,24 @@ def ai_title(e):
     return ""
 
 
+def custom_title(e):
+    """El nombre que el usuario fijo con `/rename`, si lo hizo.
+
+    Claude Code lo guarda en `<id>/custom-title.json` junto al transcript, y NO en el
+    propio transcript: por eso el aiTitle seguia ganando y la sesion renombrada salia
+    con su titulo viejo. Es una eleccion explicita del usuario, asi que manda sobre
+    cualquier titulo derivado (pane_title, aiTitle, primer mensaje).
+    """
+    t = (e or {}).get("_transcript")
+    if not t:
+        return ""
+    try:
+        j = json.loads((t.parent / t.stem / "custom-title.json").read_text("utf-8"))
+    except Exception:
+        return ""
+    return (j.get("customTitle") or "").strip()
+
+
 def rss_por_arbol(pids):
     """MB de RSS de cada pid contando a sus descendientes. Un solo `ps` para todos.
 
@@ -920,10 +938,11 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     for name, created, attached, titulo, pid in paneles:
         e = metas.get(name, {})
         pu = pulso(e, fino=fino) if e else {"escribe": None, "herramienta": None}
-        # Orden de preferencia del titulo: lo que el usuario puso con /rename o el
-        # aiTitle (los dos llegan por pane_title, en vivo) > el aiTitle del
-        # transcript > el primer mensaje. Lo ultimo era la unica fuente y es la peor.
-        propio = titulo or pu.get("aiTitle", "")
+        # Orden de preferencia del titulo: el /rename explicito (custom-title.json) >
+        # el pane_title de tmux > el aiTitle del transcript > el primer mensaje. El
+        # /rename no siempre llega por pane_title (tmux se lo come), asi que se lee de
+        # su fichero, que es donde Claude Code lo deja de verdad.
+        propio = custom_title(e) or titulo or pu.get("aiTitle", "")
         rows.append({
             "name": name, "created": created, "attached": attached,
             "meta": e, "pid": pid,
@@ -1181,6 +1200,13 @@ def fila_de_transcript(p, mt=None, fino=True):
             _CACHE_DISCO.clear()          # la clave lleva el mtime: crece sin tope
         _CACHE_DISCO[clave] = fila
     fila = dict(fila)
+    # El /rename se lee FUERA de la cache: su fichero cambia sin tocar el mtime del
+    # transcript (que es la clave de la cache), asi que renombrar una sesion parada no
+    # refrescaria nunca. Aqui se aplica en cada pasada, y por eso gana al titulo cacheado.
+    ct = custom_title(fila["meta"])
+    if ct:
+        fila["title_full"] = ct
+        fila["title"] = (ct[:33] + "\u2026") if len(ct) > 34 else ct
     fila["idle"] = max(0.0, time.time() - mt)
     viva = fila["idle"] <= VIVA
     # `working` sale del pulso, que mira el transcript; sin proceso que inspeccionar es
