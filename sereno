@@ -5261,8 +5261,15 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     (_("outside"), _("--watch: tells you when one stops and waits")),
                     ("", _("--find \"text\": searches what was said")),
                     ("", _("--json: for statuslines and scripts")),
-                    ("", _("\u29c9 in a row: another session is writing in the same place")),
-                    ("", _("\u21bb in a row: it is going in circles \u2014 see the panel")),
+                    ("", ""),
+                    # Los simbolos de cada fila: el estado, los dos avisos y la barra. Sin
+                    # esto habia que adivinar que era un \u29c9 o media barra en gris \u2014 la
+                    # leyenda de las teclas estaba, la de los simbolos no.
+                    (_("symbols"), "\u25cf " + _("writing a reply")),
+                    ("", "\u25d0 " + _("waiting on its command")),
+                    ("", "\u29c9 " + _("another session writing in the same place")),
+                    ("", "\u21bb " + _("going in circles \u2014 see the panel")),
+                    ("", "\u25b0\u25b1 " + _("context used; the faint cells are its peak")),
                 ]
                 alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
                 teclas = teclas[:max(0, alto_v - 4)]
@@ -6047,10 +6054,14 @@ def _T():
         "Don't know how to open {s}.": "No sé cómo abrir {s}.",
         "ENTER": "ENTER",
         "▸ another session is writing here too": "▸ otra sesión escribe aquí también",
-        "⧉ in a row: another session is writing in the same place":
-            "⧉ en una fila: otra sesión escribe en el mismo sitio",
-        "↻ in a row: it is going in circles — see the panel":
-            "↻ en una fila: está dando vueltas — mira el panel",
+        "symbols": "símbolos",
+        "writing a reply": "escribiendo una respuesta",
+        "waiting on its command": "esperando a su comando",
+        "another session writing in the same place":
+            "otra sesión escribe en el mismo sitio",
+        "going in circles — see the panel": "está dando vueltas — mira el panel",
+        "context used; the faint cells are its peak":
+            "contexto gastado; las celdas tenues son su pico",
         "clashes with another session": "choca con otra sesión",
         "same folder": "misma carpeta",
         "same repo": "mismo repo",

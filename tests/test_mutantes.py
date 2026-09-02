@@ -170,6 +170,11 @@ MUTANTES = [
     ("la tecla que releva a otro CLI desaparece del pie con marcadas",
      '                 ("c", _("relay"), ord("c")),\n', '',
      "test_zonas_del_pie.py"),
+    # La ayuda `?` explica los simbolos de fila, no solo las teclas. Que se caiga esa
+    # seccion es la misma clase de regresion silenciosa que `c` fuera del pie.
+    ("la ayuda deja de explicar los simbolos de cada fila",
+     '                    (_("symbols"), "● " + _("writing a reply")),\n', '',
+     "test_tui_arranca.py"),
     ("las zonas de las pastillas del pie se solapan con la vecina",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) - 1))",
      "        out.append((tecla, txt, cod, hx, hx + ancho(pastilla) + 1))",

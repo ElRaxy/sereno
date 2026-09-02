@@ -26,10 +26,12 @@ def main():
     for filas, cols in TAMANOS:
         fallos += prueba(filas, cols)
     fallos += prueba_filtro_vacio()
+    fallos += prueba_ayuda_simbolos()
     for f in fallos:
         print("FALLO:", f)
-    print(f"ok: el TUI arranca, pinta y sale en {len(TAMANOS)} tamanos, y un filtro que "
-          "no casa nada no finge una sesion" if not fallos else f"{len(fallos)} fallo(s)")
+    print(f"ok: el TUI arranca, pinta y sale en {len(TAMANOS)} tamanos, un filtro que no "
+          "casa nada no finge una sesion, y la ayuda explica los simbolos"
+          if not fallos else f"{len(fallos)} fallo(s)")
     return 1 if fallos else 0
 
 
@@ -100,6 +102,30 @@ def prueba_filtro_vacio():
                       "'(nothing matches)' se sigue contando como una sesion")
     if not fallos:
         print("ok [filtro vacio]: cuenta cero y no finge una sesion")
+    return fallos
+
+
+def prueba_ayuda_simbolos():
+    """La ayuda `?` explica los SIMBOLOS de cada fila, no solo las teclas. El estado (● ◐)
+    y los avisos (⧉ ↻) vivian sin leyenda: habia que adivinarlos. Que se caiga esa seccion
+    es una regresion silenciosa, la misma clase que `c` desaparecido del pie."""
+    entorno = dict(os.environ, SERENO_DEMO="1", SERENO_LANG="en",
+                   TERM="xterm-256color", SERENO_DEBUG="1",
+                   SERENO_TMUX_SOCK="no-existe", LINES="40", COLUMNS="74")
+    limpio = _pinta(entorno, 40, 74, [b"?"])
+    fallos = []
+    if "Traceback" in limpio:
+        fallos.append("la ayuda ha reventado:\n" + limpio[limpio.find("Traceback"):][:600])
+    # La cabecera de la seccion y al menos un simbolo con su texto: sin el glifo, la
+    # leyenda no sirve; sin el texto, el glifo tampoco.
+    for aguja, que in (("symbols", "la cabecera de simbolos"),
+                       ("writing a reply", "el estado 'escribiendo'"),
+                       ("●", "el glifo ●"),
+                       ("◐", "el glifo ◐")):
+        if aguja not in limpio:
+            fallos.append(f"la ayuda no lista {que}")
+    if not fallos:
+        print("ok [ayuda simbolos]: la leyenda de simbolos aparece en ?")
     return fallos
 
 
