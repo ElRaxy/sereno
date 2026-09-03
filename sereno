@@ -5836,14 +5836,16 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     continue
                 vivas = sum(1 for r in sel if r["working"])
                 verbo_c = _("Discard") if muertas else _("Close")
-                muestra = sel[:5]
-                # Acotar el alto a la pantalla, como los demas modales (ayuda, relevo):
-                # en un terminal de menos de ~11 filas, un newwin mas alto que `h` lanza
-                # curses.error, que el wrapper traga como "No changes" justo al cerrar.
-                alto_c, ancho_c = min(len(muestra) + 6, h), min(74, w - 4)
-                muestra = muestra[:max(0, alto_c - 6)]
-                win = curses.newwin(alto_c, ancho_c, max(0, (h - alto_c) // 2),
-                                    max(0, (w - ancho_c) // 2))
+                # La geometria vive en `caja_cierre`, sin curses, y ahi se prueba: un
+                # newwin mas alto que `h` o una fila negativa lanzan curses.error, que el
+                # wrapper traga como "No changes" justo al cerrar.
+                (alto_c, ancho_c, y_c, x_c, caben_c,
+                 fila_ojo, fila_pie) = caja_cierre(h, w, len(sel))
+                if alto_c < 2:
+                    aviso = _("The terminal is too short for the confirm box.")
+                    continue
+                muestra = sel[:caben_c]
+                win = curses.newwin(alto_c, ancho_c, y_c, x_c)
                 win.box()
                 win.addnstr(1, 3, _("{v} {n} session(s):", v=verbo_c, n=len(sel)),
                             ancho_c - 6, curses.A_BOLD)
@@ -5852,15 +5854,17 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     win.addnstr(2 + k, 3,
                                 "\u00b7 " + recorta(rr["title_full"], ancho_c - 12) + marca,
                                 ancho_c - 6, C(1) if rr["working"] else 0)
-                if len(sel) > len(muestra):
+                # El "y N mas" solo si le queda una fila por encima del borde: en un
+                # cuadro de dos filas caia fuera de la ventana, el mismo reventon.
+                if len(sel) > len(muestra) and 2 + len(muestra) < alto_c - 1:
                     win.addnstr(2 + len(muestra), 5,
                                 _("and {n} more", n=len(sel) - len(muestra)),
                                 ancho_c - 8, curses.A_DIM)
                 if vivas:
-                    win.addnstr(alto_c - 3, 3,
+                    win.addnstr(fila_ojo, 3,
                                 _("HEADS UP: {n} are working right now", n=vivas),
                                 ancho_c - 6, C(2) | curses.A_BOLD)
-                win.addnstr(alto_c - 2, 3, _("[y] confirm    [any other key] cancel"),
+                win.addnstr(fila_pie, 3, _("[y] confirm    [any other key] cancel"),
                             ancho_c - 6, CF(7) | curses.A_BOLD)
                 win.refresh()
                 win.timeout(-1)
@@ -6284,6 +6288,8 @@ def _T():
         "(nothing matches)": "(nada coincide)",
         "All sessions": "Todas las sesiones",
         "Cancelled, nothing was closed.": "Cancelado, no se ha cerrado nada.",
+        "The terminal is too short for the confirm box.":
+            "La terminal es demasiado baja para el cuadro de confirmar.",
         "Claude sessions": "Sesiones de Claude",
         "Close": "Cerrar",
         "Discard": "Descartar",
@@ -6705,6 +6711,23 @@ def caja_now(h, w, n_lineas):
     alto = min(h, max(5, min(h - 2, n_lineas + 4)))
     return (alto, ancho, max(0, (h - alto) // 2), max(0, (w - ancho) // 2),
             max(0, alto - 4))
+
+
+def caja_cierre(h, w, n_sel, tope=5):
+    """(alto, ancho, y, x, caben, fila_ojo, fila_pie) del cuadro de confirmar el cierre.
+
+    Aparte del pintado, como `caja_now`. Este cuadro ancla dos filas al FONDO —el "OJO:
+    N trabajando" y el "[y] confirma"— en `alto - 3` y `alto - 2`. En una terminal de
+    menos de tres filas esos indices salian negativos, `addnstr` lanzaba `curses.error`
+    y el wrapper lo tragaba: el selector desaparecia en silencio justo al pulsar `x`.
+    Aqui se sujetan a la fila 1. A alturas normales no cambia nada; en las minimas el
+    pie pisa el titulo en vez de reventar. Con `alto < 2` no hay cuadro que pintar y
+    quien llama tiene que decirlo en vez de intentarlo.
+    """
+    alto = min(h, min(n_sel, tope) + 6)
+    ancho = min(w, max(20, min(74, w - 4)))
+    return (alto, ancho, max(0, (h - alto) // 2), max(0, (w - ancho) // 2),
+            max(0, alto - 6), max(1, alto - 3), max(1, alto - 2))
 
 
 def lineas_now(filas, ancho_t):

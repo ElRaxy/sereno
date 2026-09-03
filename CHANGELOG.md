@@ -15,6 +15,8 @@ deja la barra de contexto midiendo contra el tope viejo hasta que aterriza el `c
 la guarda 5 lo corrige sola al pasar de 200k. Cubierto por `tests/test_cuadros_de_eleccion.py`
 (los composers, no el render) y cinco mutantes.
 
+**El cuadro de confirmar el cierre ya no revienta en una terminal de menos de tres filas.** Las dos filas que ancla al fondo —el "OJO: N están trabajando" y el "[y] confirma"— se pintaban en `alto - 3` y `alto - 2`; con menos de tres filas esos índices salían negativos, `addnstr` lanzaba `curses.error` y el wrapper lo tragaba: el selector desaparecía en silencio justo al pulsar `x`. La geometría vive ahora en `caja_cierre()`, sin curses y probada como `caja_now()`: las dos filas se sujetan a la fila 1 (a alturas normales no cambia nada de lo que se ve), el ancho tiene el mismo suelo que los demás cuadros, y con una sola fila no se intenta pintar: se avisa en la línea de estado. Un caso en `tests/test_cuadros_de_eleccion.py` y un mutante.
+
 **El relevo entrega el destino en Bypass Permissions.** Al relevar con `c`, la sesion nueva
 —Claude o Codex— arranca ya sin frenar en cada permiso: `claude` con
 `--permission-mode bypassPermissions` y `codex` con `--dangerously-bypass-approvals-and-sandbox`.

@@ -665,6 +665,12 @@ MUTANTES = [
      '    return tecla in (ord("s"), ord("S"))',
      "test_cuadros_de_eleccion.py"),
 
+    # ── el cuadro de cerrar en una terminal de menos de tres filas ───────────
+    ("las dos filas ancladas al fondo del cuadro de cerrar vuelven a salir negativas",
+     "            max(0, alto - 6), max(1, alto - 3), max(1, alto - 2))",
+     "            max(0, alto - 6), alto - 3, alto - 2)",
+     "test_cuadros_de_eleccion.py"),
+
     # ── el traceback de un crash dentro de curses ────────────────────────────
     ("un crash del TUI se traga sin dejar la traza en el log",
      "        _vuelca_crash()",
