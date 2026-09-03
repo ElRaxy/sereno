@@ -1055,9 +1055,9 @@ que ninguna otra herramienta las tiene todas, y ninguna en esta forma.
 
 | Lo que hace sereno | Dónde más lo tienes | Qué pierdes ahí |
 |:--|:--|:--|
-| Lista sesiones de otros proyectos que no arrancó él | el picker nativo de `claude --resume`; dashboards como claude-command-center | solo Claude (nativo); una app de escritorio o un servidor (dashboards) |
-| Muestra Claude, Codex y Gemini en una lista | algún gestor multi-motor | un servidor o una GUI, no una TUI de stdlib |
-| Entrega una sesión viva a otro CLI | herramientas sueltas como handoff y session-migrate | un comando aparte, no tu lista de sesiones |
+| Lista sesiones de otros proyectos que no arrancó él | el picker nativo de `claude --resume`; showagent; dashboards como claude-command-center | solo Claude (nativo); solo historial, nada de qué está viva ahora mismo (showagent); una app de escritorio o un servidor (dashboards) |
+| Muestra Claude, Codex y Gemini en una lista | showagent (una TUI en Go); runtimes de flota como Orca (TypeScript) y herdr (Rust) | un navegador de historial, no una lista de vivas (showagent); una app de escritorio o un demonio que corre los agentes por ti (Orca, herdr) |
+| Entrega una sesión viva a otro CLI | herramientas sueltas como handoff y session-migrate; showagent y specstory convierten el transcript | un comando aparte, no tu lista de sesiones; una copia convertida de los turnos, no el estado propio del CLI |
 | Contexto restante por fila | claude-command-center ("live context left") | una licencia no OSI, gratis solo para uso no comercial |
 | Busca en lo que se dijo de verdad | `--find`; wallfacer, ai-session-search | herramientas de un solo uso, cada una lo suyo |
 | Una TUI por SSH, un fichero de stdlib, cero dependencias | — | esto es lo que nada más junta |
