@@ -20,6 +20,8 @@ guardan, y las tres ramas devuelven un error limpio traducido con codigo 2. Cubi
 
 **La tecla que cierra sesiones sale a una funcion con test.** El contrato de `acepta_cierre` —`s`/`y` y sus mayusculas confirman; cualquier otra cosa, incluido el `-1` del timeout, cancela— vivia inline en el cuadro de cierre, sin test ni mutante: una tecla de mas o de menos cambiaba en silencio que se cierra o que no. Es la unica accion irreversible del programa. Ahora es funcion pura, la prueba `tests/test_cuadros_de_eleccion.py` y la vigila un mutante. Sin cambio de render.
 
+**El guardian de i18n mira tambien lo que pinta el TUI.** `tests/test_i18n.py` solo veia las frases crudas en `print` y en las variables que se pintan; ahora tambien las de `win.addnstr`/`win.addstr`, que es por donde el TUI escribe casi todo. Una frase en ingles colada en un modal se saltaba la comprobacion. Los separadores, chars sueltos y formatos de ancho que van por ahi no son frases y quedan fuera solos. Hoy no habia ningun infractor: cierra una grieta latente.
+
 ## 1.40.0
 
 **Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia
