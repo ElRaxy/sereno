@@ -4880,6 +4880,93 @@ def _pinta_ayuda(h, w, curses, C, tecla_limpia):
     tecla_limpia(win)
 
 
+def _pide_relevo(sel, destinos, con_conv, donde, hay_donde, h, w, curses, C,
+                 tecla_limpia):
+    """Dibuja el cuadro de relevo y devuelve `(elegido, con_conv, donde, modelo)`;
+    `elegido` es "" si se cancela. `[k]`, `[m]` y `[w]` ciclan sin cerrar el cuadro;
+    un numero elige el destino y cierra.
+
+    Misma forma que `_pide_lanzador`: recibe curses y sus ayudantes de `run()` en vez
+    de importarlos, y vive fuera de `run()` para que esa funcion deje de crecer.
+    """
+    # El modelo no persiste entre arranques: se elige aqui y se olvida. El
+    # ciclo es [por defecto] + catalogo, y solo se ofrece si algun destino
+    # sabe recibir modelo.
+    ciclo_m = [None] + modelos_catalogo()
+    hay_modelo = ciclo_m if (len(ciclo_m) > 1
+                             and any(d in FLAG_MODELO for d in destinos)) else ()
+    modelo = None
+    elegido = None
+    while elegido is None:
+        lin = lineas_relevo(sel, destinos, con_conv, min(70, w - 8),
+                            donde=donde, hay_donde=hay_donde,
+                            modelo=modelo, hay_modelo=hay_modelo)
+        alto_r = min(len(lin) + 2, h)
+        ancho_r = min(max(ancho(t) for t, _p in lin) + 6, w)
+        win = curses.newwin(alto_r, ancho_r, max(0, (h - alto_r) // 2),
+                            max(0, (w - ancho_r) // 2))
+        win.box()
+        for k, (txt, par) in enumerate(lin[:alto_r - 2]):
+            if txt:
+                win.addnstr(1 + k, 3, txt, ancho_r - 6,
+                            (C(par) if par else 0) | curses.A_BOLD)
+        win.refresh()
+        win.timeout(-1)
+        tec = tecla_limpia(win)
+        if tec in (ord("k"), ord("K")):
+            con_conv = not con_conv
+        elif tec in (ord("m"), ord("M")) and len(hay_modelo) > 1:
+            modelo = hay_modelo[(hay_modelo.index(modelo) + 1) % len(hay_modelo)]
+        elif tec in (ord("w"), ord("W")) and len(hay_donde) > 1:
+            donde = hay_donde[(hay_donde.index(donde) + 1) % len(hay_donde)]
+        elif ord("1") <= (tec or 0) <= ord("9"):
+            i = tec - ord("1")
+            if i < len(destinos):
+                elegido = destinos[i]
+        else:
+            elegido = ""          # cualquier otra tecla cancela
+    return elegido, con_conv, donde, modelo
+
+
+def _confirma_cierre(sel, vivas, verbo_c, h, w, curses, C, CF, tecla_limpia):
+    """Dibuja el cuadro de confirmar el cierre y devuelve lo que decidio la tecla:
+    True cierra, False cancela, None si la terminal no da ni para el cuadro (quien
+    llama lo dice en la linea de estado). La geometria sale de `caja_cierre`.
+    """
+    # La geometria vive en `caja_cierre`, sin curses, y ahi se prueba: un
+    # newwin mas alto que `h` o una fila negativa lanzan curses.error, que el
+    # wrapper traga como "No changes" justo al cerrar.
+    (alto_c, ancho_c, y_c, x_c, caben_c,
+     fila_ojo, fila_pie) = caja_cierre(h, w, len(sel))
+    if alto_c < 2:
+        return None
+    muestra = sel[:caben_c]
+    win = curses.newwin(alto_c, ancho_c, y_c, x_c)
+    win.box()
+    win.addnstr(1, 3, _("{v} {n} session(s):", v=verbo_c, n=len(sel)),
+                ancho_c - 6, curses.A_BOLD)
+    for k, rr in enumerate(muestra):
+        marca = " \u25cf" if rr["working"] else "  "
+        win.addnstr(2 + k, 3,
+                    "\u00b7 " + recorta(rr["title_full"], ancho_c - 12) + marca,
+                    ancho_c - 6, C(1) if rr["working"] else 0)
+    # El "y N mas" solo si le queda una fila por encima del borde: en un
+    # cuadro de dos filas caia fuera de la ventana, el mismo reventon.
+    if len(sel) > len(muestra) and 2 + len(muestra) < alto_c - 1:
+        win.addnstr(2 + len(muestra), 5,
+                    _("and {n} more", n=len(sel) - len(muestra)),
+                    ancho_c - 8, curses.A_DIM)
+    if vivas:
+        win.addnstr(fila_ojo, 3,
+                    _("HEADS UP: {n} are working right now", n=vivas),
+                    ancho_c - 6, C(2) | curses.A_BOLD)
+    win.addnstr(fila_pie, 3, _("[y] confirm    [any other key] cancel"),
+                ancho_c - 6, CF(7) | curses.A_BOLD)
+    win.refresh()
+    win.timeout(-1)
+    return acepta_cierre(tecla_limpia(win))
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -5727,42 +5814,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 ultimo = pref("relevo_arnes")
                 if ultimo in destinos:
                     destinos = [ultimo] + [d for d in destinos if d != ultimo]
-                # El modelo no persiste entre arranques: se elige aqui y se olvida. El
-                # ciclo es [por defecto] + catalogo, y solo se ofrece si algun destino
-                # sabe recibir modelo.
-                ciclo_m = [None] + modelos_catalogo()
-                hay_modelo = ciclo_m if (len(ciclo_m) > 1
-                                         and any(d in FLAG_MODELO for d in destinos)) else ()
-                modelo = None
-                elegido = None
-                while elegido is None:
-                    lin = lineas_relevo(sel, destinos, con_conv, min(70, w - 8),
-                                        donde=donde, hay_donde=hay_donde,
-                                        modelo=modelo, hay_modelo=hay_modelo)
-                    alto_r = min(len(lin) + 2, h)
-                    ancho_r = min(max(ancho(t) for t, _p in lin) + 6, w)
-                    win = curses.newwin(alto_r, ancho_r, max(0, (h - alto_r) // 2),
-                                        max(0, (w - ancho_r) // 2))
-                    win.box()
-                    for k, (txt, par) in enumerate(lin[:alto_r - 2]):
-                        if txt:
-                            win.addnstr(1 + k, 3, txt, ancho_r - 6,
-                                        (C(par) if par else 0) | curses.A_BOLD)
-                    win.refresh()
-                    win.timeout(-1)
-                    tec = tecla_limpia(win)
-                    if tec in (ord("k"), ord("K")):
-                        con_conv = not con_conv
-                    elif tec in (ord("m"), ord("M")) and len(hay_modelo) > 1:
-                        modelo = hay_modelo[(hay_modelo.index(modelo) + 1) % len(hay_modelo)]
-                    elif tec in (ord("w"), ord("W")) and len(hay_donde) > 1:
-                        donde = hay_donde[(hay_donde.index(donde) + 1) % len(hay_donde)]
-                    elif ord("1") <= (tec or 0) <= ord("9"):
-                        i = tec - ord("1")
-                        if i < len(destinos):
-                            elegido = destinos[i]
-                    else:
-                        elegido = ""          # cualquier otra tecla cancela
+                elegido, con_conv, donde, modelo = _pide_relevo(
+                    sel, destinos, con_conv, donde, hay_donde, h, w, curses, C,
+                    tecla_limpia)
                 if not elegido:
                     aviso = _("Cancelled, nothing was handed over.")
                     continue
@@ -5851,39 +5905,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     continue
                 vivas = sum(1 for r in sel if r["working"])
                 verbo_c = _("Discard") if muertas else _("Close")
-                # La geometria vive en `caja_cierre`, sin curses, y ahi se prueba: un
-                # newwin mas alto que `h` o una fila negativa lanzan curses.error, que el
-                # wrapper traga como "No changes" justo al cerrar.
-                (alto_c, ancho_c, y_c, x_c, caben_c,
-                 fila_ojo, fila_pie) = caja_cierre(h, w, len(sel))
-                if alto_c < 2:
+                ok_c = _confirma_cierre(sel, vivas, verbo_c, h, w, curses, C, CF,
+                                       tecla_limpia)
+                if ok_c is None:
                     aviso = _("The terminal is too short for the confirm box.")
                     continue
-                muestra = sel[:caben_c]
-                win = curses.newwin(alto_c, ancho_c, y_c, x_c)
-                win.box()
-                win.addnstr(1, 3, _("{v} {n} session(s):", v=verbo_c, n=len(sel)),
-                            ancho_c - 6, curses.A_BOLD)
-                for k, rr in enumerate(muestra):
-                    marca = " \u25cf" if rr["working"] else "  "
-                    win.addnstr(2 + k, 3,
-                                "\u00b7 " + recorta(rr["title_full"], ancho_c - 12) + marca,
-                                ancho_c - 6, C(1) if rr["working"] else 0)
-                # El "y N mas" solo si le queda una fila por encima del borde: en un
-                # cuadro de dos filas caia fuera de la ventana, el mismo reventon.
-                if len(sel) > len(muestra) and 2 + len(muestra) < alto_c - 1:
-                    win.addnstr(2 + len(muestra), 5,
-                                _("and {n} more", n=len(sel) - len(muestra)),
-                                ancho_c - 8, curses.A_DIM)
-                if vivas:
-                    win.addnstr(fila_ojo, 3,
-                                _("HEADS UP: {n} are working right now", n=vivas),
-                                ancho_c - 6, C(2) | curses.A_BOLD)
-                win.addnstr(fila_pie, 3, _("[y] confirm    [any other key] cancel"),
-                            ancho_c - 6, CF(7) | curses.A_BOLD)
-                win.refresh()
-                win.timeout(-1)
-                if acepta_cierre(tecla_limpia(win)):
+                if ok_c:
                     if not ejecutar:
                         res["out"] = ("close", sel)
                         return

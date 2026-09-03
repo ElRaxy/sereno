@@ -21,6 +21,8 @@ la guarda 5 lo corrige sola al pasar de 200k. Cubierto por `tests/test_cuadros_d
 
 **La tabla comparativa del README nombra a quien la gente nombra.** Leído Reddit (r/ClaudeCode, r/ClaudeAI, 2026-09-03): los gestores que la comunidad cita son Orca (stablyai/orca, TypeScript, MIT) y herdr (herdrdev/herdr, Rust, Apache-2.0), y el más parecido a sereno es showagent (aytzey/showagent, TUI en Go, MIT), que por su propio README es *history-first*: lee las sesiones que quedan en disco y convierte transcripts entre agentes, sin decir cuáles están vivas ni cuánto contexto les queda. Los tres entran en la tabla con lo que se pierde en cada uno; lenguajes y licencias comprobados contra la API de GitHub, no contra el hilo.
 
+**Otros dos modales salen de `run()`: el relevo y el cierre.** El cuadro de `c` (relevar) es ahora `_pide_relevo()`, que devuelve `(elegido, con_conv, donde, modelo)` con los toggles `[k]`/`[m]`/`[w]` dentro, y el de `x` (confirmar cierre) es `_confirma_cierre()`, que devuelve True/False, o None cuando la terminal no da ni para el cuadro y `run()` lo dice en la línea de estado. Misma firma que `_pide_lanzador`. Movimiento literal salvo la línea de salida de cada uno, verificado contra el diff: `run()` baja de 1001 a 941 líneas y no cambia nada de lo que se ve. Cubiertos por `test_cuadro_relevo`, `test_relevo`, `test_donde_abrir` y `test_cuadros_de_eleccion`. N4, paso 2.
+
 **El relevo entrega el destino en Bypass Permissions.** Al relevar con `c`, la sesion nueva
 —Claude o Codex— arranca ya sin frenar en cada permiso: `claude` con
 `--permission-mode bypassPermissions` y `codex` con `--dangerously-bypass-approvals-and-sandbox`.
