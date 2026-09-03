@@ -670,6 +670,12 @@ MUTANTES = [
      "        _vuelca_crash()",
      "        pass",
      "test_crash_log.py"),
+
+    # ── SERENO_ARNES fuerza un arnes, y el prefijo lo pone _env ───────────────
+    ("el prefijo se mete dentro del nombre y SERENO_ARNES deja de leerse",
+     '    forzado = _env("ARNES")',
+     '    forzado = _env("SERENO_ARNES")',
+     "test_relevo.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

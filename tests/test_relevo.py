@@ -144,6 +144,25 @@ def main():
             if nombre not in ns["ARNESES"]:
                 fallos.append(f"se ofrece {nombre!r}, que no esta en ARNESES")
 
+        # 6b. `SERENO_ARNES` fuerza UNO. El prefijo lo pone `_env`, asi que la llamada va
+        #     sin el: con el prefijo dentro (`_env("SERENO_ARNES")`) buscaria
+        #     `SERENO_SERENO_ARNES` y la variable que alguien escribe no la leeria nadie.
+        #     Se finge que los tres estan en el PATH para no depender de la maquina.
+        import shutil as _sh
+        orig_which = _sh.which
+        _sh.which = lambda n: "/fake/" + n
+        try:
+            os.environ["SERENO_ARNES"] = "codex"
+            forzado = ns["arneses_disponibles"]()
+            if forzado != ["codex"]:
+                fallos.append(f"SERENO_ARNES=codex deberia forzar solo codex, dio {forzado}")
+            os.environ["SERENO_ARNES"] = "no-es-un-arnes"
+            if set(ns["arneses_disponibles"]()) != set(ns["ARNESES"]):
+                fallos.append("SERENO_ARNES con un valor que no es arnes deberia ofrecer todos")
+        finally:
+            _sh.which = orig_which
+            os.environ.pop("SERENO_ARNES", None)
+
         # 7. Un `cwd` vacio NO es un directorio. `Path("").is_dir()` devuelve True
         #    —Python lee la ruta vacia como `.`— asi que la guarda anterior dejaba pasar
         #    todas las filas de Codex, que traen "": el relevo arrancaba donde estuviera
