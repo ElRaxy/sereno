@@ -19,6 +19,8 @@ la guarda 5 lo corrige sola al pasar de 200k. Cubierto por `tests/test_cuadros_d
 
 **Dos modales salen de `run()`.** La pantalla de `n` (lo que corren todas) y la ayuda de `?` se pintaban inline dentro de `pick_ui.run()`, la función más grande del programa. Ahora son `_pinta_now()` y `_pinta_ayuda()`, a nivel de módulo y con la misma firma que `_pide_lanzador` (reciben curses y sus ayudantes en vez de importarlos). Movimiento literal, verificado línea a línea contra el diff: `run()` baja de 1090 a 1001 líneas y no cambia nada de lo que se ve. Los dos siguen cubiertos por los tests de pseudo-terminal (`test_tui_arranca.py` pulsa `?`, `test_vista_now.py` pulsa `n`). Primer paso de una deuda que se paga por trozos.
 
+**Otros dos modales salen de `run()`: el relevo y el cierre.** El cuadro de `c` (relevar) es ahora `_pide_relevo()`, que devuelve `(elegido, con_conv, donde, modelo)` con los toggles `[k]`/`[m]`/`[w]` dentro, y el de `x` (confirmar cierre) es `_confirma_cierre()`, que devuelve True/False, o None cuando la terminal no da ni para el cuadro y `run()` lo dice en la línea de estado. Misma firma que `_pide_lanzador`. Movimiento literal salvo la línea de salida de cada uno, verificado contra el diff: `run()` baja de 1001 a 941 líneas y no cambia nada de lo que se ve. Cubiertos por `test_cuadro_relevo`, `test_relevo`, `test_donde_abrir` y `test_cuadros_de_eleccion`. N4, paso 2.
+
 **El relevo entrega el destino en Bypass Permissions.** Al relevar con `c`, la sesion nueva
 —Claude o Codex— arranca ya sin frenar en cada permiso: `claude` con
 `--permission-mode bypassPermissions` y `codex` con `--dangerously-bypass-approvals-and-sandbox`.
