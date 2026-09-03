@@ -73,6 +73,11 @@ def sin_traducir(arbol):
     no lo veia, porque solo mira las claves que SI pasan por `_()`. Un usuario en
     ingles se encontraba con eso y con dos mensajes que ademas nombraban un alias que
     no es el del programa.
+
+    Ademas de `print` y las variables que se pintan, mira `win.addnstr`/`win.addstr`:
+    el TUI escribe casi todo por ahi, y una frase cruda colada en un modal se saltaria
+    el resto de esta comprobacion. Los separadores, los chars sueltos y los formatos de
+    ancho que tambien van por `addnstr` no son frases y `frase()` los deja fuera solos.
     """
     def frase(t):
         limpio = t
@@ -83,7 +88,9 @@ def sin_traducir(arbol):
     for n in ast.walk(arbol):
         pinta = (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                  and n.func.id == "print")
-        if pinta:
+        pinta_curses = (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                        and n.func.attr in ("addnstr", "addstr"))
+        if pinta or pinta_curses:
             for t in _literales_sueltos(n):
                 if frase(t):
                     yield n.lineno, t
