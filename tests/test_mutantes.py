@@ -186,7 +186,7 @@ MUTANTES = [
     # La ayuda `?` explica los simbolos de fila, no solo las teclas. Que se caiga esa
     # seccion es la misma clase de regresion silenciosa que `c` fuera del pie.
     ("la ayuda deja de explicar los simbolos de cada fila",
-     '                    (_("symbols"), "\\u25cf " + _("writing a reply")),\n', '',
+     '        (_("symbols"), "\\u25cf " + _("writing a reply")),\n', '',
      "test_tui_arranca.py"),
     # El /rename del usuario (custom-title.json) tiene que ganar al aiTitle. Si se deja
     # de leer ese fichero, una sesion renombrada vuelve a salir con su titulo viejo y

@@ -4776,6 +4776,110 @@ def _vuelca_crash():
         pass
 
 
+def _pinta_now(h, w, curses, C, tecla_limpia):
+    """La pantalla de `n`: lo que corren todas, en un recuadro, hasta la siguiente tecla.
+
+    Recibe curses y sus dos ayudantes en vez de importarlos, como `_pide_lanzador`:
+    `run()` los tiene ya montados y duplicar ese montaje aqui seria tener dos pantallas
+    que pueden discrepar. Fuera de `run()` para que esa funcion deje de crecer.
+    """
+    # El panel ya pintaba este recorrido, pero solo el de la fila del
+    # cursor. Las lineas las compone `lineas_now()`, la MISMA que usa
+    # `--now` en la terminal: dos compositores del mismo hecho acaban
+    # diciendo cosas distintas y aqui no se veria hasta compararlos.
+    lineas_v = lineas_now(que_hacen(),
+                          max(30, min(110, w - 4) - 32))
+    alto_v, ancho_v, y_v, x_v, caben = caja_now(h, w, len(lineas_v))
+    ocultas = max(0, len(lineas_v) - caben)
+    lineas_v = lineas_v[:caben]
+    win = curses.newwin(alto_v, ancho_v, y_v, x_v)
+    win.attrset(C(6))
+    win.box()
+    win.attrset(0)
+    win.addnstr(1, 3, _("What they are all running"), ancho_v - 6,
+                C(6) | curses.A_BOLD)
+    cierre = " " + _("any key closes") + " "
+    if ancho_v > ancho(cierre) + 6:
+        win.addnstr(alto_v - 1, ancho_v - ancho(cierre) - 3, cierre,
+                    ancho(cierre), C(4))
+    # Lo que no cabe se CUENTA aunque no se dibuje: media pantalla de
+    # sesiones sin decir que faltan es peor que decir cuantas faltan.
+    if ocultas:
+        aviso_v = " " + _("{n} lines more", n=ocultas) + " "
+        if ancho_v > ancho(aviso_v) + 6:
+            win.addnstr(0, 3, aviso_v, ancho(aviso_v), C(4))
+    for k, (texto, par) in enumerate(lineas_v):
+        if texto:
+            win.addnstr(3 + k, 2, texto, max(1, ancho_v - 4), C(par))
+    win.refresh()
+    win.timeout(-1)
+    tecla_limpia(win)
+
+
+def _pinta_ayuda(h, w, curses, C, tecla_limpia):
+    """La ayuda de `?`: teclas, raton, modos de fuera y los simbolos de cada fila."""
+    teclas = [
+        (_("ENTER"), _("open it (a NEW window when Warp is there)")),
+        (_("arrows"), _("move (j / k too)")),
+        (_("home/end"), _("first / last (g / G too)")),
+        ("s / S", _("sort: activity, context, project, memory, spend / invert")),
+        ("y", _("copy the session id")),
+        (_("SPACE"), _("mark / unmark")),
+        ("v", _("range mode: drop an anchor, SPACE marks to the cursor")),
+        ("x", _("close the marked ones (asks first)")),
+        ("/", _("filter by title, project, branch or id")),
+        ("TAB", _("switch CLI: claude, history, codex, gemini, all")),
+        ("a / i", _("mark all / invert")),
+        ("d", _("mark the ones idle for over an hour")),
+        ("r", _("open the marked ones as tabs of ONE window")),
+        ("c", _("hand the marked ones to another CLI (codex, claude...)")),
+        ("n", _("what they are ALL running, in one screen")),
+        ("q", _("quit without touching anything")),
+        ("", ""),
+        (_("mouse"), _("click selects, double click opens")),
+        ("", _("underlined values copy when you click them")),
+        ("", _("right click, or click the bar on the left: mark")),
+        ("", _("wheel scrolls; tabs and buttons below are clickable")),
+        ("", ""),
+        # Quien vive dentro del selector no se entera de que existen los
+        # tres modos que no abren interfaz. Aqui es donde va a mirar.
+        (_("outside"), _("--watch: tells you when one stops and waits")),
+        ("", _("--find \"text\": searches what was said")),
+        ("", _("--json: for statuslines and scripts")),
+        ("", ""),
+        # Los simbolos de cada fila: el estado, los dos avisos y la barra. Sin
+        # esto habia que adivinar que era un \u29c9 o media barra en gris \u2014 la
+        # leyenda de las teclas estaba, la de los simbolos no.
+        (_("symbols"), "\u25cf " + _("writing a reply")),
+        ("", "\u25d0 " + _("waiting on its command")),
+        ("", "\u29c9 " + _("another session writing in the same place")),
+        ("", "\u21bb " + _("going in circles \u2014 see the panel")),
+        ("", "\u25b0\u25b1 " + _("context used; the faint cells are its peak")),
+    ]
+    alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
+    teclas = teclas[:max(0, alto_v - 4)]
+    win = curses.newwin(alto_v, ancho_v, max(0, (h - alto_v) // 2),
+                        max(0, (w - ancho_v) // 2))
+    win.attrset(C(6))
+    win.box()
+    win.attrset(0)
+    win.addnstr(1, 3, _("Keys"), ancho_v - 6, C(6) | curses.A_BOLD)
+    # Como se sale, escrito en el propio marco. Un modal sin salida a la
+    # vista hace probar teclas, y aqui casi todas hacen algo.
+    cierre = " " + _("any key closes") + " "
+    if ancho_v > ancho(cierre) + 6:
+        win.addnstr(alto_v - 1, ancho_v - ancho(cierre) - 3, cierre,
+                    ancho(cierre), C(4))
+    for k, (tec, txt) in enumerate(teclas):
+        if tec:
+            win.addnstr(3 + k, 3, f"{tec:<11}", 11, C(7) | curses.A_BOLD)
+        if txt:
+            win.addnstr(3 + k, 14, txt, max(1, ancho_v - 17), C(4))
+    win.refresh()
+    win.timeout(-1)
+    tecla_limpia(win)
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -5399,101 +5503,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             stdscr.refresh()
 
             if vista_now:
-                # El panel ya pintaba este recorrido, pero solo el de la fila del
-                # cursor. Las lineas las compone `lineas_now()`, la MISMA que usa
-                # `--now` en la terminal: dos compositores del mismo hecho acaban
-                # diciendo cosas distintas y aqui no se veria hasta compararlos.
-                lineas_v = lineas_now(que_hacen(),
-                                      max(30, min(110, w - 4) - 32))
-                alto_v, ancho_v, y_v, x_v, caben = caja_now(h, w, len(lineas_v))
-                ocultas = max(0, len(lineas_v) - caben)
-                lineas_v = lineas_v[:caben]
-                win = curses.newwin(alto_v, ancho_v, y_v, x_v)
-                win.attrset(C(6))
-                win.box()
-                win.attrset(0)
-                win.addnstr(1, 3, _("What they are all running"), ancho_v - 6,
-                            C(6) | curses.A_BOLD)
-                cierre = " " + _("any key closes") + " "
-                if ancho_v > ancho(cierre) + 6:
-                    win.addnstr(alto_v - 1, ancho_v - ancho(cierre) - 3, cierre,
-                                ancho(cierre), C(4))
-                # Lo que no cabe se CUENTA aunque no se dibuje: media pantalla de
-                # sesiones sin decir que faltan es peor que decir cuantas faltan.
-                if ocultas:
-                    aviso_v = " " + _("{n} lines more", n=ocultas) + " "
-                    if ancho_v > ancho(aviso_v) + 6:
-                        win.addnstr(0, 3, aviso_v, ancho(aviso_v), C(4))
-                for k, (texto, par) in enumerate(lineas_v):
-                    if texto:
-                        win.addnstr(3 + k, 2, texto, max(1, ancho_v - 4), C(par))
-                win.refresh()
-                win.timeout(-1)
-                tecla_limpia(win)
+                _pinta_now(h, w, curses, C, tecla_limpia)
                 vista_now = False
                 continue
 
             if ayuda:
-                teclas = [
-                    (_("ENTER"), _("open it (a NEW window when Warp is there)")),
-                    (_("arrows"), _("move (j / k too)")),
-                    (_("home/end"), _("first / last (g / G too)")),
-                    ("s / S", _("sort: activity, context, project, memory, spend / invert")),
-                    ("y", _("copy the session id")),
-                    (_("SPACE"), _("mark / unmark")),
-                    ("v", _("range mode: drop an anchor, SPACE marks to the cursor")),
-                    ("x", _("close the marked ones (asks first)")),
-                    ("/", _("filter by title, project, branch or id")),
-                    ("TAB", _("switch CLI: claude, history, codex, gemini, all")),
-                    ("a / i", _("mark all / invert")),
-                    ("d", _("mark the ones idle for over an hour")),
-                    ("r", _("open the marked ones as tabs of ONE window")),
-                    ("c", _("hand the marked ones to another CLI (codex, claude...)")),
-                    ("n", _("what they are ALL running, in one screen")),
-                    ("q", _("quit without touching anything")),
-                    ("", ""),
-                    (_("mouse"), _("click selects, double click opens")),
-                    ("", _("underlined values copy when you click them")),
-                    ("", _("right click, or click the bar on the left: mark")),
-                    ("", _("wheel scrolls; tabs and buttons below are clickable")),
-                    ("", ""),
-                    # Quien vive dentro del selector no se entera de que existen los
-                    # tres modos que no abren interfaz. Aqui es donde va a mirar.
-                    (_("outside"), _("--watch: tells you when one stops and waits")),
-                    ("", _("--find \"text\": searches what was said")),
-                    ("", _("--json: for statuslines and scripts")),
-                    ("", ""),
-                    # Los simbolos de cada fila: el estado, los dos avisos y la barra. Sin
-                    # esto habia que adivinar que era un \u29c9 o media barra en gris \u2014 la
-                    # leyenda de las teclas estaba, la de los simbolos no.
-                    (_("symbols"), "\u25cf " + _("writing a reply")),
-                    ("", "\u25d0 " + _("waiting on its command")),
-                    ("", "\u29c9 " + _("another session writing in the same place")),
-                    ("", "\u21bb " + _("going in circles \u2014 see the panel")),
-                    ("", "\u25b0\u25b1 " + _("context used; the faint cells are its peak")),
-                ]
-                alto_v, ancho_v = min(h - 2, len(teclas) + 4), max(30, min(70, w - 4))
-                teclas = teclas[:max(0, alto_v - 4)]
-                win = curses.newwin(alto_v, ancho_v, max(0, (h - alto_v) // 2),
-                                    max(0, (w - ancho_v) // 2))
-                win.attrset(C(6))
-                win.box()
-                win.attrset(0)
-                win.addnstr(1, 3, _("Keys"), ancho_v - 6, C(6) | curses.A_BOLD)
-                # Como se sale, escrito en el propio marco. Un modal sin salida a la
-                # vista hace probar teclas, y aqui casi todas hacen algo.
-                cierre = " " + _("any key closes") + " "
-                if ancho_v > ancho(cierre) + 6:
-                    win.addnstr(alto_v - 1, ancho_v - ancho(cierre) - 3, cierre,
-                                ancho(cierre), C(4))
-                for k, (tec, txt) in enumerate(teclas):
-                    if tec:
-                        win.addnstr(3 + k, 3, f"{tec:<11}", 11, C(7) | curses.A_BOLD)
-                    if txt:
-                        win.addnstr(3 + k, 14, txt, max(1, ancho_v - 17), C(4))
-                win.refresh()
-                win.timeout(-1)
-                tecla_limpia(win)
+                _pinta_ayuda(h, w, curses, C, tecla_limpia)
                 ayuda = False
                 continue
 
