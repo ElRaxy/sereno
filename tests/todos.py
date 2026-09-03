@@ -24,6 +24,17 @@ TOPE = 420          # segundos por fichero: uno colgado no puede colgar la CI en
                     # ancla en test_tui_arranca (~37s) acerca el total a 300. 420 da margen
                     # sin dejar de cazar un test de verdad colgado.
 
+# Los cuatro que se comen casi todo el reloj: los tres que abren un pseudo-terminal
+# de verdad y la bateria de mutantes (~300s ella sola). `--rapido` los salta para el
+# loop local; la CI corre SIEMPRE la carpeta entera, sin el flag.
+LENTOS = {"test_tui_arranca.py", "test_vista_now.py", "test_tmux_de_verdad.py",
+          "test_mutantes.py"}
+
+
+def seleccion(ficheros, rapido):
+    """Los ficheros a correr. Con `rapido`, fuera los de `LENTOS`."""
+    return [p for p in ficheros if not (rapido and p.name in LENTOS)]
+
 
 def titulo(p):
     """La primera linea del docstring, que es la frase que decia el `name:` del paso."""
@@ -37,10 +48,16 @@ def titulo(p):
 
 
 def main():
-    ficheros = sorted(AQUI.glob("test_*.py"))
-    if not ficheros:
+    rapido = "--rapido" in sys.argv[1:]
+    todos = sorted(AQUI.glob("test_*.py"))
+    if not todos:
         print("FALLA: no hay ni un test que correr")
         return 1
+    ficheros = seleccion(todos, rapido)
+    saltados = len(todos) - len(ficheros)
+    if rapido:
+        print(f"MODO RAPIDO: saltados {saltados} ficheros lentos (los 3 pty + mutantes). "
+              f"NO sustituye a la bateria completa; la CI corre todo.\n")
     fallados, t0 = [], time.time()
     for p in ficheros:
         marca = time.time()
@@ -57,7 +74,8 @@ def main():
             fallados.append(p.name)
             print("\n".join("      " + l for l in salida.strip().splitlines()[-25:]))
     print(f"\n{len(ficheros) - len(fallados)}/{len(ficheros)} en verde "
-          f"({time.time() - t0:.0f}s)")
+          f"({time.time() - t0:.0f}s)"
+          f"{f' — MODO RAPIDO, {saltados} lentos sin correr' if rapido else ''}")
     if fallados:
         print("fallan: " + ", ".join(fallados))
     return 1 if fallados else 0

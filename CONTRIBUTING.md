@@ -45,7 +45,7 @@ quietly skipped. If you add a guard worth keeping, add its mutant.
 ## On AI-assisted code
 
 Sereno is written with Claude Code, and its author says so up front rather than being asked. That
-is also why the harness above exists: seventy-four tests, one hundred and fifty-five mutants and a full run on
+is also why the harness above exists: seventy-five tests, one hundred and fifty-five mutants and a full run on
 every pull request are what make a claim about this code checkable by someone who did not write
 it. Contributions written the same way are welcome under exactly the same bar — the tests do not
 care who typed the line, and neither does the review.
