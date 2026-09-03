@@ -1041,16 +1041,17 @@ oído hablar, en una máquina a la que has entrado por SSH.
 
 Lo que eso te da, en concreto:
 
-|  | sereno | lanzadores y gestores | apps de escritorio |
-|:--|:--:|:--:|:--:|
-| Ve sesiones que no arrancó él | ✅ | ❌ | 🟡 |
-| Estado en vivo por sesión | ✅ | ❌ | 🟡 |
-| Último prompt y última respuesta | ✅ | ❌ | 🟡 |
-| Contexto gastado por sesión | ✅ | ❌ | ❌ |
-| Funciona sin montar nada | ✅ | necesita su lanzador | hay que instalarla |
-| Codex y Gemini también | ✅ | solo Claude | solo Claude |
-| Va por SSH | ✅ | ✅ | ❌ |
-| Dependencias | **ninguna** | tmux | Electron / Swift |
+Cada fila de abajo existe en algún otro sitio. La gracia no es que sereno inventara ninguna — es
+que ninguna otra herramienta las tiene todas, y ninguna en esta forma.
+
+| Lo que hace sereno | Dónde más lo tienes | Qué pierdes ahí |
+|:--|:--|:--|
+| Lista sesiones de otros proyectos que no arrancó él | el picker nativo de `claude --resume`; dashboards como claude-command-center | solo Claude (nativo); una app de escritorio o un servidor (dashboards) |
+| Muestra Claude, Codex y Gemini en una lista | algún gestor multi-motor | un servidor o una GUI, no una TUI de stdlib |
+| Entrega una sesión viva a otro CLI | herramientas sueltas como handoff y session-migrate | un comando aparte, no tu lista de sesiones |
+| Contexto restante por fila | claude-command-center ("live context left") | una licencia no OSI, gratis solo para uso no comercial |
+| Busca en lo que se dijo de verdad | `--find`; wallfacer, ai-session-search | herramientas de un solo uso, cada una lo suyo |
+| Una TUI por SSH, un fichero de stdlib, cero dependencias | — | esto es lo que nada más junta |
 
 ---
 
