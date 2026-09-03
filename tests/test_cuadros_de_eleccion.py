@@ -239,6 +239,38 @@ def main():
         comprueba("'%s' NO deberia cerrar sesiones" % t, not ac(ord(t)))
     comprueba("el -1 de 'sin tecla' (timeout) no debe cerrar", not ac(-1))
 
+    # ── la geometria del cuadro de cerrar: dos filas ancladas al fondo ───────
+    # El cuadro no es un composer puro —el "OJO" y el "[y]" se pintan en `alto - 3` y
+    # `alto - 2`—, asi que lo que se prueba es la aritmetica, como con `caja_now`. En
+    # una terminal de menos de tres filas esos indices eran negativos, `addnstr`
+    # lanzaba `curses.error` y el wrapper lo tragaba: el selector desaparecia sin
+    # decir nada al pulsar `x`.
+    cc = ns["caja_cierre"]
+    for h in (1, 2, 3, 4, 5, 6, 8, 11, 24):
+        for w in (10, 20, 30, 80, 200):
+            for n in (0, 1, 3, 5, 9):
+                alto, ancho, y, x, caben, f_ojo, f_pie = cc(h, w, n)
+                donde = "h=%d w=%d n=%d" % (h, w, n)
+                comprueba(donde + ": el cuadro se sale por abajo", alto <= h and y + alto <= h)
+                comprueba(donde + ": el cuadro se sale por la derecha",
+                          ancho <= w and x + ancho <= w)
+                # Las sesiones se listan desde la fila 2; la ultima no pisa el borde.
+                comprueba(donde + ": caben mas filas de las marcadas o de las que caben",
+                          caben <= min(n, 5) and (not caben or 1 + caben <= alto - 2))
+                if alto < 2:
+                    continue        # quien llama no pinta: no hay filas que sujetar
+                comprueba(donde + ": el 'OJO' cae fuera del cuadro (%d)" % f_ojo,
+                          1 <= f_ojo <= alto - 1)
+                comprueba(donde + ": el '[y]' cae fuera del cuadro (%d)" % f_pie,
+                          1 <= f_pie <= alto - 1)
+                comprueba(donde + ": el '[y]' queda por encima del 'OJO'", f_ojo <= f_pie)
+    # Control: a la altura de siempre la geometria es la de antes del arreglo, o el
+    # clamp estaria cambiando lo que se ve en vez de solo evitar el reventon.
+    comprueba("a 24 filas el cuadro de 5 sesiones ya no mide 11 y ancla igual",
+              cc(24, 80, 5) == (11, 74, 6, 3, 5, 8, 9))
+    comprueba("con una sola fila no hay cuadro y el alto lo dice",
+              cc(1, 80, 3)[0] < 2)
+
     for f in fallos:
         print("FALLO:", f)
     print("ok" if not fallos else "%d fallos" % len(fallos))
