@@ -24,6 +24,8 @@ guardan, y las tres ramas devuelven un error limpio traducido con codigo 2. Cubi
 
 **Un crash dentro del TUI deja su traza en un log, no en la nada.** `curses.wrapper` restaura la terminal antes de propagar, asi que el `except` que envuelve al selector se tragaba la excepcion y dejaba la pantalla limpia sin ninguna pista de que habia reventado. Ahora, antes de devolver `None`, se vuelca el traceback —con su hora, en append— a `sereno-crash.log` bajo el registro (`~/.claude/warp-sessions/` por defecto; un test lo desvia con `SERENO_REGISTRY` para no ensuciar el real). Cubierto por `tests/test_crash_log.py` y un mutante.
 
+**`tests/todos.py --rapido` para el loop local.** La carpeta entera tarda ~360s: los tres tests que abren un pseudo-terminal y la bateria de mutantes se comen casi todo el reloj. `--rapido` los salta —el resto corre en segundos— e imprime que es un run PARCIAL, no un verde completo. La CI sigue corriendo la carpeta entera, sin el flag. `tests/test_todos_rapido.py` fija que salta exactamente esos cuatro y que cada uno existe (un rename dejaria `--rapido` saltando un fantasma).
+
 ## 1.40.0
 
 **Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia
