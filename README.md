@@ -1086,7 +1086,7 @@ straight answer, not a promise:
 
 **`sereno` has zero networking code.** No `socket`, no `urllib`, no `requests` — the whole
 import list is `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, unicodedata, uuid` and `curses`. Nothing it reads can leave your machine, because there is nothing
+datetime, pathlib, unicodedata, uuid, traceback` and `curses`. Nothing it reads can leave your machine, because there is nothing
 in it that can send anything anywhere.
 
 The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions, and
@@ -1271,7 +1271,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are seventy-three
+collects the whole folder, prints a line per file and ends with the count. There are seventy-four
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1314,7 +1314,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and fifty-four real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and fifty-five real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

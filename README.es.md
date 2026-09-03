@@ -1061,7 +1061,7 @@ respuesta directa, no una promesa:
 
 **`sereno` no tiene una sola línea de red.** Ni `socket`, ni `urllib`, ni `requests` — la lista
 entera de imports es `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, unicodedata, uuid` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
+datetime, pathlib, unicodedata, uuid, traceback` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
 nada capaz de mandar nada a ningún sitio.
 
 Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
@@ -1243,7 +1243,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y tres,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y cuatro,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1278,7 +1278,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento cincuenta y cuatro guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento cincuenta y cinco guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

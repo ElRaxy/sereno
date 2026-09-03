@@ -22,6 +22,8 @@ guardan, y las tres ramas devuelven un error limpio traducido con codigo 2. Cubi
 
 **El guardian de i18n mira tambien lo que pinta el TUI.** `tests/test_i18n.py` solo veia las frases crudas en `print` y en las variables que se pintan; ahora tambien las de `win.addnstr`/`win.addstr`, que es por donde el TUI escribe casi todo. Una frase en ingles colada en un modal se saltaba la comprobacion. Los separadores, chars sueltos y formatos de ancho que van por ahi no son frases y quedan fuera solos. Hoy no habia ningun infractor: cierra una grieta latente.
 
+**Un crash dentro del TUI deja su traza en un log, no en la nada.** `curses.wrapper` restaura la terminal antes de propagar, asi que el `except` que envuelve al selector se tragaba la excepcion y dejaba la pantalla limpia sin ninguna pista de que habia reventado. Ahora, antes de devolver `None`, se vuelca el traceback —con su hora, en append— a `sereno-crash.log` bajo el registro (`~/.claude/warp-sessions/` por defecto; un test lo desvia con `SERENO_REGISTRY` para no ensuciar el real). Cubierto por `tests/test_crash_log.py` y un mutante.
+
 ## 1.40.0
 
 **Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia

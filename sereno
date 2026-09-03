@@ -40,6 +40,7 @@ esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
 MIT licence. https://github.com/ElRaxy/sereno
 """
 import base64, os, stat, sys, json, re, shlex, shutil, subprocess, time, datetime, pathlib
+import traceback
 import uuid
 import unicodedata
 
@@ -4675,6 +4676,24 @@ def zona_en(zonas, mx, my):
     return next((z for z in zonas if z[0] == my and z[1] <= mx <= z[2]), None)
 
 
+def _vuelca_crash():
+    """Deja la traza del ultimo crash dentro de curses en `ROOT/sereno-crash.log`.
+
+    `curses.wrapper` restaura la terminal (endwin) antes de propagar, asi que cuando
+    el except de `pick_ui` traga la excepcion la traza se perdia y el usuario veia la
+    pantalla limpia sin ninguna pista de que habia reventado. La escribimos en append
+    con su hora; va bajo ROOT para que un test con `SERENO_REGISTRY` la mande a un tmp
+    y no ensucie el registro real."""
+    try:
+        destino = ROOT / "sereno-crash.log"
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        with destino.open("a", encoding="utf-8") as f:
+            f.write("\n===== %s =====\n" % time.strftime("%Y-%m-%dT%H:%M:%S"))
+            f.write(traceback.format_exc())
+    except Exception:
+        pass
+
+
 def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="claude"):
     """Devuelve ('close'|'reopen', [filas]) o None si no se pudo pintar/se salio.
 
@@ -5769,6 +5788,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
     try:
         curses.wrapper(run)
     except Exception:
+        _vuelca_crash()
         if _env("DEBUG"):
             raise
         return None

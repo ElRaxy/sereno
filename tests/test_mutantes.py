@@ -664,6 +664,12 @@ MUTANTES = [
      '    return tecla in (ord("s"), ord("S"), ord("y"), ord("Y"))',
      '    return tecla in (ord("s"), ord("S"))',
      "test_cuadros_de_eleccion.py"),
+
+    # ── el traceback de un crash dentro de curses ────────────────────────────
+    ("un crash del TUI se traga sin dejar la traza en el log",
+     "        _vuelca_crash()",
+     "        pass",
+     "test_crash_log.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 
