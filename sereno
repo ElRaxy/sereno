@@ -5971,14 +5971,21 @@ def archive(items, folder):
 
 
 def cmd_add(argv):
+    if not argv or not argv[0].strip() or argv[0].startswith("-"):
+        print(_("--add needs a session id."))
+        return 2
     sid = argv[0]
     cwd = str(pathlib.Path.cwd())
     title = None
     i = 1
     while i < len(argv):
         if argv[i] == "--cwd":
+            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+                print(_("--cwd needs a path.")); return 2
             cwd = argv[i + 1]; i += 2
         elif argv[i] == "--title":
+            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+                print(_("--title needs a value.")); return 2
             title = argv[i + 1]; i += 2
         else:
             i += 1
@@ -5995,6 +6002,7 @@ def cmd_add(argv):
         f"title_explicit={'1' if title else ''}\n"
     )
     print(_("registered {s} -> {f}", s=sid, f=f.name))
+    return 0
 
 
 def _T():
@@ -6002,6 +6010,9 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "--add needs a session id.": "--add necesita un id de sesi\u00f3n.",
+        "--cwd needs a path.": "--cwd necesita una ruta.",
+        "--title needs a value.": "--title necesita un valor.",
         "(the {n} most recent; {f} older ones left out \u2014 add --all)":
             "(las {n} m\u00e1s recientes; quedan {f} m\u00e1s viejas fuera \u2014 a\u00f1ade --all)",
         "what they are ALL running, in one screen":

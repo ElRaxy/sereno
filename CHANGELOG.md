@@ -11,6 +11,13 @@ flag va **explicito** en los arneses y **despues de la ruta** del binario, no po
 sin pedirlo—; `tests/test_binario_no_alias.py` ahora exige tambien que el flag este. Gemini se
 queda igual: no lleva bypass.
 
+**`--add` ya no vuelca un traceback ni registra basura.** El comando interno `cmd_add` leia
+`argv` sin comprobar limites: `sereno --add` pelado, o `--cwd`/`--title` como ultimo token,
+salian con un `IndexError` crudo; y `--add --cwd /tmp` registraba `"--cwd"` como id de sesion
+en silencio. Ahora el id no puede faltar ni ser un token de opcion, los dos valores se
+guardan, y las tres ramas devuelven un error limpio traducido con codigo 2. Cubierto por
+`tests/test_cmd_add.py` (conducido por `main()`, no por la funcion a pelo) y seis mutantes.
+
 ## 1.40.0
 
 **Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia

@@ -628,6 +628,36 @@ MUTANTES = [
      "test_lanzadores.py"),
     ("_QUE_ABRE describe un lanzador que ya no esta en la tabla",
      '    "kitty": (hay_kitty, _abre_en_kitty),\n', '', "test_lanzadores.py"),
+
+    # ── cmd_add: guardas de argv para no volcar un traceback ni registrar basura ─
+    # `--add` leia argv sin comprobar limites y sin mirar QUE leia. Cada guarda
+    # protege una cosa distinta y hay un mutante por sub-condicion: los mata
+    # test_cmd_add.py comprobando que la rama devuelve 2 (o no revienta) y que no
+    # se escribio ningun .env. Un mutante que aflojara una sola pasaria sin red.
+    ("el id de --add se acepta aunque sea una cadena vacia o solo espacios",
+     '    if not argv or not argv[0].strip() or argv[0].startswith("-"):',
+     '    if not argv or argv[0].startswith("-"):',
+     "test_cmd_add.py"),
+    ("el id de --add se acepta aunque sea un token de opcion",
+     '    if not argv or not argv[0].strip() or argv[0].startswith("-"):',
+     '    if not argv or not argv[0].strip():',
+     "test_cmd_add.py"),
+    ("--cwd como ultimo token se lee fuera de rango en vez de rechazarse",
+     '        if argv[i] == "--cwd":\n            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):',
+     '        if argv[i] == "--cwd":\n            if i + 1 > len(argv) or argv[i + 1].startswith("--"):',
+     "test_cmd_add.py"),
+    ("--cwd se traga la siguiente opcion como si fuera una ruta",
+     '        if argv[i] == "--cwd":\n            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):',
+     '        if argv[i] == "--cwd":\n            if i + 1 >= len(argv):',
+     "test_cmd_add.py"),
+    ("--title como ultimo token se lee fuera de rango en vez de rechazarse",
+     '        elif argv[i] == "--title":\n            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):',
+     '        elif argv[i] == "--title":\n            if i + 1 > len(argv) or argv[i + 1].startswith("--"):',
+     "test_cmd_add.py"),
+    ("--title se traga la siguiente opcion como si fuera un valor",
+     '        elif argv[i] == "--title":\n            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):',
+     '        elif argv[i] == "--title":\n            if i + 1 >= len(argv):',
+     "test_cmd_add.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 
