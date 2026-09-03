@@ -2199,6 +2199,12 @@ def _comando_de(r, modelo=None):
     `modelo` es opcional y solo llega donde tiene sentido: una sesion viva (`cc-`) se
     reengancha por `tmux attach` a un proceso YA vivo, con el modelo ya echado, asi que
     ahi NO se pone; a un CLI cuyo flag no conocemos (gemini) tampoco (`_con_modelo`).
+
+    Reabrir una sesion de Claude con OTRO modelo lleva ademas `--fork-session`: sin el,
+    el transcript queda con dos modelos dentro, y de ahi es de donde este programa
+    deduce el modelo y el tope de contexto de la fila. Con el fork la sesion vieja se
+    queda como estaba y la nueva arranca con id propio. Sin modelo elegido no hay fork:
+    reabrir "por defecto" sigue siendo la misma sesion de siempre.
     """
     e = r.get("meta") or {}
     if r.get("abrir"):                     # historial de otro CLI (codex, gemini...)
@@ -2213,6 +2219,7 @@ def _comando_de(r, modelo=None):
         # SyntaxError en Python 3.8, que es el suelo del repo (`test_suelo_38.py`). El
         # modelo va entre el binario y `--resume`, primer token intacto.
         orden = ([bin_cli("claude")] + _con_modelo("claude", modelo)
+                 + (["--fork-session"] if modelo else [])
                  + ["--resume", e["id"]] + list(e.get("resume_flags__list") or []))
         return " ".join(shlex.quote(x) for x in orden), e.get("cwd") or str(HOME)
     return None
@@ -2779,6 +2786,16 @@ def _fila_admite_modelo(r):
     return bool((r.get("meta") or {}).get("id"))
 
 
+def _modelos_para(sel):
+    """El ciclo `[por defecto] + catalogo` si alguna fila de `sel` sabe recibir modelo, y
+    `()` si no hay nada que ofrecer. Lo usa el cuadro para pintar `[m]` y `run()` para
+    decidir si el cuadro se abre con un solo lanzador: un cuadro de una opcion es una
+    tecla de mas, salvo que dentro haya un modelo que elegir."""
+    ciclo_m = [None] + modelos_catalogo()
+    return ciclo_m if (len(ciclo_m) > 1
+                       and any(_fila_admite_modelo(r) for r in sel)) else ()
+
+
 def _pide_lanzador(sel, lanzadores, h, w, curses, C, tecla_limpia):
     """Dibuja el cuadro de "donde" y devuelve `(lanzador, modelo)`, o `(None, None)` si
     se cancela. El `[m]` cicla el modelo sin cerrar el cuadro, como `[k]`/`[w]` en el
@@ -2788,9 +2805,7 @@ def _pide_lanzador(sel, lanzadores, h, w, curses, C, tecla_limpia):
     montados —el modulo falso de los tests entra por ahi— y duplicar ese montaje aqui
     seria tener dos pantallas que pueden discrepar.
     """
-    ciclo_m = [None] + modelos_catalogo()
-    hay_modelo = ciclo_m if (len(ciclo_m) > 1
-                             and any(_fila_admite_modelo(r) for r in sel)) else ()
+    hay_modelo = _modelos_para(sel)
     modelo = None
     while True:
         lin = lineas_abrir(sel, lanzadores, min(70, w - 8),
@@ -5796,7 +5811,9 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     res["out"] = ("reopen", sel)
                     return
                 # Con dos o mas sitios donde abrirlas, se pregunta. Con uno no hay nada
-                # que elegir y un cuadro de una sola opcion es solo una tecla de mas.
+                # que elegir y un cuadro de una sola opcion es solo una tecla de mas —
+                # salvo que haya modelo que elegir: entonces el cuadro es el unico sitio
+                # donde vive el `[m]`, y sin el no se puede reabrir con otro modelo.
                 donde = lanzadores_disponibles()
                 # Mismo criterio que el cuadro del relevo: lo ultimo elegido va primero.
                 # Dos cuadros con la misma forma no pueden recordar uno si y otro no.
@@ -5804,7 +5821,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     donde = [pref("abrir_donde")] + [d for d in donde
                                                      if d != pref("abrir_donde")]
                 modelo_reabrir = None
-                if len(donde) > 1:
+                if len(donde) > 1 or (donde and _modelos_para(sel)):
                     donde, modelo_reabrir = _pide_lanzador(
                         sel, donde, h, w, curses, C, tecla_limpia)
                     if donde is None:
@@ -7209,7 +7226,7 @@ def main():
         # reanudables las duplicaba en cuanto TAB cargaba `extra`.
         # `donde` con valor por defecto: el selector lo pasa desde que `r` pregunta en
         # que terminal abrir, y un lambda de dos parametros reventaba la demo entera.
-        pick_ui(live_sessions(), ejecutar=lambda verbo, sel, donde=None: (
+        pick_ui(live_sessions(), ejecutar=lambda verbo, sel, donde=None, modelo=None: (
             _("{n} closed and archived. The history is still on disk.", n=len(sel))
             if verbo == "close" else _("{n} reattached with {v}",
                                        n=len(sel), v=donde or "demo"), live_sessions()),

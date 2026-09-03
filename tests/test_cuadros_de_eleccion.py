@@ -206,6 +206,15 @@ def main():
               cmd_c.strip() and not shlex.split(cmd_c)[0].startswith("--"), cmd_c)
     comprueba("sin modelo, la reapertura de Claude mete un flag igualmente",
               "--model" not in cd(r_claude)[0], cd(r_claude)[0])
+    # Con otro modelo, la reapertura se bifurca: sin `--fork-session` el transcript
+    # queda con dos modelos dentro, que es de donde se deduce el tope de contexto.
+    comprueba("reabrir con otro modelo no bifurca la sesion (--fork-session)",
+              "--fork-session" in shlex.split(cmd_c), cmd_c)
+    comprueba("reabrir por defecto bifurca la sesion sin que nadie lo pida",
+              "--fork-session" not in cd(r_claude)[0], cd(r_claude)[0])
+    comprueba("el fork va antes de --resume, no colgando del final",
+              shlex.split(cmd_c).index("--fork-session") < shlex.split(cmd_c).index("--resume"),
+              cmd_c)
 
     cmd_x = cd(r_codex, modelo="gpt-5")[0]
     comprueba("la reapertura de Codex no lleva -m con el modelo",
