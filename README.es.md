@@ -713,6 +713,7 @@ Entregar 3 sesiones a:
 [1] codex   [2] claude
     gemini, antigravity — sin comprobar cómo se le pasa un prompt
 [k] incluir la conversación: no
+[m] modelo: por defecto
 [w] abrirlas en: tmux
 
 [1-9] entregar    [otra tecla] cancelar
@@ -721,6 +722,14 @@ Entregar 3 sesiones a:
 El CLI del que vienen las filas no se ofrece — pero solo cuando lo es de **todas**: con la
 selección mezclada salen los dos, porque alguna fila puede ir a cada uno. Cualquier otra tecla
 cancela.
+
+`m` rota el modelo con el que arranca la sesión nueva — `por defecto` (no pasar flag) más lo que
+liste `SERENO_MODELOS` (`opus,sonnet,haiku` de fábrica). Solo aparece cuando hay entre qué elegir
+y el destino sabe recibir modelo: `claude --model <m>` y `codex -m <m>`, verificados contra cada
+`--help`; `gemini` se queda fuera por lo mismo que arriba. La elección **no** persiste entre
+arranques —un modelo elegido un día y todavía puesto al siguiente es una sorpresa—; solo la
+variable de entorno se queda. Ojo al aviso de *Sobre esa barra de contexto*: una sesión reanudada
+con una ventana mayor sale baja en la barra hasta que aterriza su propio `cost-state`.
 
 `w` rota dónde se abren las ventanas, la misma pregunta que hace `r`. Y **el último destino pasa
 al frente y el último sitio se queda puesto**: quien releva a Codex una vez suele relevar a Codex
@@ -1279,7 +1288,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento cincuenta y seis guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento sesenta y una guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

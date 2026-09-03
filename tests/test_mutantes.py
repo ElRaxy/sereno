@@ -113,12 +113,12 @@ MUTANTES = [
     # paso el 2026-09-01 con `--allow-dangerously-skip-permissions`. Son TRES sitios los
     # que componen ordenes y basta uno mal para que el alias vuelva a colarse, asi que
     # hay un mutante por sitio: uno solo no probaria que estan los tres.
-    ("el historial de Claude se reabre por el nombre y no por la ruta",
-     'shlex.quote(bin_cli("claude")),\n                                     shlex.quote',
-     '"claude",\n                                     shlex.quote',
+    ("la sesion de Claude parada se reabre por el nombre y no por la ruta",
+     'orden = ([bin_cli("claude")] + _con_modelo("claude", modelo)',
+     'orden = (["claude"] + _con_modelo("claude", modelo)',
      "test_binario_no_alias.py"),
     ("el historial de otro CLI se reabre por el nombre y no por la ruta",
-     '        orden = [bin_cli(r["abrir"][0])] + list(r["abrir"][1:])',
+     '        orden = [bin_cli(cli)] + _con_modelo(cli, modelo) + list(r["abrir"][1:])',
      '        orden = list(r["abrir"])',
      "test_binario_no_alias.py"),
     ("las huerfanas del registro se reabren por el nombre y no por la ruta",
@@ -126,12 +126,12 @@ MUTANTES = [
      '        cmd = " ".join(["claude", "--resume", e["id"]]',
      "test_binario_no_alias.py"),
     ("el relevo a Codex arranca por el nombre y no por la ruta",
-     '    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),',
-     '    "codex": lambda prompt: "codex " + shlex.quote(prompt),',
+     '    "codex": lambda prompt, modelo=None: shlex.quote(bin_cli("codex")) + _modelo_seg("codex", modelo) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),',
+     '    "codex": lambda prompt, modelo=None: "codex" + _modelo_seg("codex", modelo) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),',
      "test_binario_no_alias.py"),
     ("el relevo a Claude arranca por el nombre y no por la ruta",
-     '    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " --permission-mode bypassPermissions " + shlex.quote(prompt),',
-     '    "claude": lambda prompt: "claude " + shlex.quote(prompt),',
+     '    "claude": lambda prompt, modelo=None: shlex.quote(bin_cli("claude")) + _modelo_seg("claude", modelo) + " --permission-mode bypassPermissions " + shlex.quote(prompt),',
+     '    "claude": lambda prompt, modelo=None: "claude" + _modelo_seg("claude", modelo) + " --permission-mode bypassPermissions " + shlex.quote(prompt),',
      "test_binario_no_alias.py"),
 
     # ── el relevo entrega el destino en Bypass Permissions ──────────────────
@@ -676,6 +676,31 @@ MUTANTES = [
      '    forzado = _env("ARNES")',
      '    forzado = _env("SERENO_ARNES")',
      "test_relevo.py"),
+
+    # ── el modelo elegido llega a la orden, y SOLO donde tiene sentido ────────
+    # El flag va DONDE arranca una sesion nueva —Claude parada (`--resume`), Codex del
+    # historial, y el relevo a los dos— y NO donde no: una viva (`cc-`) se reengancha a
+    # un proceso ya echado, y a gemini no sabemos pedirselo. Un mutante por sitio que lo
+    # lleva —quitarselo—, y uno que mete a gemini en el diccionario —ponerselo a quien no
+    # debe—. Los mata `test_cuadros_de_eleccion.py`, que compone las cuatro ordenes.
+    ("la reapertura de una sesion de Claude deja de llevar el modelo elegido",
+     '[bin_cli("claude")] + _con_modelo("claude", modelo)',
+     '[bin_cli("claude")] + []',
+     "test_cuadros_de_eleccion.py"),
+    ("la reapertura de una sesion de Codex deja de llevar el modelo elegido",
+     '[bin_cli(cli)] + _con_modelo(cli, modelo)',
+     '[bin_cli(cli)] + []',
+     "test_cuadros_de_eleccion.py"),
+    ("el relevo a Claude deja de llevar el modelo elegido",
+     '_modelo_seg("claude", modelo)', '""',
+     "test_cuadros_de_eleccion.py"),
+    ("el relevo a Codex deja de llevar el modelo elegido",
+     '_modelo_seg("codex", modelo)', '""',
+     "test_cuadros_de_eleccion.py"),
+    ("a gemini se le cuela un modelo que no sabemos como pedirle",
+     'FLAG_MODELO = {"claude": "--model", "codex": "-m"}',
+     'FLAG_MODELO = {"claude": "--model", "codex": "-m", "gemini": "--model"}',
+     "test_cuadros_de_eleccion.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

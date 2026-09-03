@@ -2152,27 +2152,69 @@ def bin_cli(nombre):
     return shutil.which(nombre) or nombre
 
 
-def _comando_de(r):
+# Como se le pide un modelo a cada CLI, verificado contra su `--help` el 2026-09-03:
+#   claude --model <m>    ·    codex -m <m>
+# `gemini` no esta aqui A PROPOSITO: no se ha comprobado como se le pide modelo, la
+# misma regla que lo deja fuera de bypass. El CLI que no este en el diccionario no
+# lleva modelo aunque se pida — asi el mismo toggle sirve para todos sin mentir.
+FLAG_MODELO = {"claude": "--model", "codex": "-m"}
+
+
+def _con_modelo(cli, modelo):
+    """Los tokens del flag de modelo para este CLI, o [] si no se le pasa nada.
+
+    Va DESPUES de la ruta del binario, como el bypass, para que el binario siga siendo
+    el primer token (`test_binario_no_alias`). Sin modelo elegido (`None` o vacio) no
+    devuelve nada: es el comportamiento conservador y por defecto — una sesion reanudada
+    hereda el modelo de su propio transcript, no la config global de la maquina.
+    """
+    flag = FLAG_MODELO.get(cli)
+    if not modelo or not flag:
+        return []
+    return [flag, modelo]
+
+
+def _modelo_seg(cli, modelo):
+    """El flag de modelo como SEGMENTO de cadena para `ARNESES`, que compone con `+`:
+    " --model opus" o "" si no se pasa modelo. La misma decision que `_con_modelo`, en
+    la forma que piden las lambdas del relevo."""
+    toks = _con_modelo(cli, modelo)
+    return (" " + " ".join(shlex.quote(t) for t in toks)) if toks else ""
+
+
+def modelos_catalogo():
+    """Los modelos entre los que ciclar, de `SERENO_MODELOS`. Lista corta por defecto:
+    una lista larga hardcodeada caduca con cada release del CLI. La opcion "por defecto"
+    (no pasar flag) la pone el ciclo de la interfaz, no esta aqui."""
+    return [m.strip() for m in _env("MODELOS", "opus,sonnet,haiku").split(",") if m.strip()]
+
+
+def _comando_de(r, modelo=None):
     """(comando, cwd) con que se abre esta fila. None si no se sabe abrirla.
 
     El nombre del CLI pasa por `bin_cli()` SIEMPRE, aqui y en `write_launch_config` y
     `ARNESES`, que son los otros dos sitios que componen una orden. Los tres, o
     ninguno: basta uno con el nombre pelado para que un alias se cuele.
+
+    `modelo` es opcional y solo llega donde tiene sentido: una sesion viva (`cc-`) se
+    reengancha por `tmux attach` a un proceso YA vivo, con el modelo ya echado, asi que
+    ahi NO se pone; a un CLI cuyo flag no conocemos (gemini) tampoco (`_con_modelo`).
     """
     e = r.get("meta") or {}
     if r.get("abrir"):                     # historial de otro CLI (codex, gemini...)
-        orden = [bin_cli(r["abrir"][0])] + list(r["abrir"][1:])
+        cli = r["abrir"][0]
+        orden = [bin_cli(cli)] + _con_modelo(cli, modelo) + list(r["abrir"][1:])
         return " ".join(shlex.quote(x) for x in orden), e.get("cwd") or str(HOME)
     if str(r.get("name", "")).startswith("cc-"):
         return (f"{shlex.quote(TMUX_BIN)} -L {SOCK} attach -t {shlex.quote(r['name'])}",
                 e.get("cwd") or str(HOME))
     if e.get("id"):                        # sesion de Claude muerta: --resume
-        flags = " ".join(shlex.quote(f) for f in (e.get("resume_flags__list") or []))
-        # Con `%` y no con una f-string partida en dos lineas: eso es un SyntaxError
-        # en Python 3.8, que es el suelo del repo, y lo caza `test_suelo_38.py`.
-        cmd = "%s --resume %s %s" % (shlex.quote(bin_cli("claude")),
-                                     shlex.quote(e["id"]), flags)
-        return cmd.strip(), e.get("cwd") or str(HOME)
+        # Lista de tokens y un `join`, no una f-string partida en dos lineas: eso es un
+        # SyntaxError en Python 3.8, que es el suelo del repo (`test_suelo_38.py`). El
+        # modelo va entre el binario y `--resume`, primer token intacto.
+        orden = ([bin_cli("claude")] + _con_modelo("claude", modelo)
+                 + ["--resume", e["id"]] + list(e.get("resume_flags__list") or []))
+        return " ".join(shlex.quote(x) for x in orden), e.get("cwd") or str(HOME)
     return None
 
 
@@ -2577,7 +2619,7 @@ def _escribe_config(nombre, pestanas):
     return ruta
 
 
-def pestanas_de(rows):
+def pestanas_de(rows, modelo=None):
     """(pestanas, sin_forma) — las filas que se saben abrir, y las que no.
 
     El comando sale de `_comando_de()`, que ya distingue los tres casos: una sesion viva
@@ -2588,7 +2630,7 @@ def pestanas_de(rows):
     """
     pestanas, sin_forma = [], []
     for r in rows:
-        par = _comando_de(r)
+        par = _comando_de(r, modelo)
         if not par:
             sin_forma.append(r)
             continue
@@ -2616,18 +2658,18 @@ def pestanas_de(rows):
 #   claude --permission-mode bypassPermissions ; codex --dangerously-bypass-approvals-and-sandbox
 # gemini NO lleva bypass: se deja como estaba.
 ARNESES = {
-    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),
+    "codex": lambda prompt, modelo=None: shlex.quote(bin_cli("codex")) + _modelo_seg("codex", modelo) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),
     # `claude [options] [command] [prompt]` -- "Your prompt", y sin `-p` la sesion es
     # interactiva. Verificado contra `claude --help` el 2026-08-28. Esta aqui para que
     # el relevo vaya en los dos sentidos: una sesion de Codex tambien se entrega.
     # Por `bin_cli` y no por el nombre pelado, por lo mismo que en `_comando_de`.
-    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " --permission-mode bypassPermissions " + shlex.quote(prompt),
+    "claude": lambda prompt, modelo=None: shlex.quote(bin_cli("claude")) + _modelo_seg("claude", modelo) + " --permission-mode bypassPermissions " + shlex.quote(prompt),
     # `gemini [query]` arranca interactivo con ese prompt inicial; `-i/--prompt-interactive`
     # es su forma explicita ("execute the provided prompt and continue in interactive mode")
     # y evita que un briefing que empiece raro se lea como subcomando. Verificado contra
     # `gemini --help` el 2026-09-02. Antigravity no entra: no hay binario que sembrar, solo
     # se leen sus conversaciones para reanudarlas.
-    "gemini": lambda prompt: shlex.quote(bin_cli("gemini")) + " -i " + shlex.quote(prompt),
+    "gemini": lambda prompt, modelo=None: shlex.quote(bin_cli("gemini")) + _modelo_seg("gemini", modelo) + " -i " + shlex.quote(prompt),
 }
 
 # El CLI del que sale una fila. `fuente` tiene cinco valores y dos son el mismo arnes:
@@ -2703,7 +2745,7 @@ def briefing(r, con_conversacion=False):
     return "\n".join(lineas)
 
 
-def pestanas_de_relevo(rows, arnes, con_conversacion=False):
+def pestanas_de_relevo(rows, arnes, con_conversacion=False, modelo=None):
     """(pestanas, sin_sitio, mismo_cli) para entregar estas filas a otro CLI.
 
     Se cae la fila cuyo directorio ya no existe: un relevo que arranca en `~` porque el
@@ -2722,38 +2764,60 @@ def pestanas_de_relevo(rows, arnes, con_conversacion=False):
             sin_sitio_.append(r)
             continue
         titulo = "%s \u2192 %s" % (r.get("title") or r.get("name") or "", arnes)
-        pestanas.append((titulo, compone(briefing(r, con_conversacion)), cwd))
+        pestanas.append((titulo, compone(briefing(r, con_conversacion), modelo), cwd))
     return pestanas, sin_sitio_, mismo_
 
 
+def _fila_admite_modelo(r):
+    """Si a esta fila se le puede elegir modelo al reabrirla. Misma frontera que
+    `_comando_de`: una viva (`cc-`) se reengancha a un proceso ya echado, y un CLI cuyo
+    flag no conocemos (gemini) no cuenta; una de Claude parada o una de Codex, si."""
+    if r.get("abrir"):
+        return r["abrir"][0] in FLAG_MODELO
+    if str(r.get("name", "")).startswith("cc-"):
+        return False
+    return bool((r.get("meta") or {}).get("id"))
+
+
 def _pide_lanzador(sel, lanzadores, h, w, curses, C, tecla_limpia):
-    """Dibuja el cuadro de "donde" y devuelve el elegido, o None si se cancela.
+    """Dibuja el cuadro de "donde" y devuelve `(lanzador, modelo)`, o `(None, None)` si
+    se cancela. El `[m]` cicla el modelo sin cerrar el cuadro, como `[k]`/`[w]` en el
+    relevo; una tecla de sesion (`1-9`) elige y cierra.
 
     Recibe curses y sus dos ayudantes en vez de importarlos: `pick_ui` los tiene ya
     montados —el modulo falso de los tests entra por ahi— y duplicar ese montaje aqui
     seria tener dos pantallas que pueden discrepar.
     """
-    lin = lineas_abrir(sel, lanzadores, min(70, w - 8))
-    alto = min(len(lin) + 2, h)
-    ancho_c = min(max(ancho(t) for t, _p in lin) + 6, w)
-    win = curses.newwin(alto, ancho_c, max(0, (h - alto) // 2),
-                        max(0, (w - ancho_c) // 2))
-    win.box()
-    for k, (txt, par) in enumerate(lin[:alto - 2]):
-        if txt:
-            win.addnstr(1 + k, 3, txt, ancho_c - 6,
-                        (C(par) if par else 0) | curses.A_BOLD)
-    win.refresh()
-    win.timeout(-1)
-    tec = tecla_limpia(win)
-    if ord("1") <= (tec or 0) <= ord("9"):
-        i = tec - ord("1")
-        if i < len(lanzadores):
-            return lanzadores[i]
-    return None
+    ciclo_m = [None] + modelos_catalogo()
+    hay_modelo = ciclo_m if (len(ciclo_m) > 1
+                             and any(_fila_admite_modelo(r) for r in sel)) else ()
+    modelo = None
+    while True:
+        lin = lineas_abrir(sel, lanzadores, min(70, w - 8),
+                           modelo=modelo, hay_modelo=hay_modelo)
+        alto = min(len(lin) + 2, h)
+        ancho_c = min(max(ancho(t) for t, _p in lin) + 6, w)
+        win = curses.newwin(alto, ancho_c, max(0, (h - alto) // 2),
+                            max(0, (w - ancho_c) // 2))
+        win.box()
+        for k, (txt, par) in enumerate(lin[:alto - 2]):
+            if txt:
+                win.addnstr(1 + k, 3, txt, ancho_c - 6,
+                            (C(par) if par else 0) | curses.A_BOLD)
+        win.refresh()
+        win.timeout(-1)
+        tec = tecla_limpia(win)
+        if tec in (ord("m"), ord("M")) and len(hay_modelo) > 1:
+            modelo = hay_modelo[(hay_modelo.index(modelo) + 1) % len(hay_modelo)]
+            continue
+        if ord("1") <= (tec or 0) <= ord("9"):
+            i = tec - ord("1")
+            if i < len(lanzadores):
+                return lanzadores[i], modelo
+        return None, None
 
 
-def lineas_abrir(sel, lanzadores, ancho, tope=5):
+def lineas_abrir(sel, lanzadores, ancho, tope=5, modelo=None, hay_modelo=()):
     """[(texto, par_de_color)] del cuadro que pregunta DONDE se abren estas sesiones.
 
     Compositor puro y aparte del pintado, igual que `lineas_relevo`: curses no avisa
@@ -2769,6 +2833,12 @@ def lineas_abrir(sel, lanzadores, ancho, tope=5):
     out.append(("", 0))
     for i, n in enumerate(lanzadores):
         out.append(("[%d] %s  \u2014  %s" % (i + 1, n, _QUE_ABRE.get(n, lambda: n)()), 7))
+    # Mismo toggle que `lineas_relevo`: "por defecto" = no pasar flag, y solo cuando hay
+    # entre que elegir. Una sesion reanudada hereda su modelo del transcript; esto es la
+    # forma de romperlo a proposito.
+    if len(hay_modelo) > 1:
+        out.append(("[m] " + _("model: {v}", v=modelo or _("default")),
+                    7 if modelo else 4))
     out.append(("", 0))
     out.append((_("[1-9] open there    [any other key] cancel"), 7))
     return out
@@ -2813,7 +2883,8 @@ def destinos_de_relevo(sel):
     return [a for a in arneses_disponibles() if any(cli_de(r) != a for r in sel)]
 
 
-def lineas_relevo(sel, destinos, con_conv, ancho, tope=5, donde=None, hay_donde=()):
+def lineas_relevo(sel, destinos, con_conv, ancho, tope=5, donde=None, hay_donde=(),
+                  modelo=None, hay_modelo=()):
     """[(texto, par_de_color)] del cuadro que pregunta a donde va el relevo.
 
     Compositor puro y aparte del pintado, por lo mismo que `lineas_now`: el cuadro tiene
@@ -2844,6 +2915,13 @@ def lineas_relevo(sel, destinos, con_conv, ancho, tope=5, donde=None, hay_donde=
                            v=_("yes") if con_conv else _("no")), 7 if con_conv else 4))
     if con_conv:
         out.append(("    " + _("it is written to Warp's config, on disk"), 2))
+    # El modelo con el que arranca la sesion nueva. "por defecto" = no pasar flag, el
+    # comportamiento conservador. Solo cuando hay entre que elegir —catalogo Y un destino
+    # que sepa recibir modelo—: ofrecerlo con un CLI al que no sabemos pasarselo mentiria.
+    # Se pinta apagado en "por defecto" y encendido con un modelo puesto, como `[k]`.
+    if len(hay_modelo) > 1:
+        out.append(("[m] " + _("model: {v}", v=modelo or _("default")),
+                    7 if modelo else 4))
     # Donde se abren las ventanas: la misma pregunta que hace `r`, y por las mismas
     # razones. Solo cuando hay entre que elegir; con un sitio, decirlo seria ruido.
     if len(hay_donde) > 1:
@@ -2853,7 +2931,7 @@ def lineas_relevo(sel, destinos, con_conv, ancho, tope=5, donde=None, hay_donde=
     return out
 
 
-def relevo(sel, arnes=None, con_conversacion=None, lanzador=None):
+def relevo(sel, arnes=None, con_conversacion=None, lanzador=None, modelo=None):
     """Abre una sesion NUEVA del otro CLI por cada fila, en su directorio.
 
     Sin arnes pedido, el destino por defecto es cualquiera MENOS el de las filas: es lo
@@ -2870,7 +2948,7 @@ def relevo(sel, arnes=None, con_conversacion=None, lanzador=None):
     if con_conversacion is None:
         con_conversacion = _env("RELEVO") == "completo"
     pestanas, sin_sitio_, mismo_ = pestanas_de_relevo(
-        sel, arnes, con_conversacion=con_conversacion)
+        sel, arnes, con_conversacion=con_conversacion, modelo=modelo)
     if not pestanas:
         if mismo_ and not sin_sitio_:
             return None, _("Those are already {c} sessions.", c=arnes)
@@ -5634,10 +5712,18 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 ultimo = pref("relevo_arnes")
                 if ultimo in destinos:
                     destinos = [ultimo] + [d for d in destinos if d != ultimo]
+                # El modelo no persiste entre arranques: se elige aqui y se olvida. El
+                # ciclo es [por defecto] + catalogo, y solo se ofrece si algun destino
+                # sabe recibir modelo.
+                ciclo_m = [None] + modelos_catalogo()
+                hay_modelo = ciclo_m if (len(ciclo_m) > 1
+                                         and any(d in FLAG_MODELO for d in destinos)) else ()
+                modelo = None
                 elegido = None
                 while elegido is None:
                     lin = lineas_relevo(sel, destinos, con_conv, min(70, w - 8),
-                                        donde=donde, hay_donde=hay_donde)
+                                        donde=donde, hay_donde=hay_donde,
+                                        modelo=modelo, hay_modelo=hay_modelo)
                     alto_r = min(len(lin) + 2, h)
                     ancho_r = min(max(ancho(t) for t, _p in lin) + 6, w)
                     win = curses.newwin(alto_r, ancho_r, max(0, (h - alto_r) // 2),
@@ -5652,6 +5738,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     tec = tecla_limpia(win)
                     if tec in (ord("k"), ord("K")):
                         con_conv = not con_conv
+                    elif tec in (ord("m"), ord("M")) and len(hay_modelo) > 1:
+                        modelo = hay_modelo[(hay_modelo.index(modelo) + 1) % len(hay_modelo)]
                     elif tec in (ord("w"), ord("W")) and len(hay_donde) > 1:
                         donde = hay_donde[(hay_donde.index(donde) + 1) % len(hay_donde)]
                     elif ord("1") <= (tec or 0) <= ord("9"):
@@ -5664,8 +5752,11 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     aviso = _("Cancelled, nothing was handed over.")
                     continue
                 guarda_pref(relevo_arnes=elegido, relevo_donde=donde)
+                # El modelo se pasa SOLO si se eligio uno: sin eso, "por defecto" no toca
+                # la firma de la llamada de siempre.
+                extra_m = {"modelo": modelo} if modelo else {}
                 _arnes, aviso = relevo(sel, elegido, con_conversacion=con_conv,
-                                       lanzador=donde)
+                                       lanzador=donde, **extra_m)
                 marcadas.clear()
                 ancla = None
                 continue
@@ -5697,15 +5788,20 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 if pref("abrir_donde") in donde:
                     donde = [pref("abrir_donde")] + [d for d in donde
                                                      if d != pref("abrir_donde")]
+                modelo_reabrir = None
                 if len(donde) > 1:
-                    donde = _pide_lanzador(sel, donde, h, w, curses, C, tecla_limpia)
+                    donde, modelo_reabrir = _pide_lanzador(
+                        sel, donde, h, w, curses, C, tecla_limpia)
                     if donde is None:
                         aviso = _("Cancelled, nothing was opened.")
                         continue
                     guarda_pref(abrir_donde=donde)
                 else:
                     donde = donde[0] if donde else None
-                aviso, todas = ejecutar("reopen", sel, donde)
+                # Igual que en el relevo: el modelo solo va si se eligio, sin cambiar la
+                # firma del `ejecutar` de siempre cuando no lo hay.
+                extra_m = (modelo_reabrir,) if modelo_reabrir else ()
+                aviso, todas = ejecutar("reopen", sel, donde, *extra_m)
                 fuera = ([_("{n} already had a tab", n=len(con_pestana))] if con_pestana
                          else []) + ([_("{n} cannot be opened from here",
                                         n=len(_sin_forma))] if _sin_forma else [])
@@ -6068,6 +6164,8 @@ def _T():
         "Hand over {n} session to:": "Entregar {n} sesi\u00f3n a:",
         "Hand over {n} sessions to:": "Entregar {n} sesiones a:",
         "include the conversation: {v}": "incluir la conversaci\u00f3n: {v}",
+        "model: {v}": "modelo: {v}",
+        "default": "por defecto",
         "yes": "s\u00ed",
         "no": "no",
         "it is written to Warp's config, on disk":
@@ -7158,7 +7256,7 @@ def main():
 
         rows = live_sessions(con_ram=True)      # el TUI si pinta RAM y titulos finos
 
-        def ejecutar(verbo, sel, donde=None):
+        def ejecutar(verbo, sel, donde=None, modelo=None):
             """Hace el trabajo y devuelve la lista fresca, sin salir del selector."""
             if verbo == "close":
                 n = stop_rows(sel, forget=True)
@@ -7168,7 +7266,7 @@ def main():
                 # `r` del selector. Por aqui no pasaban ni la guarda de la 1.24.0 ni los
                 # lanzadores de la 1.25.0, asi que seguia reventando fuera de macOS y
                 # anunciando las pestanas pedidas en vez de las abiertas.
-                pestanas, _sf = pestanas_de(sel)
+                pestanas, _sf = pestanas_de(sel, modelo)
                 _escribe_config(CONFIG_NAME, pestanas)
                 cual, hechas = abre_varias(pestanas, CONFIG_NAME, donde)
                 aviso = (_("{n} reattached with {v}", n=hechas, v=cual) if hechas
