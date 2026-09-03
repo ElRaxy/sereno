@@ -1092,9 +1092,9 @@ that no other single tool has all of them, and none in this form.
 
 | What sereno does | Where else you can get it | What you give up there |
 |:--|:--|:--|
-| Lists sessions across projects it didn't start | the native `claude --resume` picker; dashboards like claude-command-center | Claude-only (native); a desktop app or a server (dashboards) |
-| Shows Claude, Codex and Gemini in one list | a few multi-engine managers | a server or a GUI, not a stdlib TUI |
-| Hands a live session to another CLI | one-shot tools like handoff and session-migrate | a separate command, not your session list |
+| Lists sessions across projects it didn't start | the native `claude --resume` picker; showagent; dashboards like claude-command-center | Claude-only (native); history only, nothing about what is alive right now (showagent); a desktop app or a server (dashboards) |
+| Shows Claude, Codex and Gemini in one list | showagent (a Go TUI); fleet runtimes like Orca (TypeScript) and herdr (Rust) | a history browser, not a live list (showagent); a desktop app or a daemon that runs the agents for you (Orca, herdr) |
+| Hands a live session to another CLI | one-shot tools like handoff and session-migrate; showagent and specstory convert the transcript | a separate command, not your session list; a converted copy of the turns, not the CLI's own state |
 | Context left per row | claude-command-center ("live context left") | a non-OSI license, free for non-commercial use only |
 | Searches inside what was actually said | `--find`; wallfacer, ai-session-search | single-purpose tools, one job each |
 | A TUI over SSH, one stdlib file, zero dependencies | — | this is the part nothing else combines |
