@@ -311,6 +311,13 @@ works it out in this order, and stops at the first that answers:
 Rule 5 is what keeps the bar honest: the percentage can never read above 100%, and there is a
 test that fails if it ever does.
 
+One caveat comes from picking a model at reopen or handover (the `[m]` toggle): resume a session
+into a bigger window than its transcript recorded, and until the new `cost-state` with the `[1m]`
+suffix lands its bar is drawn against the **old**, smaller ceiling — so the percentage reads
+**high**, 171k against 200k (86%) where it is really 171k of a million (17%). Rule 5 fixes it on
+its own once the session passes 200k, and the peak survives a compaction. It is a self-curing lag,
+not a wrong number to chase.
+
 **And that guard has memory: it looks at the peak too**, not just the context right now.
 Compacting destroys the evidence — the window drops to 16k and a one-million session starts
 being drawn against the standard one — so the peak is rebuilt from the transcript: the `usage`
@@ -739,6 +746,7 @@ Hand over 3 sessions to:
 [1] codex   [2] claude
     gemini, antigravity — not checked how to seed it
 [k] include the conversation: no
+[m] model: default
 [w] open them in: tmux
 
 [1-9] hand over    [any other key] cancel
@@ -746,6 +754,15 @@ Hand over 3 sessions to:
 
 The CLI the rows come from is not offered — but only when it is the origin of **every** marked
 row: with a mixed selection both appear, because some row can go to each. Any other key cancels.
+
+`m` cycles the model the new session starts with — `default` (pass no flag) plus whatever
+`SERENO_MODELOS` lists (`opus,sonnet,haiku` out of the box). It only shows when there is something
+to choose and the destination knows how to take a model: `claude --model <m>` and `codex -m <m>`,
+verified against each `--help`; `gemini` is left out for the same reason it is left out above. The
+choice does **not** stick between runs — a model picked one day and still set the next is a
+surprise; the environment variable is the only thing that persists. See the caveat under *About
+that context bar* — a session resumed with a bigger window reads low on the bar until its own
+`cost-state` lands.
 
 `w` cycles where the windows open, the same question `r` asks. The **last destination goes to the
 front and the last place stays put**: whoever hands over to Codex once hands over to Codex always,
@@ -1214,6 +1231,7 @@ you deleting the script.
 | `SERENO_CTX_MAX` | worked out | context ceiling in tokens, when the cascade gets it wrong |
 | `SERENO_CTX_AVISO` | `80,90` | the percentages `--watch` alerts on. `0` turns the context alert off |
 | `SERENO_SORT` | `activity` | which sort the picker opens on: `context`, `project`, `memory`, `spend`. A `-` in front inverts it |
+| `SERENO_MODELOS` | `opus,sonnet,haiku` | the models the `[m]` toggle cycles when reopening or handing over. `default` (no flag) is always first |
 | `SERENO_TMUX_SOCK` | `claude-code` | which tmux socket to read |
 | `SERENO_REGISTRY` | `~/.claude/warp-sessions` | where the optional launcher registry lives |
 | `SERENO_BIN` | `~/.local/bin` | where `install.sh` puts the file |
@@ -1315,7 +1333,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and fifty-six real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and sixty-one real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

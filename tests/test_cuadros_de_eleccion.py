@@ -20,6 +20,7 @@ otro es exactamente el fallo que esta forma invita a cometer.
 """
 import os
 import pathlib
+import shlex
 import sys
 
 os.environ["SERENO_DEMO"] = "1"
@@ -162,6 +163,70 @@ def main():
                   max(len(x) for x in puestas_a) <= ancho)
     comprueba("abrir: el sitio ofrecido no aparece",
               any("Warp" in x for x in textos(la(filas(1), ["Warp"], 60))))
+
+    # ── el toggle de modelo: dice su estado, en color, y solo cuando hay que elegir ──
+    hay_m = (None, "opus", "sonnet")
+    off_m = lr(filas(1), ["claude"], False, 60)                       # sin hay_modelo
+    def_m = lr(filas(1), ["claude"], False, 60, modelo=None, hay_modelo=hay_m)
+    on_m = lr(filas(1), ["claude"], False, 60, modelo="opus", hay_modelo=hay_m)
+    comprueba("relevo: el toggle de modelo sale sin haber entre que elegir",
+              not any(t.startswith("[m]") for t in textos(off_m)))
+    m_def = [(t, p) for t, p in def_m if t.startswith("[m]")]
+    m_on = [(t, p) for t, p in on_m if t.startswith("[m]")]
+    comprueba("relevo: no hay linea de toggle de modelo", m_def and m_on)
+    if m_def and m_on:
+        comprueba("relevo: 'por defecto' no se pinta como el valor por defecto",
+                  "default" in m_def[0][0])
+        comprueba("relevo: el modelo elegido no aparece en el toggle",
+                  "opus" in m_on[0][0])
+        comprueba("relevo: el toggle de modelo se pinta igual puesto que por defecto",
+                  m_def[0][1] != m_on[0][1])
+    # y el gemelo `lineas_abrir` lleva el mismo toggle, con la misma regla
+    off_a = la(filas(1), ["Warp"], 60)
+    on_a = la(filas(1), ["Warp"], 60, modelo="opus", hay_modelo=hay_m)
+    comprueba("abrir: el toggle de modelo sale sin haber entre que elegir",
+              not any(t.startswith("[m]") for t in textos(off_a)))
+    comprueba("abrir: no hay linea de toggle de modelo",
+              any(t.startswith("[m]") and "opus" in t for t in textos(on_a)))
+
+    # ── el modelo elegido llega a la orden compuesta, y SOLO donde toca ──────
+    cd = ns["_comando_de"]
+    ar = ns["ARNESES"]
+    r_claude = {"name": "sid", "title_full": "parada", "meta": {"cwd": "/", "id": "sid-1"}}
+    r_codex = {"name": "x", "title_full": "codex", "abrir": ["codex", "resume", "3333"],
+               "meta": {"cwd": "/"}}
+    r_gem = {"name": "g", "title_full": "gem", "abrir": ["gemini", "-i", "hola"],
+             "meta": {"cwd": "/"}}
+    r_live = {"name": "cc-proyecto-1", "title_full": "viva", "meta": {"cwd": "/"}}
+
+    cmd_c = cd(r_claude, modelo="opus")[0]
+    comprueba("la reapertura de Claude no lleva el modelo elegido",
+              "--model opus" in cmd_c, cmd_c)
+    comprueba("el binario deja de ser el primer token al colar el modelo",
+              cmd_c.strip() and not shlex.split(cmd_c)[0].startswith("--"), cmd_c)
+    comprueba("sin modelo, la reapertura de Claude mete un flag igualmente",
+              "--model" not in cd(r_claude)[0], cd(r_claude)[0])
+
+    cmd_x = cd(r_codex, modelo="gpt-5")[0]
+    comprueba("la reapertura de Codex no lleva -m con el modelo",
+              "-m gpt-5" in cmd_x, cmd_x)
+
+    cmd_l = cd(r_live, modelo="opus")[0]
+    comprueba("a una sesion viva (tmux attach) se le cuela un modelo",
+              "opus" not in cmd_l and "--model" not in cmd_l, cmd_l)
+
+    cmd_g = cd(r_gem, modelo="pro")[0]
+    comprueba("a gemini reabierto se le cuela un modelo que no sabemos pedirle",
+              "pro" not in cmd_g and "-m" not in shlex.split(cmd_g), cmd_g)
+
+    comprueba("el relevo a Claude no lleva --model",
+              "--model sonnet" in ar["claude"]("brief", "sonnet"))
+    comprueba("el relevo a Codex no lleva -m",
+              "-m sonnet" in ar["codex"]("brief", "sonnet"))
+    comprueba("al relevo a Gemini se le cuela un modelo",
+              "sonnet" not in ar["gemini"]("brief", "sonnet"))
+    comprueba("sin modelo el relevo a Claude mete un flag",
+              "--model" not in ar["claude"]("brief"))
 
     # ── el contrato de la tecla que CIERRA: la unica accion irreversible ─────
     # No es un cuadro de texto, pero es la misma clase de decision que estos cuadros

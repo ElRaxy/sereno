@@ -2,6 +2,19 @@
 
 ## 1.41.0
 
+**Elegir el modelo al reabrir y al relevar.** Un toggle `[m]` en los dos cuadros —el de `r`
+(reabrir) y el de `c` (relevar)— cicla el modelo con el que arranca la sesion nueva: `por defecto`
+(no pasar flag, el comportamiento de siempre) mas lo que liste `SERENO_MODELOS`
+(`opus,sonnet,haiku` de fabrica, para no clavar una lista que caduca). El flag va **despues de la
+ruta** del binario, como el bypass: `claude --model <m>` y `codex -m <m>`, verificados contra cada
+`--help`. Solo se ofrece cuando hay entre que elegir y el destino sabe recibir modelo: una sesion
+viva (`cc-`) se reengancha a un proceso ya echado y no lleva modelo, y a `gemini` no se le pasa
+—su flag no esta comprobado, la misma regla que lo deja fuera del bypass—. No persiste entre
+arranques salvo la variable de entorno. Aviso conocido y aceptado: reabrir con una ventana mayor
+deja la barra de contexto midiendo contra el tope viejo hasta que aterriza el `cost-state` nuevo;
+la guarda 5 lo corrige sola al pasar de 200k. Cubierto por `tests/test_cuadros_de_eleccion.py`
+(los composers, no el render) y cinco mutantes.
+
 **El relevo entrega el destino en Bypass Permissions.** Al relevar con `c`, la sesion nueva
 —Claude o Codex— arranca ya sin frenar en cada permiso: `claude` con
 `--permission-mode bypassPermissions` y `codex` con `--dangerously-bypass-approvals-and-sandbox`.
