@@ -18,6 +18,8 @@ en silencio. Ahora el id no puede faltar ni ser un token de opcion, los dos valo
 guardan, y las tres ramas devuelven un error limpio traducido con codigo 2. Cubierto por
 `tests/test_cmd_add.py` (conducido por `main()`, no por la funcion a pelo) y seis mutantes.
 
+**La tecla que cierra sesiones sale a una funcion con test.** El contrato de `acepta_cierre` —`s`/`y` y sus mayusculas confirman; cualquier otra cosa, incluido el `-1` del timeout, cancela— vivia inline en el cuadro de cierre, sin test ni mutante: una tecla de mas o de menos cambiaba en silencio que se cierra o que no. Es la unica accion irreversible del programa. Ahora es funcion pura, la prueba `tests/test_cuadros_de_eleccion.py` y la vigila un mutante. Sin cambio de render.
+
 ## 1.40.0
 
 **Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia
