@@ -2642,8 +2642,12 @@ def cli_de(r):
 
 
 def arneses_disponibles():
-    """Los de `ARNESES` que existen en el PATH. Un CLI que no esta no se ofrece."""
-    forzado = _env("SERENO_ARNES")
+    """Los de `ARNESES` que existen en el PATH. Un CLI que no esta no se ofrece.
+
+    `SERENO_ARNES=codex` (o `CLAUDE_ARNES`) fuerza uno solo. El prefijo lo antepone
+    `_env`, asi que el nombre va SIN el: `_env("SERENO_ARNES")` buscaria
+    `SERENO_SERENO_ARNES`, que no escribe nadie."""
+    forzado = _env("ARNES")
     nombres = [forzado] if forzado in ARNESES else list(ARNESES)
     return [n for n in nombres if shutil.which(n)]
 
