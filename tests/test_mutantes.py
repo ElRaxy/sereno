@@ -126,12 +126,25 @@ MUTANTES = [
      '        cmd = " ".join(["claude", "--resume", e["id"]]',
      "test_binario_no_alias.py"),
     ("el relevo a Codex arranca por el nombre y no por la ruta",
-     '    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " " + shlex.quote(prompt),',
+     '    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),',
      '    "codex": lambda prompt: "codex " + shlex.quote(prompt),',
      "test_binario_no_alias.py"),
     ("el relevo a Claude arranca por el nombre y no por la ruta",
-     '    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " " + shlex.quote(prompt),',
+     '    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " --permission-mode bypassPermissions " + shlex.quote(prompt),',
      '    "claude": lambda prompt: "claude " + shlex.quote(prompt),',
+     "test_binario_no_alias.py"),
+
+    # ── el relevo entrega el destino en Bypass Permissions ──────────────────
+    # El flag va POR DEFECTO y explicito (no por alias). Si alguien lo quita, el relevo
+    # arranca frenando en cada permiso y deja de ser un traspaso util: lo mata la
+    # asercion positiva de test_binario_no_alias.py.
+    ("el relevo a Codex deja de entregar en bypass",
+     ' + " --dangerously-bypass-approvals-and-sandbox " + ',
+     ' + " " + ',
+     "test_binario_no_alias.py"),
+    ("el relevo a Claude deja de entregar en bypass",
+     ' + " --permission-mode bypassPermissions " + ',
+     ' + " " + ',
      "test_binario_no_alias.py"),
 
     # ── el relevo es un traspaso: lleva con que seguir, y lee a Codex ────────

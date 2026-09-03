@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.41.0
+
+**El relevo entrega el destino en Bypass Permissions.** Al relevar con `c`, la sesion nueva
+—Claude o Codex— arranca ya sin frenar en cada permiso: `claude` con
+`--permission-mode bypassPermissions` y `codex` con `--dangerously-bypass-approvals-and-sandbox`.
+Es lo que se quiere de un traspaso: quien releva sigue el trabajo, no re-aprueba cada paso. El
+flag va **explicito** en los arneses y **despues de la ruta** del binario, no por un alias del
+`.zshrc` —justo el fallo del 2026-09-01, cuando un alias colo `--allow-dangerously-skip-permissions`
+sin pedirlo—; `tests/test_binario_no_alias.py` ahora exige tambien que el flag este. Gemini se
+queda igual: no lleva bypass.
+
 ## 1.40.0
 
 **Relevar DESDE Codex ya no da un briefing vacio.** El relevo de una sesion de Codex salia
