@@ -122,6 +122,17 @@ def main():
                     fallos.append("%s: la orden sigue empezando por el nombre pelado: "
                                   "%r" % (donde, cmd[:60]))
 
+            # El relevo entrega el destino en Bypass Permissions por defecto, y el flag
+            # va EXPLICITO en ARNESES (no por un alias). Va DESPUES de la ruta: el
+            # bloque de arriba ya comprueba que el primer token sigue siendo la ruta.
+            bypass = {"claude": "--permission-mode bypassPermissions",
+                      "codex": "--dangerously-bypass-approvals-and-sandbox"}
+            for cli, flag in bypass.items():
+                orden = ns["ARNESES"][cli]("hola")
+                if flag not in orden:
+                    fallos.append("ARNESES[%r] ya no releva en bypass: falta %r en %r"
+                                  % (cli, flag, orden))
+
             # La sesion viva no cambia: se abre por tmux, y `TMUX_BIN` ya era una ruta.
             viva = ns["_comando_de"]({"name": "cc-proyecto-1111aaaa",
                                       "meta": {"cwd": "/"}})[0]

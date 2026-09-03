@@ -2606,13 +2606,21 @@ def pestanas_de(rows):
 # contra `codex --help` el 2026-08-28. Anadir otro es una linea AQUI, pero antes hay que
 # comprobar en su `--help` como se le pasa un prompt inicial y que abra sesion
 # INTERACTIVA: `gemini` no esta instalado en esta maquina, asi que no se pone a ojo.
+# El relevo arranca el destino en Bypass Permissions POR DEFECTO. Es una accion
+# explicita de Alex —marca sesiones y pulsa `c`—, no un agente autonomo suelto: el
+# receptor debe seguir el trabajo sin frenar en cada permiso. El flag va EXPLICITO
+# aqui, no por un alias del `.zshrc` (justo lo que reviento el 2026-09-01), y despues
+# de la ruta del binario para que siga siendo el primer token (test_binario_no_alias).
+# Flags verificados contra `--help` el 2026-09-03:
+#   claude --permission-mode bypassPermissions ; codex --dangerously-bypass-approvals-and-sandbox
+# gemini NO lleva bypass: se deja como estaba.
 ARNESES = {
-    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " " + shlex.quote(prompt),
+    "codex": lambda prompt: shlex.quote(bin_cli("codex")) + " --dangerously-bypass-approvals-and-sandbox " + shlex.quote(prompt),
     # `claude [options] [command] [prompt]` -- "Your prompt", y sin `-p` la sesion es
     # interactiva. Verificado contra `claude --help` el 2026-08-28. Esta aqui para que
     # el relevo vaya en los dos sentidos: una sesion de Codex tambien se entrega.
     # Por `bin_cli` y no por el nombre pelado, por lo mismo que en `_comando_de`.
-    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " " + shlex.quote(prompt),
+    "claude": lambda prompt: shlex.quote(bin_cli("claude")) + " --permission-mode bypassPermissions " + shlex.quote(prompt),
     # `gemini [query]` arranca interactivo con ese prompt inicial; `-i/--prompt-interactive`
     # es su forma explicita ("execute the provided prompt and continue in interactive mode")
     # y evita que un briefing que empiece raro se lea como subcomando. Verificado contra
@@ -6355,7 +6363,7 @@ def _T():
 _T()
 
 
-VERSION = "1.40.0"
+VERSION = "1.41.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

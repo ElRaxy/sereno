@@ -105,9 +105,15 @@ def main():
         #    un espacio, codex recibiria media frase como prompt y el resto como flags.
         if pest:
             trozos = shlex.split(pest[0][1])
-            if len(trozos) != 2:
-                fallos.append(f"la orden se parte en {len(trozos)} trozos, se esperaban 2")
-            elif trozos[1] != briefing(fila(vivo)):
+            # binario + flag de bypass + briefing: el relevo entrega a codex en
+            # `--dangerously-bypass-approvals-and-sandbox` por defecto. El briefing sigue
+            # siendo UN solo trozo citado —el ultimo—: si se partiera por un espacio,
+            # codex recibiria media frase como prompt y el resto como flags.
+            if len(trozos) != 3:
+                fallos.append(f"la orden se parte en {len(trozos)} trozos, se esperaban 3")
+            elif trozos[1] != "--dangerously-bypass-approvals-and-sandbox":
+                fallos.append(f"codex no arranca en bypass: {trozos[1]!r}")
+            elif trozos[2] != briefing(fila(vivo)):
                 fallos.append("el prompt que recibe codex no es el briefing")
 
         # 5. El YAML sobrevive a una orden de varias lineas. Es el fallo que casi se
