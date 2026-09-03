@@ -728,8 +728,12 @@ liste `SERENO_MODELOS` (`opus,sonnet,haiku` de fábrica). Solo aparece cuando ha
 y el destino sabe recibir modelo: `claude --model <m>` y `codex -m <m>`, verificados contra cada
 `--help`; `gemini` se queda fuera por lo mismo que arriba. La elección **no** persiste entre
 arranques —un modelo elegido un día y todavía puesto al siguiente es una sorpresa—; solo la
-variable de entorno se queda. Ojo al aviso de *Sobre esa barra de contexto*: una sesión reanudada
-con una ventana mayor sale baja en la barra hasta que aterriza su propio `cost-state`.
+variable de entorno se queda. **Reabrir una sesión parada de Claude con otro modelo la bifurca**
+(`--fork-session`): el transcript viejo se queda como estaba y la sesión nueva arranca con id
+propio. Sin eso, un mismo transcript llevaría dos modelos dentro, y de ahí es de donde sereno lee
+el modelo y el tope de contexto. Reabrir `por defecto` no bifurca nada. Ojo al aviso de *Sobre esa
+barra de contexto*: una sesión reanudada con una ventana mayor sale baja en la barra hasta que
+aterriza su propio `cost-state`.
 
 `w` rota dónde se abren las ventanas, la misma pregunta que hace `r`. Y **el último destino pasa
 al frente y el último sitio se queda puesto**: quien releva a Codex una vez suele relevar a Codex
@@ -980,7 +984,8 @@ Los dos son opcionales. Sin ellos funciona todo menos la columna de memoria — 
 ocupa nada, en vez de quedarse ahí vacía — y `ENTER` hace `exec` sobre la terminal actual.
 
 Abrir **varias a la vez** —`r` y `c`— va por uno de estos. `r` pregunta por cuál, cuando hay más
-de uno a mano; con uno solo no hay nada que elegir y no aparece ningún cuadro.
+de uno a mano; con uno solo no hay nada que elegir y no aparece ningún cuadro — salvo que
+haya modelo que elegir, porque el cuadro es el único sitio donde vive el `[m]`.
 `SERENO_LANZADOR` fija uno. **Warp es el único que las junta**: una sola ventana con una
 pestaña por sesión. Los demás abren una ventana por sesión:
 
@@ -1288,7 +1293,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento sesenta y dos guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento sesenta y cuatro guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

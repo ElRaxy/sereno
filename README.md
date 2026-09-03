@@ -760,9 +760,12 @@ row: with a mixed selection both appear, because some row can go to each. Any ot
 to choose and the destination knows how to take a model: `claude --model <m>` and `codex -m <m>`,
 verified against each `--help`; `gemini` is left out for the same reason it is left out above. The
 choice does **not** stick between runs — a model picked one day and still set the next is a
-surprise; the environment variable is the only thing that persists. See the caveat under *About
-that context bar* — a session resumed with a bigger window reads low on the bar until its own
-`cost-state` lands.
+surprise; the environment variable is the only thing that persists. **Reopening a stopped Claude
+session with another model forks it** (`--fork-session`): the old transcript stays as it was and
+the new session gets its own id. Without that, one transcript would carry two models, and that
+transcript is where sereno reads the model and the context ceiling from. Reopen with `default`
+and nothing forks. See the caveat under *About that context bar* — a session resumed with a
+bigger window reads low on the bar until its own `cost-state` lands.
 
 `w` cycles where the windows open, the same question `r` asks. The **last destination goes to the
 front and the last place stays put**: whoever hands over to Codex once hands over to Codex always,
@@ -1013,7 +1016,8 @@ at all, rather than sitting there empty — and `ENTER` execs into the session i
 terminal.
 
 **Several at once** — `r` and `c` — goes through one of these. `r` asks which, when more than
-one is around; with a single one there is nothing to choose and no box appears.
+one is around; with a single one there is nothing to choose and no box appears — unless
+there is a model to pick, because the box is the only place the `[m]` toggle lives.
 `SERENO_LANZADOR` pins one. **Warp is the only one that keeps them together**: a single
 window with one tab per session. The rest open a window per session:
 
@@ -1333,7 +1337,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and sixty-two real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and sixty-four real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

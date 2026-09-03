@@ -671,6 +671,16 @@ MUTANTES = [
      "            max(0, alto - 6), alto - 3, alto - 2)",
      "test_cuadros_de_eleccion.py"),
 
+    # ── reabrir con otro modelo bifurca la sesion, y el [m] con un solo lanzador ──
+    ("reabrir con otro modelo deja de bifurcar y el transcript mezcla dos modelos",
+     '                 + (["--fork-session"] if modelo else [])\n',
+     '                 + []\n',
+     "test_cuadros_de_eleccion.py"),
+    ("con un solo lanzador el cuadro no se abre aunque haya modelo que elegir",
+     "                if len(donde) > 1 or (donde and _modelos_para(sel)):",
+     "                if len(donde) > 1:",
+     "test_donde_abrir.py"),
+
     # ── el traceback de un crash dentro de curses ────────────────────────────
     ("un crash del TUI se traga sin dejar la traza en el log",
      "        _vuelca_crash()",
