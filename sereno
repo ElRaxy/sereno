@@ -2769,6 +2769,17 @@ def lineas_abrir(sel, lanzadores, ancho, tope=5):
     return out
 
 
+def acepta_cierre(tecla):
+    """La tecla que confirma cerrar sesiones — la unica accion irreversible del programa.
+
+    Sale del cuadro a una funcion pura porque un contrato inline no tiene quien lo mire:
+    cualquier tecla de mas o de menos en el set cambia que se cierra o que no, y sin test
+    ni mutante eso pasa en silencio. `s`/`y` y sus mayusculas dicen si; cualquier otra
+    cosa —incluido el -1 de "sin tecla" del timeout— cancela.
+    """
+    return tecla in (ord("s"), ord("S"), ord("y"), ord("Y"))
+
+
 def ausentes_de_relevo(destinos):
     """[(cli, por que no se ofrece)] de los CLI conocidos que no estan en la lista.
 
@@ -5734,7 +5745,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                             ancho_c - 6, CF(7) | curses.A_BOLD)
                 win.refresh()
                 win.timeout(-1)
-                if tecla_limpia(win) in (ord("s"), ord("S"), ord("y"), ord("Y")):
+                if acepta_cierre(tecla_limpia(win)):
                     if not ejecutar:
                         res["out"] = ("close", sel)
                         return

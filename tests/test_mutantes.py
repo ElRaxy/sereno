@@ -658,6 +658,12 @@ MUTANTES = [
      '        elif argv[i] == "--title":\n            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):',
      '        elif argv[i] == "--title":\n            if i + 1 >= len(argv):',
      "test_cmd_add.py"),
+
+    # ── la tecla que confirma cerrar sesiones, la unica accion irreversible ──
+    ("una tecla de menos en el contrato de cierre y `y` deja de cerrar",
+     '    return tecla in (ord("s"), ord("S"), ord("y"), ord("Y"))',
+     '    return tecla in (ord("s"), ord("S"))',
+     "test_cuadros_de_eleccion.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

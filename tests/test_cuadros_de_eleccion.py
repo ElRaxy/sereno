@@ -163,6 +163,17 @@ def main():
     comprueba("abrir: el sitio ofrecido no aparece",
               any("Warp" in x for x in textos(la(filas(1), ["Warp"], 60))))
 
+    # ── el contrato de la tecla que CIERRA: la unica accion irreversible ─────
+    # No es un cuadro de texto, pero es la misma clase de decision que estos cuadros
+    # y hasta ahora vivia inline, sin test ni mutante: una tecla de mas o de menos en
+    # el set cambia en silencio que se cierra o que no.
+    ac = ns["acepta_cierre"]
+    for t in ("s", "S", "y", "Y"):
+        comprueba("'%s' deberia confirmar el cierre" % t, ac(ord(t)))
+    for t in ("n", "N", "q", "x", " "):
+        comprueba("'%s' NO deberia cerrar sesiones" % t, not ac(ord(t)))
+    comprueba("el -1 de 'sin tecla' (timeout) no debe cerrar", not ac(-1))
+
     for f in fallos:
         print("FALLO:", f)
     print("ok" if not fallos else "%d fallos" % len(fallos))
