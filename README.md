@@ -993,10 +993,30 @@ you have ever run.
 | `message.usage` on the last reply | context spent, and the model |
 | `cwd`, `gitBranch` | project and branch |
 | `aiTitle`, `lastPrompt` | the title and the panel |
+| `~/.claude/sessions/<pid>.json` | `busy` / `waiting` / `idle`, written down rather than inferred |
 
 That costs **4 ms** for the live sessions and **16 ms** for the whole history, measured against
 1,248 transcripts and 3.8 GB. The results are cached by mtime, so a file that hasn't moved isn't
 read twice.
+
+That last file is the only one that is not a transcript. Claude Code writes one per live process and
+rewrites it whenever the session changes state, and it closes the one hole the mtime cannot: a
+session three minutes into a `Bash` writes nothing, so by modification time it looks stopped exactly
+while it works — and one that is asking you for permission has a `tool_use` with no `tool_result`,
+which used to read as "waiting on a command of its own" when it was waiting on *you*. It refines the
+verdict, it does not replace it: Codex and Gemini have no such file, and a `status` this program does
+not recognise counts as unknown, never as idle. A file whose PID no longer runs does not count either.
+
+**The plan's quota is the one number that is not on disk**, and that is why it arrives from a
+separate program. How much of the 5-hour and weekly windows you have burned is known only to
+Anthropic, and asking costs a connection — which `sereno` does not make and, thanks to
+`tests/test_sin_red.py`, cannot. So `sereno-cuota` asks and writes `~/.sereno/cuota.json`, and
+`sereno` reads that file like any other, without ever learning where it came from. Run it or don't:
+with no file there is no cell in the header, the three `quota_*` fields of `--json` are `null`, and
+nothing else changes. It borrows the OAuth token Claude Code already keeps in your keychain and does
+nothing else with it — it never refreshes it, never writes it back, never prints it — and when the
+token has expired you get the last good reading **with its age** rather than a zero, which would
+read as "you have used nothing".
 
 Codex, Gemini and Antigravity come from their own history directories and reopen with their own
 `resume` command. They are files on disk, not live processes, so `sereno` refuses to "close" them
@@ -1294,7 +1314,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are seventy-five
+collects the whole folder, prints a line per file and ends with the count. There are seventy-seven
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1337,7 +1357,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and sixty-four real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and seventy-two real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

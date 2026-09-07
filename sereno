@@ -32,7 +32,9 @@ optional and only add live process control; without them everything is read from
 Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
 SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_CTX_AVISO=80,90 (the context thresholds
 --watch alerts on; 0 turns it off), SERENO_SORT=activity|context|project|memory
-(prefix with `-` to invert: SERENO_SORT=-activity).
+(prefix with `-` to invert: SERENO_SORT=-activity), SERENO_CLAUDE_SESSIONS_DIR
+(where Claude Code writes its <pid>.json), SERENO_DIR (where `sereno-cuota` leaves
+the plan quota; ~/.sereno by default).
 
 Los comentarios de este fichero estan en castellano a proposito: explican POR QUE
 esta cada cosa, y traducirlos perderia el matiz. La interfaz si es bilingue.
@@ -188,6 +190,145 @@ def alive(pid):
     except Exception:
         return True  # si no se puede comprobar, no la tratamos como muerta
     return "claude" in out
+
+
+# ─────────── el registro que escribe el propio Claude Code: ~/.claude/sessions ───────────
+# La tercera fuente de estado, y la unica que lo dice SIN abrir el transcript: el CLI deja
+# un `<pid>.json` por proceso vivo y lo reescribe al cambiar de estado. Tapa el agujero que
+# el `mtime` no puede tapar —una sesion tres minutos dentro de un `Bash` no escribe nada, o
+# sea que por fecha de modificacion figura parada justo mientras trabaja— y adelanta el
+# flanco de `--watch`: el `waiting` aparece en el fichero en el momento, no noventa
+# segundos despues.
+#
+# No sustituye a nada. Solo lo escribe Claude Code (visto en la 2.1.261; Codex y Gemini no
+# tienen nada parecido) y es formato de otro programa, con su propio calendario de
+# releases: se decodifica con manga ancha y lo que no se entiende vale `None`, nunca `idle`.
+SESIONES_CC = pathlib.Path(_env("CLAUDE_SESSIONS_DIR") or HOME / ".claude/sessions")
+# `status` tal cual lo escribe el CLI -> el estado que publica sereno. `hibernating` cae en
+# `idle` porque la sesion sigue viva y no esta haciendo nada. Lo que NO este en esta tabla
+# vale `None`: dar por parada una sesion porque su estado se llama de otra forma es
+# exactamente el falso verde que este programa existe para no dar.
+ESTADO_CC = {"busy": "busy", "waiting": "waiting", "idle": "idle",
+             "hibernating": "idle"}
+# Los valores de `waitingFor` que significan "te esta pidiendo permiso". Visto
+# `"permission prompt"` en esta maquina; `"permission"` va por si lo acortan. Lo que no
+# este aqui NO se pinta: es texto de otro programa y no se enseña crudo en la interfaz.
+ESPERA_PERMISO = ("permission prompt", "permission")
+# Cada cuanto se relee la carpeta. Son cinco ficheros de 600 bytes, pero filtrar por vivo
+# cuesta un `ps` y el selector repinta varias veces por segundo.
+TTL_CC = 2.0
+_CACHE_CC = {}
+
+
+def hechos_cc(j):
+    """Los hechos de un `<pid>.json` del CLI, o None si no se entiende. Funcion pura.
+
+    Tolerante a proposito: el formato no esta documentado. Sin `pid` o sin `sessionId` no
+    hay nada que emparejar y se descarta entero; un `status` que no conocemos se queda en
+    `None`, que es "no consta" y no "parada".
+    """
+    if not isinstance(j, dict):
+        return None
+    pid, sid = j.get("pid"), j.get("sessionId")
+    if not isinstance(pid, int) or pid <= 1 or not isinstance(sid, str) or not sid:
+        return None
+    espera = j.get("waitingFor")
+    return {"pid": pid, "sesion": sid,
+            "estado": ESTADO_CC.get(j.get("status")),
+            "espera": espera if isinstance(espera, str) else None}
+
+
+def lee_registro_cc(carpeta=None):
+    """{sessionId: hechos} de la carpeta del CLI, SIN filtrar por vivo.
+
+    Un fichero ilegible se salta en silencio: no es nuestro, y adivinar que decia seria
+    inventarse el estado de una sesion.
+    """
+    d = pathlib.Path(carpeta) if carpeta else SESIONES_CC
+    fuera = {}
+    try:
+        ficheros = sorted(d.glob("*.json"))
+    except OSError:
+        return fuera
+    for p in ficheros:
+        try:
+            h = hechos_cc(json.loads(p.read_text()))
+        except (OSError, ValueError):
+            continue
+        if h:
+            fuera[h["sesion"]] = h
+    return fuera
+
+
+def pids_vivos(pids):
+    """Los que siguen corriendo, de una tacada. Mismo criterio que `alive()` —el PID existe
+    y su linea de comando menciona claude— pero con un solo `ps` para todos: uno por sesion
+    serian cinco procesos cada vez que se repinta la lista.
+
+    NO se compara el `procStart` del registro contra el `lstart` de `ps`, que seria el corte
+    fino contra un PID reciclado. Medido en esta maquina: el fichero lo escribe en ingles y
+    en UTC (`Sat Sep  5 11:57:21 2026`) y `ps` lo imprime en el idioma y la zona del sistema
+    (`s\u00e1b.  5 sept. 13:57:21 2026`). Compararlos de cadena a cadena daria SIEMPRE distinto, y
+    parsear las dos formas para restar dos husos es mas superficie de la que vale el caso.
+    """
+    limpios = sorted({int(p) for p in pids if str(p).isdigit() and int(p) > 1})
+    if not limpios:
+        return set()
+    try:
+        out = subprocess.run(["ps", "-p", ",".join(str(p) for p in limpios),
+                              "-o", "pid=,command="],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return set(limpios)      # si no se puede comprobar, no las damos por muertas
+    vivos = set()
+    for linea in out.splitlines():
+        trozos = linea.split(None, 1)
+        if len(trozos) == 2 and trozos[0].isdigit() and "claude" in trozos[1]:
+            vivos.add(int(trozos[0]))
+    return vivos
+
+
+def registro_cc(ahora=None):
+    """Lo mismo que `lee_registro_cc`, ya filtrado a procesos vivos y cacheado.
+
+    El CLI no siempre borra el fichero al morir, asi que sin el filtro una sesion muerta
+    seguiria diciendo `busy` para siempre — que es el falso verde de siempre, con otra cara.
+    """
+    t = time.time() if ahora is None else ahora
+    if _CACHE_CC and t - _CACHE_CC.get("t", 0) < TTL_CC:
+        return _CACHE_CC["v"]
+    crudo = lee_registro_cc()
+    vivos = pids_vivos([h["pid"] for h in crudo.values()])
+    v = {s: h for s, h in crudo.items() if h["pid"] in vivos}
+    _CACHE_CC.clear()
+    _CACHE_CC.update(t=t, v=v)
+    return v
+
+
+def afina_con_registro(estado, reg, parada=False):
+    """El estado que sale del transcript, corregido por lo que dice el registro del CLI.
+
+    Corregido, no sustituido: con `reg` a `None` —Codex, Gemini, un Claude viejo o la
+    carpeta vacia— sale exactamente lo que salia antes. Cada rama esta por un caso que el
+    transcript no puede ver:
+
+      · `busy` gana a `waiting`/`stopped`: dentro de un comando largo el transcript lleva
+        minutos sin moverse y por `mtime` la sesion figura parada mientras trabaja.
+      · `waiting` gana a TODO, `in_command` incluido: cuando el CLI te pide permiso hay un
+        `tool_use` sin `tool_result` en el transcript, o sea que sereno decia "esperando a
+        un comando suyo" cuando en realidad te esperaba a ti. Es el caso simetrico del
+        anterior y el que mas se nota.
+      · `idle` respeta `in_command`: el registro dice que no hay turno abierto y el
+        transcript que hay una herramienta a medias. Se conserva el mas concreto de los dos
+        en vez de elegir a ciegas.
+    """
+    if reg is None:
+        return estado
+    if reg == "busy":
+        return estado if estado == "in_command" else "writing"
+    if reg == "idle" and estado == "in_command":
+        return estado
+    return "stopped" if parada else "waiting"
 
 
 def transcript_of(e):
@@ -697,20 +838,27 @@ def pulso(e, secs=90, fino=True):
     npm exec), estuvieran haciendo algo o no.
     """
     t = e.get("_transcript") if e else None
+    # Lo que el propio CLI dice de esta sesion, si lo dice. Se empareja por `sessionId`,
+    # que es el nombre del transcript que escribe AHORA: una sesion reanudada cambia de id
+    # y el del registro de `warp-sessions` se queda en el de arranque.
+    reg = registro_cc().get(t.stem) if t else None
+    if reg is None and e:
+        reg = registro_cc().get(e.get("id") or "")
+    base = {"registro": (reg or {}).get("estado"), "espera": (reg or {}).get("espera")}
     if not t:
-        return {"escribe": None, "herramienta": None}
+        return dict(base, escribe=None, herramienta=None)
     try:
         # El `mtime` hace ademas de reloj de respaldo para las lineas sin `timestamp`:
         # sin el, un toque sin fecha nace con epoch 0 y se poda al instante, en silencio.
         mtime = t.stat().st_mtime
     except OSError:
-        return {"escribe": None, "herramienta": None}
+        return dict(base, escribe=None, herramienta=None)
     escribe = (time.time() - mtime) < secs
     if not fino:
         # El aviso de abrir terminal solo cuenta sesiones: leer la cola de todos los
         # transcripts para afinar le costaria 100 ms en vez de 30, y no cambia lo que
         # imprime. Lo fino lo pide el selector, que si lo pinta.
-        return {"escribe": escribe, "herramienta": None}
+        return dict(base, escribe=escribe, herramienta=None)
 
     pendientes, ultimo_tool, extra, toca = set(), False, {}, []
     cerrado = None
@@ -814,8 +962,8 @@ def pulso(e, secs=90, fino=True):
     # acaba de parsear: cero lecturas mas y, medido sobre 16 filas reales, 5 ms de CPU
     # frente a los 49 que ya cuesta esta funcion.
     extra["atasco"] = alertas(sintomas(recorrido(crudos)))
-    return {"escribe": escribe, "herramienta": bool(pendientes) and ultimo_tool,
-            "cerrado": cerrado, **extra}
+    return dict(base, escribe=escribe, herramienta=bool(pendientes) and ultimo_tool,
+                cerrado=cerrado, **extra)
 
 
 def _dur(secs):
@@ -974,8 +1122,16 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
         # que existe para ver. Lo caza `tests/test_watch_flanco.py`.
         # Lo recien cerrado se excluye igual que lo que tmux ya ensena: si no, cerrar
         # una sesion la devuelve a la lista desde el disco y encima marcada como viva.
+        # Las que el CLI dice que estan trabajando o esperandote se libran del filtro por
+        # `mtime`: son justo las que el filtro tira, porque una sesion dentro de un `Bash`
+        # largo lleva minutos sin tocar su transcript. Es la parte de DESCUBRIR del
+        # registro, no solo la de puntuar: sin esto la fila no llega a existir y da igual
+        # lo bien que supieramos su estado.
+        trabajando = {sid for sid, h in registro_cc().items()
+                      if h["estado"] in ("busy", "waiting")}
         rows += sesiones_de_disco(vistos=ids | cerradas_recientes(),
-                                  solo_activas=solo_activas, fino=fino)
+                                  solo_activas=solo_activas, fino=fino,
+                                  protegidos=trabajando)
     # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
     # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
     # cursor, que es lo que abre ENTER.
@@ -1144,7 +1300,8 @@ def _ids(rows):
     return {(r.get("meta") or {}).get("id") for r in rows}
 
 
-def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True):
+def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True,
+                      protegidos=()):
     if DEMO:
         return []
     """Filas a partir de los transcript de `~/.claude/projects`.
@@ -1152,6 +1309,9 @@ def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True):
     `solo_activas` filtra por mtime ANTES de abrir nada: preguntar "¿hay alguna
     sesion viva que tmux no vea?" cuesta entonces un `stat` por fichero y no una
     lectura. Sin ese filtro, 1.248 transcript son 3,8 GB de cola por barrer.
+
+    `protegidos` son los `sessionId` que el registro del propio CLI da por vivos y
+    ocupados: se salvan del filtro por mtime aunque lleven diez minutos sin escribir.
     """
     if not PROJECTS.is_dir():
         return []
@@ -1167,7 +1327,7 @@ def sesiones_de_disco(vistos=(), solo_activas=False, limite=40, fino=True):
             mt = p.stat().st_mtime
         except OSError:
             continue
-        if solo_activas and ahora - mt > VIVA:
+        if solo_activas and ahora - mt > VIVA and p.stem not in protegidos:
             continue
         cands.append((mt, p))
     cands.sort(reverse=True)
@@ -1450,17 +1610,22 @@ def sesiones_demo():
 # JSON lleva este enum, que es lo unico que se promete estable.
 def estado_estable(r):
     pu = r.get("pulso") or {}
+    parada = (r.get("idle") or 0) >= 6 * INACTIVA
     if pu.get("escribe") is None:
-        return "unknown"
-    if pu.get("herramienta"):
-        return "in_command"
+        base = "unknown"
+    elif pu.get("herramienta"):
+        base = "in_command"
     # `escribe` es que el fichero se toco hace poco, y eso sigue siendo cierto durante
     # los 90 segundos SIGUIENTES a que la sesion termine: justo cuando empieza a
     # esperarte. `cerrado` es el corte fino y manda sobre el mtime; cuando no consta
     # (None) se decide como siempre.
-    if pu.get("escribe") and not pu.get("cerrado"):
-        return "writing"
-    return "waiting" if (r.get("idle") or 0) < 6 * INACTIVA else "stopped"
+    elif pu.get("escribe") and not pu.get("cerrado"):
+        base = "writing"
+    else:
+        base = "stopped" if parada else "waiting"
+    # Y encima, lo que el propio CLI escribio de si mismo. El enum no crece: sigue siendo
+    # el mismo de siempre, y por eso `ESQUEMA_JSON` no se mueve.
+    return afina_con_registro(base, pu.get("registro"), parada)
 
 
 # La version del CONTRATO, que no es la del programa. `sereno` sube de version por
@@ -1558,7 +1723,15 @@ def filas_json(rows):
 
 
 def print_json(rows):
+    # La cuota va en el SOBRE y no en cada fila, y no es un detalle de maquetacion: es de
+    # la CUENTA, no de la sesion. Repetida en cuarenta filas invita a sumarla, que es
+    # justo lo que no significa. `null` cuando no hay fichero de `sereno-cuota`, que es
+    # "no se midio" y no "no has gastado nada".
+    c = lee_cuota()
     print(json.dumps({"sereno": VERSION, "schema": ESQUEMA_JSON,
+                      "quota_session_pct": c.get("session_pct"),
+                      "quota_weekly_pct": c.get("weekly_pct"),
+                      "quota_fetched_at": c.get("fetched_at"),
                       "sessions": filas_json(rows)},
                      indent=2, ensure_ascii=False))
 
@@ -1743,6 +1916,88 @@ def choques_nuevos(antes, ahora):
     return salen
 
 
+# ───────────────────── la cuota del plan, que la escribe otro programa ─────────────────
+# Lo unico que `sereno` no puede saber leyendo ficheros que ya estan en el disco: cuanto
+# llevas gastado de la ventana de 5 horas y de la semanal del plan. Eso solo lo sabe
+# Anthropic, y preguntarselo es red — que este programa no hace, no por descuido sino
+# porque es la promesa que sostiene todo lo demas. Lo pregunta `sereno-cuota`, que vive al
+# lado, es opcional y se ejecuta cuando tu quieras; aqui solo se LEE su fichero. Sin el no
+# hay celda en la cabecera, los campos de `--json` valen `null` y no se avisa de nada.
+#
+# `os.environ` a pelo y no `_env()`: `_env` cae en `CLAUDE_DIR` como respaldo, y esa
+# variable es demasiado generica para apropiarsela por un fichero nuestro.
+CUOTA = pathlib.Path(os.environ.get("SERENO_DIR")
+                     or HOME / ".sereno") / "cuota.json"
+# A partir de aqui la celda dice ademas cuando se leyo. No es un adorno: un "34 %" de hace
+# tres horas se lee igual de fresco que uno de hace un minuto, y es la forma mas facil de
+# mentir con un dato verdadero.
+VIEJA_CUOTA = 15 * 60
+
+
+def lee_cuota():
+    """Los hechos que dejo `sereno-cuota`, o {} si no hay fichero. No lanza nunca.
+
+    No se recomponen ni se juzgan: si el fichero dice que la ultima lectura fallo, sale
+    tal cual, con su `error` y su `fetched_at` viejo, y decide quien lo pinta.
+
+    Sin cache: son doscientos bytes y un `read_text`. El resto de fuentes se cachean
+    porque cuestan un `ps` o abrir cuarenta transcripts; esta no cuesta nada, y una cache
+    aqui solo serviria para servir un numero viejo.
+    """
+    try:
+        d = json.loads(CUOTA.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def texto_cuota(c, ahora=None):
+    """La celda de la cabecera, o "" si no hay nada que decir."""
+    if not c or c.get("session_pct") is None:
+        return ""
+    trozos = [_("quota 5h {p}%", p=c["session_pct"])]
+    if c.get("weekly_pct") is not None:
+        trozos.append(_("7d {p}%", p=c["weekly_pct"]))
+    t = time.time() if ahora is None else ahora
+    edad = t - (c.get("fetched_at") or 0)
+    if edad > VIEJA_CUOTA:
+        trozos.append(_("{t} old", t=_lapso(edad)))
+    return "  \u00b7  ".join(trozos)
+
+
+# El quinto flanco de `--watch`, y el unico que no habla de ninguna sesion en concreto
+# sino de la CUENTA. Mismo criterio que el de contexto: se avisa al CRUZAR, no mientras se
+# esta por encima. 95 y no 90 porque la cuota no se arregla compactando — al 95 % lo unico
+# que queda por decidir es si paras tu o te para el plan.
+ESCALONES_CUOTA = (80, 95)
+
+
+def nivel_cuota(c, escalones=None):
+    """El escalon de cuota ya pasado, o 0. Un hecho, no un juicio, igual que `nivel_ctx`.
+
+    `session_pct` a `None` es "no se midio" y NO cero: sin lectura no se avisa, en vez de
+    avisar del 0 % de una cuota inventada.
+    """
+    esc = ESCALONES_CUOTA if escalones is None else escalones
+    p = (c or {}).get("session_pct")
+    if p is None or not esc:
+        return 0
+    pasados = [e for e in esc if p >= e]
+    return max(pasados) if pasados else 0
+
+
+def cuota_nueva(antes, ahora, escalones=None):
+    """El escalon que la cuota ACABA de cruzar, o 0. Pura, como las cuatro de abajo y por
+    lo mismo: el bucle no se puede probar y esto si.
+
+    Se compara escalon a escalon: estar por encima del 80 % tres horas avisaria en cada
+    vuelta y al tercer aviso se deja de leer. Cuando la ventana se resetea el nivel cae
+    solo, y el siguiente cruce vuelve a ser noticia.
+    """
+    n = nivel_cuota(ahora, escalones)
+    return n if n > antes else 0
+
+
 # El cuarto flanco, y el unico que no mira lo que la sesion HACE sino lo que le queda:
 # la ventana de contexto llenandose. Se avisa al CRUZAR un escalon, no mientras se esta
 # por encima — igual que los otros tres, y por lo mismo: una sesion al 92% durante media
@@ -1851,6 +2106,7 @@ _AVISO_WATCH = {
 def watch(cada=20):
     print(_("Watching. Nothing is reported until a session stops working. Ctrl-C to quit."), flush=True)
     antes, pares, atascados, ctxs = {}, {}, {}, {}
+    nivel_c = 0
     primera = True
     try:
         while True:
@@ -1896,6 +2152,19 @@ def watch(cada=20):
                 sys.stdout.flush()
                 notifica(_("context running out"),
                          _("{t} \u00b7 {p}% used", t=que, p=pct))
+            # Y el quinto, que no habla de ninguna sesion sino de la CUENTA: la
+            # ventana de 5 horas del plan llenandose. Solo existe si has puesto a correr
+            # `sereno-cuota`; sin su fichero `nivel_cuota` vale 0 y esto calla para
+            # siempre, que es lo que tiene que hacer una fuente que no esta.
+            c = lee_cuota()
+            paso = 0 if primera else cuota_nueva(nivel_c, c)
+            if paso:
+                sys.stdout.write("\a" + _("{hora}  \u25b0 the plan's 5h quota is at {p}%",
+                                          hora=time.strftime("%H:%M"), p=paso) + "\n")
+                sys.stdout.flush()
+                notifica(_("plan quota running out"),
+                         _("5h window at {p}% used", p=paso))
+            nivel_c = nivel_cuota(c)
             antes = {r["id"]: r["state"] for r in filas}
             pares = pares_choque(filas)
             atascados = {r["id"]: r.get("stuck") or [] for r in filas}
@@ -3609,15 +3878,25 @@ def _fase(r):
     """
     pu = r.get("pulso") or {}
     idle = r.get("idle") or 0
-    if pu.get("escribe") is None:
+    if pu.get("escribe") is None and pu.get("registro") is None:
         return None
-    if pu.get("herramienta"):
+    # Sale de `estado_estable`, que es lo MISMO que pinta la lista, registro del CLI
+    # incluido. Repetir aqui la cadena de ifs era lo que hacia que el panel dijese
+    # "escribiendo" mientras la fila de al lado decia "te espera".
+    est = estado_estable(r)
+    if est == "unknown":
+        return None
+    if est == "in_command":
         if idle > 10 * 60:
             return _("{t} on the same tool: it may be stuck", t=_lapso(idle))
         return _("waiting on a command of its own")
-    if pu.get("escribe") and not pu.get("cerrado"):
+    if est == "writing":
         return _("writing its reply")
-    return (_("waiting on you") if idle < 6 * INACTIVA
+    # El CLI dice ademas QUE espera. Solo se traduce lo conocido: `waitingFor` es texto de
+    # otro programa y no se pinta crudo.
+    if pu.get("registro") == "waiting" and pu.get("espera") in ESPERA_PERMISO:
+        return _("waiting for you to allow a tool")
+    return (_("waiting on you") if est == "waiting"
             else _("stopped, waiting on you"))
 
 
@@ -5255,6 +5534,14 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 if hx + ancho(pieza) <= w - 1:
                     cab_put("  \u00b7  ", 4)
                     cab_put(_mb(ram_total), 8, curses.A_BOLD)
+            # La cuota del PLAN, que no es el contexto de ninguna sesion: la escribe
+            # `sereno-cuota` y aqui solo se lee. Sin su fichero no ocupa ni una columna,
+            # igual que la memoria sin tmux. Va la ultima porque es lo unico de la
+            # cabecera que no habla de lo que tienes delante.
+            txt_cuota = texto_cuota(lee_cuota())
+            if txt_cuota and hx + ancho("  \u00b7  " + txt_cuota) <= w - 1:
+                cab_put("  \u00b7  ", 4)
+                cab_put(txt_cuota, 7, curses.A_BOLD)
 
             fondo = max(5, h - 6)          # ultima fila util del area de contenido
             alto = max(3, min(len(rows), fondo - 2))
@@ -6542,6 +6829,14 @@ def _T():
         "switch CLI: claude, history, codex, gemini, all": "cambiar de CLI: claude, historial, codex, gemini, todas",
         "waiting on a command of its own": "esperando a que termine un comando suyo",
         "waiting on you": "te espera a ti",
+        "waiting for you to allow a tool": "esperando a que le des permiso",
+        "quota 5h {p}%": "cuota 5h {p}%",
+        "7d {p}%": "7d {p}%",
+        "{t} old": "de hace {t}",
+        "{hora}  \u25b0 the plan's 5h quota is at {p}%":
+            "{hora}  \u25b0 la cuota de 5h del plan va por el {p}%",
+        "plan quota running out": "se acaba la cuota del plan",
+        "5h window at {p}% used": "ventana de 5h al {p}% gastada",
         "wheel scrolls; tabs and buttons below are clickable": "rueda: desplaza; pestañas y botones de abajo se pinchan",
         "writing its reply": "escribiendo la respuesta",
         "{f} \u00b7 ENTER resumes it": "{f} \u00b7 ENTER lo reanuda",

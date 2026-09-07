@@ -49,9 +49,16 @@ ESTADOS = {"writing", "in_command", "waiting", "stopped", "unknown"}
 # un campo que falta o cambia de tipo, el arreglo no es tocar la tabla y ya: es subir
 # `ESQUEMA_JSON` en `sereno` y aqui, porque alguien ahi fuera lee esos campos.
 ESQUEMA = 1
-# Lo que envuelve a las filas. Ni una clave mas: un consumidor que haga
-# `for s in d["sessions"]` no puede encontrarse otra cosa donde no la espera.
-SOBRE = {"sereno": str, "schema": int, "sessions": list}
+# Lo que envuelve a las filas. Ni una clave mas de las que estan aqui: un consumidor que
+# haga `for s in d["sessions"]` no puede encontrarse otra cosa donde no la espera.
+#
+# La cuota del plan vive AQUI y no dentro de cada fila a proposito: es de la CUENTA, no de
+# la sesion. Repetida en cuarenta filas invita a sumarla, que es justo lo que no significa.
+# Los tres campos valen `null` mientras no se haya ejecutado `sereno-cuota`, que es el
+# programa aparte —y el unico— que abre una conexion. Anadirlos NO sube `ESQUEMA`: nada
+# se ha quitado ni ha cambiado de tipo, y quien lea el esquema 1 sigue leyendo lo mismo.
+SOBRE = {"sereno": str, "schema": int, "sessions": list,
+         "quota_session_pct": int, "quota_weekly_pct": int, "quota_fetched_at": int}
 
 
 def main():
@@ -106,7 +113,10 @@ def main():
                           f"{sorted(set(sobre) - set(SOBRE))}, faltan "
                           f"{sorted(set(SOBRE) - set(sobre))}")
         for k, tipo in SOBRE.items():
-            if k in sobre and not isinstance(sobre[k], tipo):
+            # `null` cuela, igual que en las filas y por lo mismo: distingue "no se
+            # midio" de un cero. Sin `sereno-cuota` corriendo, los tres de la cuota son
+            # null SIEMPRE, y este test corre asi.
+            if k in sobre and sobre[k] is not None and not isinstance(sobre[k], tipo):
                 fallos.append(f"sobre.{k} es {type(sobre[k]).__name__}, se esperaba "
                               f"{tipo.__name__}")
         if sobre.get("schema") != ESQUEMA:
