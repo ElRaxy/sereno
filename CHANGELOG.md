@@ -1,5 +1,38 @@
 # Changelog
 
+## Sin publicar
+
+**El registro que escribe el propio Claude Code, como tercera fuente de estado.** El CLI deja un
+`~/.claude/sessions/<pid>.json` por proceso vivo con `status` (`busy`/`waiting`/`idle`) y
+`waitingFor`, y lo reescribe al cambiar de estado: es el unico sitio donde el estado esta ESCRITO
+en vez de deducido. Tapa dos agujeros del `mtime` que ningun ajuste del umbral podia tapar — una
+sesion tres minutos dentro de un `Bash` no escribe nada y figuraba parada justo mientras trabajaba,
+y una que te pide permiso tiene un `tool_use` sin `tool_result` y se leia como «esperando a un
+comando suyo» cuando te esperaba a ti — y adelanta el flanco *waiting on you* de `--watch`, que ya
+no espera los 90 s. **Afina el veredicto, no lo sustituye**: sin fichero (Codex, Gemini, un Claude
+viejo) sale exactamente lo de antes, un `status` desconocido vale `None` y nunca `idle`, y un
+fichero cuyo PID ya no corre no cuenta. Ademas las sesiones que el registro da por ocupadas se
+libran del filtro por `mtime` de `sesiones_de_disco`, que es justo el que las tiraba. Carpeta
+configurable con `SERENO_CLAUDE_SESSIONS_DIR`. `tests/test_registro_sessions.py` y cinco mutantes
+(164 -> 169).
+
+**La cuota del plan, en un programa aparte que `sereno` solo lee.** Cuanto llevas gastado de la
+ventana de 5 horas y de la semanal es la unica cifra que no esta en el disco: solo la sabe
+Anthropic y preguntarla cuesta una conexion, que `sereno` no hace y `tests/test_sin_red.py` no
+deja hacer. Asi que la pregunta **`sereno-cuota`**, un ejecutable nuevo al lado del programa, que
+toma prestado el token OAuth del llavero de Claude Code —lo lee y nada mas: **no lo refresca ni lo
+reescribe**, y no lo imprime nunca— y escribe hechos tipados en `~/.sereno/cuota.json`
+(`session_pct`, `weekly_pct`, `resets_at`, `plan`, `fetched_at`, `http_status`, `error`). `sereno`
+lee ese fichero como leeria cualquier otro: celda en la cabecera del TUI, campos
+`quota_session_pct` / `quota_weekly_pct` / `quota_fetched_at` en el sobre de `--json` (en el
+sobre y no en cada fila: es de la CUENTA, no de la sesion; el esquema sigue siendo **1**, porque
+nada se ha quitado ni ha cambiado de tipo) y un quinto flanco en `--watch` al cruzar el 80 % y el
+95 %. Sin fichero no hay celda, los campos valen `null` y no se avisa de nada. Cuando la lectura
+falla —429, token caducado— **se conserva la ultima buena con su edad** en vez de poner ceros, que
+se leerian como «no has gastado nada». Backoff de 60 s doblando hasta 15 min ante un 429, solo en
+`--watch`. `tests/test_cuota.py` (servidor local y `security` de mentira: ni red real ni llavero
+real) y tres mutantes (169 -> 172).
+
 ## 1.41.0
 
 **Elegir el modelo al reabrir y al relevar.** Un toggle `[m]` en los dos cuadros —el de `r`

@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""sereno-cuota - deja escrito cuanto llevas gastado del plan, para que `sereno` lo lea.
+
+`sereno` no hace red: lo dice su README y lo impide `tests/test_sin_red.py`, que recorre
+su arbol de sintaxis. La cuota del plan (la ventana de 5 horas y la semanal) NO esta en
+ningun fichero local, asi que la unica forma de saberla es preguntarsela a Anthropic —
+y meter eso dentro de `sereno` seria romper la promesa que sostiene todo lo demas.
+
+Por eso es un programa APARTE. Este si abre una conexion, y solo este. Escribe hechos
+tipados en `~/.sereno/cuota.json` y ahi se acaba su trabajo; `sereno` lee ese fichero
+como leeria cualquier otro, sin enterarse de donde salio. Si no lo ejecutas nunca, el
+fichero no existe, y `sereno` funciona igual que siempre.
+
+  sereno-cuota             una pasada: lee, escribe el fichero y sale
+  sereno-cuota --watch     se queda en bucle (5 min, con espera creciente si te frenan)
+  sereno-cuota --once      lo mismo que sin nada; existe para que se lea en un cron
+
+De donde sale el token: del ITEM DEL LLAVERO que Claude Code ya tiene puesto
+("Claude Code-credentials"). No hay login propio ni hay que pegar nada. Y no se toca:
+si ha caducado, se dice y se conserva la ultima lectura buena con su edad. **Nunca se
+refresca ni se reescribe** — es una credencial de otro programa, y escribir en ella es
+justo lo que separa "leer tu llavero" de "gestionarlo por ti".
+
+El token no se imprime, ni entero ni en trozos, ni en un error. Lo unico que sale por
+la salida estandar es una linea con los porcentajes.
+
+Entorno: SERENO_DIR (donde escribir; por defecto ~/.sereno), SERENO_CUOTA_URL y
+SERENO_SECURITY_BIN (para las pruebas: el endpoint y el `security` de mentira).
+
+MIT licence. https://github.com/ElRaxy/sereno
+"""
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+SERVICIO = "Claude Code-credentials"
+# El mismo que consulta `/usage` del propio CLI. No esta publicado por Anthropic: puede
+# cambiar sin avisar, y por eso lo que se escribe en el fichero incluye SIEMPRE el
+# `http_status` y el `error`, para que quien lo lea distinga "no gasto nada" de "no se
+# pudo mirar".
+URL = os.environ.get("SERENO_CUOTA_URL") or "https://api.anthropic.com/api/oauth/usage"
+SECURITY = os.environ.get("SERENO_SECURITY_BIN") or "/usr/bin/security"
+DESTINO = pathlib.Path(os.environ.get("SERENO_DIR")
+                       or pathlib.Path.home() / ".sereno") / "cuota.json"
+# Espera tras un 429. El endpoint contesta `Retry-After: 0`, que no sirve de nada, asi
+# que se empieza en un minuto y se dobla hasta un cuarto de hora. Solo aplica al bucle:
+# una pasada suelta no reintenta, escribe el fallo y sale.
+ESPERA_MIN, ESPERA_MAX, CADA = 60, 900, 300
+TOPE_SEG = 20
+
+
+def _corre(cmd):
+    """(salida, error) de un comando, sin reventar nunca. Se juntan las dos porque
+    `security` no documenta por cual de las dos saca los atributos."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=TOPE_SEG)
+        return r.stdout or "", r.stderr or ""
+    except Exception as e:
+        return "", str(e)
+
+
+def mdat_del_llavero():
+    """Cuando se toco por ultima vez el item, sin leer el secreto.
+
+    Los ATRIBUTOS del llavero no estan protegidos por la ACL: se leen sin que macOS
+    pregunte nada. El secreto (`-w`) si, y por eso en el bucle solo se pide cuando esto
+    ha cambiado. `None` si el item no esta.
+    """
+    salida, err = _corre([SECURITY, "find-generic-password", "-s", SERVICIO])
+    m = re.search(r'"mdat"[^"]*"([0-9]{14}Z)', salida + err)
+    return m.group(1) if m else None
+
+
+def credencial():
+    """{token, caduca_ms, plan} del item del llavero, o {"error": ...}.
+
+    Lo que devuelve NUNCA se imprime tal cual: lleva el token dentro.
+    """
+    salida, err = _corre([SECURITY, "find-generic-password", "-s", SERVICIO, "-w"])
+    crudo = (salida or "").strip()
+    if not crudo:
+        return {"error": "sin credencial en el llavero"}
+    try:
+        oauth = (json.loads(crudo) or {}).get("claudeAiOauth") or {}
+    except ValueError:
+        return {"error": "la credencial del llavero no es JSON"}
+    token = oauth.get("accessToken")
+    if not isinstance(token, str) or not token:
+        return {"error": "la credencial no trae accessToken"}
+    caduca = oauth.get("expiresAt")
+    return {"token": token,
+            "caduca_ms": caduca if isinstance(caduca, (int, float)) else None,
+            "plan": oauth.get("subscriptionType") or None}
+
+
+def consulta(token, url=None):
+    """(http_status, payload, espera_pedida). Sin veredicto: solo lo que contesto.
+
+    `http_status` a `None` es que no hubo respuesta (sin red, DNS, timeout), que no es
+    lo mismo que un 200 vacio ni que un 429.
+    """
+    pet = urllib.request.Request(url or URL, headers={
+        "Authorization": "Bearer " + token,
+        "anthropic-beta": "oauth-2025-04-20",
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(pet, timeout=TOPE_SEG) as r:
+            cuerpo = r.read().decode("utf-8", "replace")
+            try:
+                return r.getcode(), json.loads(cuerpo), None
+            except ValueError:
+                return r.getcode(), None, None
+    except urllib.error.HTTPError as e:
+        try:
+            espera = int(e.headers.get("Retry-After") or 0)
+        except (TypeError, ValueError):
+            espera = 0
+        return e.code, None, espera
+    except Exception:
+        # A proposito sin el texto de la excepcion: en un fallo de TLS o de proxy puede
+        # traer la URL con cabeceras dentro, y de ahi al fichero hay un paso.
+        return None, None, None
+
+
+def porcentajes(payload):
+    """{session_pct, weekly_pct, resets_at} a partir de la respuesta. Funcion pura.
+
+    Se lee `limits[]`, que es la forma nueva y la que crece (`weekly_opus`,
+    `weekly_sonnet`), y se cae a `five_hour`/`seven_day` como respaldo: una ventana
+    recien reseteada desaparece de `limits` y solo queda en los campos viejos. Lo que no
+    venga se queda en `None` — cero seria decir que no has gastado nada.
+    """
+    fuera = {"session_pct": None, "weekly_pct": None, "resets_at": None}
+    if not isinstance(payload, dict):
+        return fuera
+
+    def pct(x):
+        v = (x or {}).get("utilization") if isinstance(x, dict) else None
+        return int(round(v)) if isinstance(v, (int, float)) else None
+
+    fuera["session_pct"] = pct(payload.get("five_hour"))
+    fuera["weekly_pct"] = pct(payload.get("seven_day"))
+    if isinstance(payload.get("five_hour"), dict):
+        fuera["resets_at"] = payload["five_hour"].get("resets_at") or None
+    for lim in payload.get("limits") or ():
+        if not isinstance(lim, dict):
+            continue
+        p = lim.get("percent")
+        p = int(round(p)) if isinstance(p, (int, float)) else None
+        if lim.get("kind") == "session" and p is not None:
+            fuera["session_pct"] = p
+            fuera["resets_at"] = lim.get("resets_at") or fuera["resets_at"]
+        elif lim.get("kind") == "weekly_all" and p is not None:
+            fuera["weekly_pct"] = p
+    return fuera
+
+
+def previo(destino=None):
+    """Lo ultimo que se escribio, o {}. Sirve para conservar la lectura buena."""
+    try:
+        d = json.loads((destino or DESTINO).read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def compone(anterior, plan=None, http_status=None, payload=None, error=None,
+            ahora=None):
+    """Los hechos que van al fichero. Funcion pura, y el corazon de todo esto.
+
+    El veredicto no se escribe: se escriben los datos con los que cualquiera compone el
+    suyo. Y cuando la lectura falla NO se ponen a cero los porcentajes — se conserva la
+    ultima buena CON SU `fetched_at`, que es lo que permite ver que esta vieja. Un cero
+    se lee como "no has gastado nada", que es la mentira mas facil de contar aqui.
+    """
+    t = int(time.time() if ahora is None else ahora)
+    p = porcentajes(payload)
+    bueno = http_status == 200 and p["session_pct"] is not None
+    if bueno:
+        return {"session_pct": p["session_pct"], "weekly_pct": p["weekly_pct"],
+                "resets_at": p["resets_at"], "plan": plan,
+                "fetched_at": t, "http_status": http_status, "error": None}
+    return {"session_pct": anterior.get("session_pct"),
+            "weekly_pct": anterior.get("weekly_pct"),
+            "resets_at": anterior.get("resets_at"),
+            "plan": plan or anterior.get("plan"),
+            "fetched_at": anterior.get("fetched_at"),
+            "http_status": http_status,
+            "error": error or ("respuesta sin porcentajes" if http_status == 200
+                               else "http %s" % http_status)}
+
+
+def escribe(hechos, destino=None):
+    d = destino or DESTINO
+    d.parent.mkdir(parents=True, exist_ok=True)
+    d.write_text(json.dumps(hechos, indent=2, ensure_ascii=False) + "\n")
+
+
+def una_pasada(destino=None, url=None, token_cacheado=None):
+    """(hechos, espera_pedida). `token_cacheado` es para el bucle: evita volver a pedir
+    el secreto al llavero cuando el item no se ha tocado."""
+    anterior = previo(destino)
+    cred = token_cacheado or credencial()
+    if cred.get("error"):
+        h = compone(anterior, error=cred["error"])
+        escribe(h, destino)
+        return h, 0
+    caduca = cred.get("caduca_ms")
+    if caduca and caduca / 1000.0 <= time.time():
+        # No se refresca. Es una credencial de otro programa: Claude Code la rota solo la
+        # proxima vez que lo abras, y hasta entonces se ensena la ultima lectura buena.
+        h = compone(anterior, plan=cred.get("plan"), error="token caducado")
+        escribe(h, destino)
+        return h, 0
+    estado, payload, espera = consulta(cred["token"], url)
+    h = compone(anterior, plan=cred.get("plan"), http_status=estado, payload=payload,
+                error=None if estado else "sin respuesta")
+    escribe(h, destino)
+    return h, (espera or 0)
+
+
+def linea(h):
+    """Una linea legible, sin nada que no este ya en el fichero."""
+    def p(v):
+        return "?" if v is None else "%d%%" % v
+    edad = ""
+    if h.get("fetched_at"):
+        mins = int((time.time() - h["fetched_at"]) / 60)
+        if mins >= 15:
+            edad = " (hace %d min)" % mins
+    return "5h %s / 7d %s%s%s" % (p(h.get("session_pct")), p(h.get("weekly_pct")), edad,
+                                 "  [%s]" % h["error"] if h.get("error") else "")
+
+
+def bucle():
+    espera_429 = 0
+    mdat, cred = None, None
+    while True:
+        ahora_mdat = mdat_del_llavero()
+        if cred is None or ahora_mdat != mdat:
+            mdat, cred = ahora_mdat, credencial()
+        h, _pedida = una_pasada(token_cacheado=cred if not cred.get("error") else None)
+        print(linea(h), flush=True)
+        if h.get("http_status") == 429:
+            espera_429 = min(max(ESPERA_MIN, espera_429 * 2), ESPERA_MAX)
+        else:
+            espera_429 = 0
+        if h.get("error") == "token caducado":
+            cred = None          # que se relea cuando el CLI lo rote
+        time.sleep(max(CADA, espera_429))
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if "-h" in args or "--help" in args:
+        print(__doc__.strip())
+        return 0
+    if "--watch" in args:
+        try:
+            bucle()
+        except KeyboardInterrupt:
+            print()
+        return 0
+    h, _pedida = una_pasada()
+    print(linea(h))
+    # 0 solo cuando hay una lectura FRESCA. El fichero se escribe en los dos casos: quien
+    # decide que hacer con un dato viejo es quien lo lee, no este programa.
+    return 0 if h.get("error") is None else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

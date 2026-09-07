@@ -60,8 +60,11 @@ MUTANTES = [
     ("un tope de contexto que no consta deja de frenar el aviso",
      "if not ctx or not tope or not esc:", "if not ctx or not esc:",
      "test_watch_contexto.py"),
+    # El ancla lleva la linea de arriba desde que `nivel_cuota` hace lo mismo con la
+    # cuota del plan: `return max(pasados)` solo ya aparece dos veces.
     ("el escalon cruzado es el mas bajo en vez del mas alto",
-     "return max(pasados) if pasados else 0", "return min(pasados) if pasados else 0",
+     "    pasados = [e for e in esc if lleno >= e]\n    return max(pasados) if pasados else 0",
+     "    pasados = [e for e in esc if lleno >= e]\n    return min(pasados) if pasados else 0",
      "test_watch_contexto.py"),
     ("el nivel de contexto se guarda como maximo historico",
      'ctxs = {r["id"]: nivel_ctx(r) for r in filas}',
@@ -417,8 +420,8 @@ MUTANTES = [
 
     # ── el contrato de --json, que leen scripts de otros ─────────────────────
     ("--json deja de anunciar la version de su contrato",
-     '    print(json.dumps({"sereno": VERSION, "schema": ESQUEMA_JSON,\n                      "sessions": filas_json(rows)},',
-     '    print(json.dumps({"sereno": VERSION, "sessions": filas_json(rows)},',
+     '    print(json.dumps({"sereno": VERSION, "schema": ESQUEMA_JSON,',
+     '    print(json.dumps({"sereno": VERSION,',
      "test_json_sin_conversacion.py"),
     ("el numero de contrato se mueve sin que nadie lo declare",
      "ESQUEMA_JSON = 1", "ESQUEMA_JSON = 2", "test_json_sin_conversacion.py"),
@@ -717,6 +720,42 @@ MUTANTES = [
      'FLAG_MODELO = {"claude": "--model", "codex": "-m"}',
      'FLAG_MODELO = {"claude": "--model", "codex": "-m", "gemini": "--model"}',
      "test_cuadros_de_eleccion.py"),
+
+    # ── el registro que escribe el propio Claude Code ────────────────────────
+    ("un `status` que no conocemos se lee como `idle`",
+     '"estado": ESTADO_CC.get(j.get("status")),',
+     '"estado": ESTADO_CC.get(j.get("status"), "idle"),',
+     "test_registro_sessions.py"),
+    ("el fichero de un PID muerto sigue diciendo `busy` para siempre",
+     'v = {s: h for s, h in crudo.items() if h["pid"] in vivos}',
+     'v = dict(crudo)',
+     "test_registro_sessions.py"),
+    ("sin registro deja de salir lo que salia antes: lo sustituye en vez de afinarlo",
+     "    if reg is None:\n        return estado",
+     '    if reg is None:\n        return "waiting"',
+     "test_registro_sessions.py"),
+    ("pedirte permiso se sigue leyendo como esperar a un comando suyo",
+     '    if reg == "idle" and estado == "in_command":',
+     '    if estado == "in_command":',
+     "test_registro_sessions.py"),
+    ("una sesion que el CLI da por ocupada la tira el filtro por mtime",
+     "if solo_activas and ahora - mt > VIVA and p.stem not in protegidos:",
+     "if solo_activas and ahora - mt > VIVA:",
+     "test_registro_sessions.py"),
+
+    # ── la cuota del plan, que lee del fichero del sidecar ───────────────────
+    ("el aviso de cuota se repite dentro del mismo escalon",
+     "    n = nivel_cuota(ahora, escalones)\n    return n if n > antes else 0",
+     "    n = nivel_cuota(ahora, escalones)\n    return n",
+     "test_cuota.py"),
+    ("el escalon de cuota cruzado es el mas bajo en vez del mas alto",
+     "    pasados = [e for e in esc if p >= e]\n    return max(pasados) if pasados else 0",
+     "    pasados = [e for e in esc if p >= e]\n    return min(pasados) if pasados else 0",
+     "test_cuota.py"),
+    ("una cuota leida hace tres horas se pinta igual de fresca que una de ahora",
+     "    if edad > VIEJA_CUOTA:",
+     "    if False:",
+     "test_cuota.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

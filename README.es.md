@@ -962,10 +962,30 @@ sesiones que has abierto en tu vida.
 | el `message.usage` de la última respuesta | contexto gastado, y el modelo |
 | `cwd`, `gitBranch` | proyecto y rama |
 | `aiTitle`, `lastPrompt` | el título y el panel |
+| `~/.claude/sessions/<pid>.json` | `busy` / `waiting` / `idle`, escrito en vez de deducido |
 
 Eso cuesta **4 ms** para las sesiones vivas y **16 ms** para el historial entero, medido contra
 1.248 transcripts y 3,8 GB. Y se cachea por fecha de modificación, así que un fichero que no se ha
 movido no se lee dos veces.
+
+Ese último fichero es el único que no es un transcript. Claude Code escribe uno por proceso vivo y lo
+reescribe cada vez que la sesión cambia de estado, y tapa el agujero que la fecha de modificación no
+puede tapar: una sesión tres minutos dentro de un `Bash` no escribe nada, así que por fecha figura
+parada justo mientras trabaja — y una que te está pidiendo permiso tiene un `tool_use` sin
+`tool_result`, que se leía como «esperando a un comando suyo» cuando en realidad te esperaba a **ti**.
+Afina el veredicto, no lo sustituye: Codex y Gemini no tienen nada parecido, y un `status` que este
+programa no conoce cuenta como desconocido, nunca como parada. Un fichero cuyo PID ya no corre
+tampoco cuenta.
+
+**La cuota del plan es la única cifra que no está en el disco**, y por eso llega desde un programa
+aparte. Cuánto llevas gastado de la ventana de 5 horas y de la semanal solo lo sabe Anthropic, y
+preguntarlo cuesta una conexión — que `sereno` no hace y, gracias a `tests/test_sin_red.py`, no puede
+hacer. Así que lo pregunta `sereno-cuota`, que escribe `~/.sereno/cuota.json`, y `sereno` lee ese
+fichero como leería cualquier otro, sin enterarse de dónde salió. Lo ejecutas o no: sin fichero no hay
+celda en la cabecera, los tres campos `quota_*` de `--json` valen `null`, y no cambia nada más. Toma
+prestado el token OAuth que Claude Code ya tiene en tu llavero y no hace nada más con él — no lo
+refresca, no lo reescribe y no lo imprime — y si ha caducado te enseña la última lectura buena **con
+su edad**, en vez de un cero, que se leería como «no has gastado nada».
 
 Las de Codex, Gemini y Antigravity salen de sus propias carpetas de historial y se reabren con el
 `resume` de su CLI. Son ficheros en disco, no procesos vivos, así que `sereno` se niega a
@@ -1258,7 +1278,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y cinco,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y siete,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1293,7 +1313,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento sesenta y cuatro guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento setenta y dos guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.
