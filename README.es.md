@@ -8,7 +8,7 @@
 
 **Una interfaz de terminal que te dice qué está haciendo _de verdad_ cada sesión, no solo que existe.**
 
-Un fichero de Python · cero dependencias · Claude Code, Codex, Gemini, Antigravity
+Un fichero de Python · cero dependencias · Claude Code, Codex, Gemini, Antigravity, Kilo Code
 
 <br>
 
@@ -156,6 +156,7 @@ Y cuando la lista **mezcla CLIs**, una más: de cuál es la sesión.
 | `◆` | Codex |
 | `▲` | Gemini |
 | `◇` | Antigravity |
+| `⬡` | Kilo Code |
 
 Solo aparece cuando hay algo que distinguir. Dentro de la pestaña de un solo CLI la columna
 desaparece y el título recupera esas dos — repetir el mismo símbolo en toda la lista solo dice lo
@@ -579,7 +580,7 @@ línea de tmux filtra por él antes de dividir.
 | `s` / `S` | ordenar por actividad · contexto · proyecto · memoria · **gasto** / invertir |
 | `y` | copiar el id de la sesión, el que se le pasa a `claude --resume` (o pincharlo — ver abajo) |
 | `/` | filtrar por título mientras escribes |
-| `TAB` | cambiar de CLI: Claude · Codex · Gemini · todas — cada fila lleva el glifo del suyo cuando la lista los mezcla |
+| `TAB` | cambiar de CLI: Claude · Codex · Gemini · Kilo · todas — cada fila lleva el glifo del suyo cuando la lista los mezcla |
 | `?` | el resto |
 
 **El ratón funciona.** Click para seleccionar, doble click para abrir, click derecho (o en la
@@ -711,7 +712,7 @@ Entregar 3 sesiones a:
 · Migrate CI to reusable workflows
 
 [1] codex   [2] claude
-    gemini, antigravity — sin comprobar cómo se le pasa un prompt
+    gemini, antigravity, kilo — sin comprobar cómo se le pasa un prompt
 [k] incluir la conversación: no
 [m] modelo: por defecto
 [w] abrirlas en: tmux
@@ -988,8 +989,17 @@ refresca, no lo reescribe y no lo imprime — y si ha caducado te enseña la úl
 su edad**, en vez de un cero, que se leería como «no has gastado nada».
 
 Las de Codex, Gemini y Antigravity salen de sus propias carpetas de historial y se reabren con el
-`resume` de su CLI. Son ficheros en disco, no procesos vivos, así que `sereno` se niega a
-«cerrarlas» en vez de fingir que ha hecho algo.
+`resume` de su CLI. **Kilo Code** es el raro: es un fork de opencode y guarda todas las sesiones
+de todos los proyectos en una sola base SQLite (`~/.local/share/kilo/kilo.db`, o `$XDG_DATA_HOME`),
+que `sereno` abre en **solo lectura**. El proyecto, la rama y el título salen de una consulta en
+vez de cuarenta lecturas de fichero — y el peso de la sesión no se enseña, porque ese fichero es de
+todos los proyectos a la vez y su tamaño no diría nada de una sesión. Ninguna de las cuatro es un
+proceso vivo, así que `sereno` se niega a «cerrarlas» en vez de fingir que ha hecho algo.
+
+Kilo se lista, pero **no es destino de relevo**. `kilo` no está instalado en la máquina donde se
+escribió esto, así que no se ha comprobado contra su `--help` cómo se le pasa un prompt inicial, y
+un lanzador escrito leyendo el fuente de otro es una suposición. El cuadro de relevo lo dice tal
+cual, apagado — la misma regla que deja fuera a Antigravity, y no un olvido.
 
 <details>
 <summary><strong>Opcional: tmux y Warp</strong></summary>
@@ -1096,7 +1106,7 @@ respuesta directa, no una promesa:
 
 **`sereno` no tiene una sola línea de red.** Ni `socket`, ni `urllib`, ni `requests` — la lista
 entera de imports es `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, unicodedata, uuid, traceback` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
+datetime, pathlib, sqlite3, unicodedata, uuid, traceback` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
 nada capaz de mandar nada a ningún sitio.
 
 Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
@@ -1278,7 +1288,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y siete,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y ocho,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1313,7 +1323,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento setenta y dos guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento setenta y seis guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

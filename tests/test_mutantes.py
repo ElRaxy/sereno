@@ -502,11 +502,13 @@ MUTANTES = [
      '                vistos[j["id"]] = j', '                vistos.setdefault(j["id"], j)',
      "test_sesiones_codex.py"),
     ("las sesiones de Codex dejan de ordenarse por fecha",
-     '    out.sort(key=lambda r: -(r["created"] or 0))', "    out.sort(key=lambda r: 0)",
+     'j["id"]]))\n    out.sort(key=lambda r: -(r["created"] or 0))',
+     'j["id"]]))\n    out.sort(key=lambda r: 0)',
      "test_sesiones_codex.py"),
     ("el orden de Codex se invierte y quedan las mas viejas",
-     '    out.sort(key=lambda r: -(r["created"] or 0))',
-     '    out.sort(key=lambda r: (r["created"] or 0))', "test_sesiones_codex.py"),
+     'j["id"]]))\n    out.sort(key=lambda r: -(r["created"] or 0))',
+     'j["id"]]))\n    out.sort(key=lambda r: (r["created"] or 0))',
+     "test_sesiones_codex.py"),
     ("el limite de sesiones de Codex desaparece",
      "    out = out[:limite]", "    out = out", "test_sesiones_codex.py"),
     ("una linea a medias del indice tumba la lectura entera",
@@ -756,6 +758,17 @@ MUTANTES = [
      "    if edad > VIEJA_CUOTA:",
      "    if False:",
      "test_cuota.py"),
+
+    # ── Kilo Code, que se lee de una sqlite ajena ────────────────────────────
+    ("la base de Kilo se abre en ESCRITURA en vez de en solo lectura",
+     '"?mode=ro"', '"?mode=rw"', "test_kilo.py"),
+    ("las subsesiones y las archivadas de Kilo entran en la lista",
+     "WHERE s.parent_id IS NULL AND s.time_archived IS NULL ",
+     "WHERE 1=1 ", "test_kilo.py"),
+    ("los milisegundos de Kilo se leen como si fueran segundos",
+     "(actualizado or 0) / 1000.0", "(actualizado or 0)", "test_kilo.py"),
+    ("una sesion de Kilo muerta a mitad figura escribiendo para siempre",
+     "idle is not None and idle < VIVA", "True", "test_kilo.py"),
 ]
 TOPE = 180          # segundos por mutante: uno colgado no cuelga la tanda entera
 

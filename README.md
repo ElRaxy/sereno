@@ -8,7 +8,7 @@
 
 **A terminal UI that tells you what every coding-agent session is _actually_ doing — not just that it exists.**
 
-One Python file · zero dependencies · Claude Code, Codex, Gemini, Antigravity
+One Python file · zero dependencies · Claude Code, Codex, Gemini, Antigravity, Kilo Code
 
 <br>
 
@@ -156,6 +156,7 @@ And when the list **mixes CLIs**, one more: which one the session belongs to.
 | `◆` | Codex |
 | `▲` | Gemini |
 | `◇` | Antigravity |
+| `⬡` | Kilo Code |
 
 It only appears when there is something to tell apart. Inside a single-CLI tab the column
 disappears and the title gets those two back — repeating the same symbol down the whole list only
@@ -607,7 +608,7 @@ on it first.
 | `s` / `S` | sort by activity · context · project · memory · **spend** / invert |
 | `y` | copy the session id, the one `claude --resume` takes (or click it — see below) |
 | `/` | filter by title as you type |
-| `TAB` | switch CLI: Claude · Codex · Gemini · all — each row carries its CLI's glyph when the list mixes them |
+| `TAB` | switch CLI: Claude · Codex · Gemini · Kilo · all — each row carries its CLI's glyph when the list mixes them |
 | `?` | everything else |
 
 **The mouse works.** Click to select, double click to open, right click (or the bar on the
@@ -744,7 +745,7 @@ Hand over 3 sessions to:
 · Migrate CI to reusable workflows
 
 [1] codex   [2] claude
-    gemini, antigravity — not checked how to seed it
+    gemini, antigravity, kilo — not checked how to seed it
 [k] include the conversation: no
 [m] model: default
 [w] open them in: tmux
@@ -1019,8 +1020,18 @@ token has expired you get the last good reading **with its age** rather than a z
 read as "you have used nothing".
 
 Codex, Gemini and Antigravity come from their own history directories and reopen with their own
-`resume` command. They are files on disk, not live processes, so `sereno` refuses to "close" them
-rather than pretending it did something.
+`resume` command. **Kilo Code** is the odd one out: it is a fork of opencode and keeps every
+session of every project in a single SQLite database (`~/.local/share/kilo/kilo.db`, or
+`$XDG_DATA_HOME`), which `sereno` opens **read-only**. The project, the branch and the title come
+out of one query instead of forty file reads — and the session's weight is not shown at all,
+because that file belongs to every project at once and its size would say nothing about one
+session. None of them are live processes, so `sereno` refuses to "close" them rather than
+pretending it did something.
+
+Kilo is listed, but it is **not a handover destination**. `kilo` is not installed on the machine
+this was written on, so how it takes an initial prompt was never checked against its `--help`, and
+a launcher written from reading someone's source is a guess. The handover box says exactly that,
+greyed out — the same rule that keeps Antigravity out, and not an oversight.
 
 <details>
 <summary><strong>Optional: tmux and Warp</strong></summary>
@@ -1128,7 +1139,7 @@ straight answer, not a promise:
 
 **`sereno` has zero networking code.** No `socket`, no `urllib`, no `requests` — the whole
 import list is `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, unicodedata, uuid, traceback` and `curses`. Nothing it reads can leave your machine, because there is nothing
+datetime, pathlib, sqlite3, unicodedata, uuid, traceback` and `curses`. Nothing it reads can leave your machine, because there is nothing
 in it that can send anything anywhere.
 
 The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions, and
@@ -1314,7 +1325,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are seventy-seven
+collects the whole folder, prints a line per file and ends with the count. There are seventy-eight
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1357,7 +1368,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and seventy-two real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and seventy-six real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

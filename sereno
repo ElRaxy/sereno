@@ -2,7 +2,8 @@
 """sereno - see what every coding-agent session on your machine is actually doing.
 
 A single-file, stdlib-only terminal UI over the sessions of Claude Code (and the
-history of Codex, Gemini and Antigravity). It does not just list them: for each one
+history of Codex, Gemini, Antigravity and Kilo Code). It does not just list them:
+for each one
 it reads the transcript and says whether the agent is writing, blocked on a command
 of its own, or waiting on you - plus how much memory it eats, what you last asked
 and what it last answered.
@@ -45,6 +46,9 @@ import base64, os, stat, sys, json, re, shlex, shutil, subprocess, time, datetim
 import traceback
 import uuid
 import unicodedata
+# Kilo Code no deja un fichero por sesion: las guarda todas en una base sqlite.
+# Es stdlib y solo se abre en SOLO LECTURA, asi que no anade dependencia ni red.
+import sqlite3
 
 HOME = pathlib.Path.home()
 # El nombre con el que te han invocado: el repo lo instala como `sereno`, pero por un
@@ -73,7 +77,7 @@ VIVA = 90
 # sesiones de Claude paradas, o sea un ESTADO, y tenerlo de pestana mezclaba dos ejes en
 # la misma barra. Ahora caen dentro de `claude`, al fondo, que es donde `ordena()` ya las
 # pone por si sola.
-ORDEN_FUENTES = ["claude", "codex", "gemini", "antigravity"]
+ORDEN_FUENTES = ["claude", "codex", "gemini", "antigravity", "kilo"]
 # El valor interno se queda en castellano (es la clave de `fuente` en cada fila); lo
 # que se traduce es la etiqueta que se pinta.
 _ETIQUETAS = {"todas": "all", "historial": "history"}
@@ -89,8 +93,12 @@ _ETIQUETAS = {"todas": "all", "historial": "history"}
 # usados en la lista: un emoji ocupa dos y descuadra la tabla entera, y `\u25aa` —que
 # parecia el candidato obvio para codex— es la marca de "tiene pestana abierta".
 GLIFO_CLI = {"claude": "\u2726", "codex": "\u25c6", "gemini": "\u25b2",
-             "antigravity": "\u25c7"}
-COLOR_CLI = {"claude": 6, "codex": 8, "gemini": 9, "antigravity": 7}
+             "antigravity": "\u25c7", "kilo": "\u2b21"}
+# Kilo va en gris (4) y no en un color propio porque no queda ninguno: los cuatro
+# pares vivos (39 azul, 208 naranja, 141 violeta, 84 verde menta) ya son de los
+# cuatro CLI de antes, y anadir un `init_pair` toca el arranque de curses. El gris
+# ademas cuadra con lo que Kilo es hoy aqui: se lista, pero no es destino de relevo.
+COLOR_CLI = {"claude": 6, "codex": 8, "gemini": 9, "antigravity": 7, "kilo": 4}
 
 
 def glifo_cli(r):
@@ -2951,7 +2959,7 @@ ARNESES = {
 # El CLI del que sale una fila. `fuente` tiene cinco valores y dos son el mismo arnes:
 # "historial" es Claude Code parado, no otro programa.
 NOMBRE_CLI = {"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini",
-              "antigravity": "Antigravity"}
+              "antigravity": "Antigravity", "kilo": "Kilo Code"}
 
 
 def cli_de(r):
@@ -3017,6 +3025,16 @@ def briefing(r, con_conversacion=False):
         if trans:
             lineas += ["", "  " + _("its full transcript is here — read it for the whole "
                                     "story before you keep going:"), "    " + str(trans)]
+        elif (r.get("meta") or {}).get("_kilo_db"):
+            # Kilo no tiene un fichero por sesion que ensenar: su historia son filas de
+            # una sqlite compartida por todos los proyectos. El puntero util es la base
+            # MAS el id, no una ruta a secas, que ahi no distingue nada. No se pone una
+            # orden (`kilo export <id>`) porque `kilo` no se ha ejecutado en esta
+            # maquina: la base SI se ha leido, asi que es lo unico que consta.
+            lineas += ["", "  " + _("its history is in this SQLite database, session {i} "
+                                    "— read it from there before you keep going:",
+                                    i=r.get("name") or ""),
+                       "    " + str((r.get("meta") or {})["_kilo_db"])]
     lineas += ["", _("First get your bearings in that directory, then carry on the work above.")]
     return "\n".join(lineas)
 
@@ -4286,6 +4304,146 @@ def _det_codex(r):
     return d
 
 
+def _evento_kilo(p):
+    """Un evento de la traza a partir de un trozo `tool` de Kilo, con la misma forma que
+    los de Claude para que `linea_ruta` los pinte igual.
+
+    Aqui SI consta el estado de cada llamada —`state.status` es uno de
+    pending/running/completed/error— y sus tiempos, asi que el glifo puede decir si
+    sigue en vuelo o si fallo. Es lo que no se puede con Codex, cuyo rollout no publica
+    ni fallo ni duracion y por eso saca todas las llamadas como hechos.
+    """
+    est = p.get("state") if isinstance(p.get("state"), dict) else {}
+    estado = est.get("status")
+    reloj = est.get("time") if isinstance(est.get("time"), dict) else {}
+    ini, fin = reloj.get("start"), reloj.get("end")
+    nom = p.get("tool") or "?"
+    arg = _clean(est.get("title") or "")[:120]
+    return {"nom": nom, "res": (nom + " \u00b7 " + arg) if arg else nom,
+            "t0": (ini / 1000.0) if ini else 0,
+            "dur": ((fin - ini) / 1000.0) if (ini and fin) else None,
+            "pend": estado in ("pending", "running"), "err": estado == "error",
+            "cod": None, "bytes": 0, "busca": False, "vacio": None}
+
+
+def _cola_kilo(r):
+    """Las ultimas lineas de una sesion de Kilo —mensajes con sus trozos—, de UNA
+    consulta y en orden cronologico.
+
+    Se cachea en la propia fila porque la quieren DOS: `_det_kilo`, para lo dicho y la
+    traza, y `_pulso_kilo`, para los hechos de estado. Con una consulta cada uno serian
+    dos por fila del cursor y por refresco, leyendo exactamente las mismas filas.
+
+    El orden lo pone Python y no el `ORDER BY`: la consulta ordena al reves porque es la
+    unica forma de que el `LIMIT` se quede con la COLA, y ademas el join reparte los
+    trozos de un mismo mensaje en varias filas. Reordenar aqui es ordenar sesenta
+    tuplas, no releer nada.
+    """
+    meta = r.setdefault("meta", {})
+    if "_kilo_cola" in meta:
+        return meta["_kilo_cola"]
+    crudas = []
+    db = meta.get("_kilo_db")
+    con = _abre_kilo(db) if db else None
+    if con is not None:
+        try:
+            crudas = con.execute(_SQL_KILO_COLA, (r.get("name") or "", 60)).fetchall()
+        except Exception:
+            crudas = []
+        finally:
+            con.close()
+
+    def carga(txt):
+        """El JSON de una columna `data`, o {} si no se puede leer."""
+        try:
+            j = json.loads(txt)
+        except Exception:
+            return {}
+        return j if isinstance(j, dict) else {}
+
+    mensajes = {}
+    for mid, creado, mdata, pid, pdata in crudas:
+        m = mensajes.get(mid)
+        if m is None:
+            m = mensajes[mid] = {"id": mid or "", "creado": creado or 0,
+                                 "data": carga(mdata), "partes": []}
+        if pdata is not None:
+            m["partes"].append((pid or "", carga(pdata)))
+    cola = sorted(mensajes.values(), key=lambda m: (m["creado"], m["id"]))
+    for m in cola:
+        m["partes"] = [p for _pid, p in sorted(m["partes"], key=lambda x: x[0])]
+    meta["_kilo_cola"] = cola
+    return cola
+
+
+def _det_kilo(r):
+    """Lo que `detalles()` saca del transcript de Claude, pero de la base de Kilo.
+
+    Rellena los mismos campos que `_det_codex` menos uno: `peso` NO se pone. Esa columna
+    mide el fichero de la sesion, y aqui el fichero es la base entera, comun a todos los
+    proyectos: publicar su tamano en la fila de UNA sesion seria un numero que miente.
+    Sin dato, la columna ya sabe pintar "?".
+    """
+    d = {}
+    meta = r.get("meta") or {}
+    if meta.get("_rama"):
+        d["gitBranch"] = meta["_rama"]
+    if meta.get("cwd"):
+        d["cwd"] = meta["cwd"]
+    eventos = []
+    for m in _cola_kilo(r):
+        papel = m["data"].get("role")
+        texto = _clean(" ".join(p.get("text") or "" for p in m["partes"]
+                                if p.get("type") == "text"))
+        if papel == "user" and texto:
+            d["lastPrompt"] = texto
+        elif papel == "assistant" and texto:
+            d["resp"] = _sin_tabla(texto)
+        for p in m["partes"]:
+            if p.get("type") == "tool":
+                eventos.append(_evento_kilo(p))
+    if eventos:
+        d["ruta"] = eventos[-MAX_EVENTOS:]
+    return d
+
+
+def _pulso_kilo(r):
+    """Hechos sobre lo que hace una sesion de Kilo. El veredicto lo compone quien llame.
+
+    Las mismas claves que publica `pulso()` para Claude, y por eso no hay que tocar nada
+    mas: `estado_estable()` y `_fase()` miran solo estos hechos, no de que CLI vienen.
+
+    Dos decisiones que no son obvias:
+
+      · `escribe` exige ADEMAS que la sesion se haya movido hace poco. Un ultimo mensaje
+        sin `time.completed` es justo lo que deja una sesion que se murio hace tres
+        dias, y sin el corte figuraria como "escribiendo" para siempre. Es el mismo
+        umbral (`VIVA`) con el que `pulso()` lee el mtime del transcript.
+      · `ctx` se queda en `None` a proposito, aunque los tokens SI constan en el mensaje.
+        Lo que no consta es el TOPE: `tope_contexto()` razona sobre nombres de modelo de
+        Claude, y con un `modelID` de cualquiera de los proveedores de Kilo no hay
+        cascada equivalente. Publicar el numerador sin denominador pintaria una barra
+        contra un tope inventado, que informa menos que no pintar barra.
+    """
+    hechos = {"escribe": None, "herramienta": None, "cerrado": None,
+              "ctx": None, "modelo": None}
+    idle = r.get("idle")
+    for m in _cola_kilo(r):
+        datos = m["data"]
+        if datos.get("role") != "assistant":
+            continue
+        reloj = datos.get("time") if isinstance(datos.get("time"), dict) else {}
+        hechos["escribe"] = (idle is not None and idle < VIVA
+                             and reloj.get("completed") is None)
+        hechos["cerrado"] = bool(datos.get("finish"))
+        hechos["modelo"] = datos.get("modelID") or None
+        hechos["herramienta"] = any(
+            p["state"].get("status") in ("pending", "running")
+            for p in m["partes"]
+            if p.get("type") == "tool" and isinstance(p.get("state"), dict))
+    return hechos
+
+
 def detalles(r):
     """aiTitle / lastPrompt / rama / peso del transcript, de su cola.
 
@@ -4299,6 +4457,16 @@ def detalles(r):
         return r["_det"]
     if cli_de(r) == "codex":
         d = _det_codex(r)
+        d["fase"] = _fase(r)
+        r["_det"] = d
+        return d
+    if cli_de(r) == "kilo":
+        # El pulso de Kilo se cuelga AQUI, en la fila del cursor, y no en
+        # `sesiones_kilo()`: alli serian cuarenta consultas por refresco para un dato
+        # que solo se pinta cuando te posas encima. Sale de la MISMA cola que el
+        # detalle, que se lee una vez y se queda cacheada en la fila.
+        r["pulso"] = _pulso_kilo(r)
+        d = _det_kilo(r)
         d["fase"] = _fase(r)
         r["_det"] = d
         return d
@@ -6378,6 +6546,111 @@ def _sesiones_json_dir(fuente, raiz, patron, abrir_cmd, limite=20):
     return out
 
 
+# ─────────────── Kilo Code, que guarda las suyas en sqlite ───────────────
+# Kilo Code (fork de opencode) no deja un fichero por sesion: las guarda TODAS en una
+# base sqlite comun, `$XDG_DATA_HOME/kilo/kilo.db` — en macOS sin XDG puesto,
+# `~/.local/share/kilo/kilo.db`. Los canales dev/nightly escriben `kilo-<canal>.db` al
+# lado, y por eso se miran por glob y no solo la de release.
+#
+# Eso cambia dos cosas frente a los otros CLI:
+#
+#   · la lista sale de UNA consulta. `_cwd_codex` abre cuarenta rollouts solo para saber
+#     el directorio de cada sesion; aqui `directory` es una columna, y la rama tambien.
+#   · el PESO de una sesion deja de existir. La base es de todos los proyectos a la vez.
+#
+# La base se abre SIEMPRE en solo lectura y con un timeout corto: esto corre dentro del
+# refresco de la lista y no puede quedarse esperando a que Kilo suelte un lock.
+#
+# Y Kilo se LISTA pero no es destino de relevo: `kilo` no esta instalado en esta
+# maquina, asi que no se ha podido comprobar en su `--help` como se le pasa un prompt
+# inicial. Por eso no entra en `ARNESES` y `ausentes_de_relevo()` lo saca en gris con
+# ese motivo — la misma regla que deja fuera a `antigravity`, y no un olvido.
+KILO_DATA = pathlib.Path(os.environ.get("XDG_DATA_HOME")
+                         or str(HOME / ".local/share")) / "kilo"
+KILO_DB = KILO_DATA / "kilo.db"
+
+# `parent_id IS NULL` deja fuera las subsesiones — es el `isSidechain` de Claude con
+# otro nombre — y `time_archived IS NULL` lo que el usuario ya archivo. La rama vive en
+# `workspace`, no en `session`, y solo consta si la sesion nacio en un worktree: por eso
+# el join es LEFT y no INNER, que se llevaria por delante a casi todas.
+_SQL_KILO_LISTA = (
+    "SELECT s.id, s.title, s.directory, s.time_updated, w.branch "
+    "FROM session s LEFT JOIN workspace w ON w.id = s.workspace_id "
+    "WHERE s.parent_id IS NULL AND s.time_archived IS NULL "
+    "ORDER BY s.time_updated DESC LIMIT ?")
+
+_SQL_KILO_COLA = (
+    "SELECT m.id, m.time_created, m.data, p.id, p.data "
+    "FROM message m LEFT JOIN part p ON p.message_id = m.id "
+    "WHERE m.session_id = ? "
+    "ORDER BY m.time_created DESC, m.id DESC LIMIT ?")
+
+
+def _kilo_bases():
+    """Las bases de Kilo que hay en disco, o [] si no hay ninguna.
+
+    `SERENO_KILO_DB` apunta a una concreta y manda sobre todo lo demas: es lo que usan
+    los tests para no depender del `$HOME` de quien los corra.
+    """
+    forzada = _env("KILO_DB")
+    if forzada:
+        p = pathlib.Path(forzada)
+        return [p] if p.is_file() else []
+    bases = [KILO_DB]
+    try:
+        bases += sorted(KILO_DB.parent.glob("kilo-*.db"))
+    except OSError:
+        pass
+    return [b for b in bases if b.is_file()]
+
+
+def _abre_kilo(db):
+    """La base de Kilo abierta en SOLO LECTURA, o None si no se puede.
+
+    Por `as_uri()` y no por una f-string: la ruta puede llevar espacios, un `?` o un
+    `#`, y ahi la URI de sqlite parte por donde no es \u2014 el `mode=ro` se perderia y se
+    abriria en lectura/escritura la base de otro programa.
+
+    Devolver None en vez de reventar es el contrato de toda esta rama: una base que Kilo
+    esta migrando, un esquema que cambio upstream o un fichero a medias no pueden dejar
+    la lista entera vacia.
+    """
+    try:
+        return sqlite3.connect(db.as_uri() + "?mode=ro", uri=True, timeout=0.5)
+    except Exception:
+        return None
+
+
+def sesiones_kilo(limite=40):
+    """Las sesiones de Kilo Code, de su base sqlite y sin escribir en ella.
+
+    Los tiempos de Kilo van en MILISEGUNDOS (`Date.now()`) y no en segundos: sin el
+    `/1000` la lista entera saldria fechada en el ano 57000 y el `idle` en negativo.
+    """
+    out = []
+    for db in _kilo_bases():
+        con = _abre_kilo(db)
+        if con is None:
+            continue
+        try:
+            filas = con.execute(_SQL_KILO_LISTA, (limite,)).fetchall()
+        except Exception:
+            filas = []
+        finally:
+            con.close()
+        for sid, titulo, directorio, actualizado, rama in filas:
+            r = _fila_externa("kilo", sid, titulo or "(sin nombre)",
+                              (actualizado or 0) / 1000.0,
+                              ["kilo", "--session", sid], directorio or "")
+            r["meta"]["_rama"] = rama or ""
+            # La base viaja con la fila para que `_cola_kilo` no vuelva a buscarla, y
+            # para que el briefing pueda apuntar al sitio donde esta la historia.
+            r["meta"]["_kilo_db"] = db
+            out.append(r)
+    out.sort(key=lambda r: -(r["created"] or 0))
+    return out[:limite]
+
+
 def sesiones_externas(vistos=()):
     if DEMO:
         return [r for r in sesiones_demo() if r.get("fuente") != "claude"]
@@ -6389,6 +6662,7 @@ def sesiones_externas(vistos=()):
     fuera += sesiones_codex()
     fuera += _sesiones_json_dir("gemini", GEMINI_TMP, "*/chats/*.json", ["gemini", "--resume"])
     fuera += _sesiones_json_dir("antigravity", ANTIGRAVITY, "*.json", ["antigravity", "resume"])
+    fuera += sesiones_kilo()
     return fuera
 
 
@@ -6560,6 +6834,10 @@ def _T():
             "viene es d\u00f3nde iba; su transcripci\u00f3n completa est\u00e1 en disco si necesitas m\u00e1s.",
         "its full transcript is here \u2014 read it for the whole story before you keep going:":
             "su transcripci\u00f3n completa est\u00e1 aqu\u00ed \u2014 l\u00e9ela para tener toda la historia "
+            "antes de seguir:",
+        "its history is in this SQLite database, session {i} \u2014 read it from there "
+        "before you keep going:":
+            "su historia est\u00e1 en esta base SQLite, sesi\u00f3n {i} \u2014 l\u00e9ela de ah\u00ed "
             "antes de seguir:",
         "project": "proyecto",
         "branch": "rama",
