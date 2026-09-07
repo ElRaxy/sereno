@@ -33,6 +33,33 @@ se leerian como «no has gastado nada». Backoff de 60 s doblando hasta 15 min a
 `--watch`. `tests/test_cuota.py` (servidor local y `security` de mentira: ni red real ni llavero
 real) y tres mutantes (169 -> 172).
 
+**Kilo Code, el cuarto CLI de la lista, leído de su sqlite en solo lectura.** Kilo Code es un fork
+de opencode y es el primero que no deja un fichero por sesión: guarda todas las de todos los
+proyectos en una sola base SQLite (`$XDG_DATA_HOME/kilo/kilo.db`, y los canales dev/nightly en
+`kilo-<canal>.db` al lado). `sereno` la abre en **solo lectura** —por URI, con `as_uri()` para que
+una ruta con espacios o con `?` no parta el `mode=ro`— y saca la lista de **una** consulta: el
+directorio, el título y `time_updated` son columnas, y la rama sale del `workspace` enlazado
+cuando la sesión nació en un worktree. Se filtran las subsesiones (`parent_id`, el `isSidechain`
+de Claude con otro nombre) y las archivadas. El detalle y el pulso salen de una segunda consulta,
+solo para la fila del cursor y cacheada en la fila: `_pulso_kilo` publica los mismos hechos que
+`pulso()` —`escribe`, `herramienta`, `cerrado`, `ctx`, `modelo`— y el veredicto lo siguen
+componiendo `estado_estable()` y `_fase()`, que no distinguen de qué CLI vienen. Dos cosas que **no**
+se publican a propósito: el **peso** de la sesión (esa base es de todos los proyectos a la vez, y su
+tamaño no dice nada de una sesión) y el **contexto** (los tokens constan, pero el tope de ventana
+no: `tope_contexto()` razona sobre nombres de modelo de Claude, y una barra sin denominador informa
+menos que ninguna barra). Ante una base ausente, corrupta o con un esquema que upstream haya movido,
+la lista de Kilo se queda vacía y no se lleva por delante a los demás CLI. Glifo `⬡` —una columna,
+`east_asian_width` 'N'— en gris, porque los cuatro pares vivos ya son de los cuatro CLI de antes.
+`tests/test_kilo.py` (78 tests), con la escritura sobre la base como control negativo del `mode=ro`.
+
+**Kilo se lista pero no es destino de relevo, y el cuadro lo dice.** `kilo` no está instalado en
+esta máquina, así que no se ha podido comprobar contra su `--help` cómo se le pasa un prompt
+inicial ni cuál de sus tres flags de bypass es el bueno. Por eso no entra en `ARNESES` ni en
+`FLAG_MODELO`, y `ausentes_de_relevo()` lo saca apagado con «sin comprobar cómo se le pasa un
+prompt» — exactamente el mecanismo que ya usa `antigravity`, sin código nuevo. El briefing tampoco
+inventa una ruta de transcript que no existe: apunta a la base SQLite **más** el id de la sesión,
+que es lo único que consta.
+
 ## 1.41.0
 
 **Elegir el modelo al reabrir y al relevar.** Un toggle `[m]` en los dos cuadros —el de `r`
