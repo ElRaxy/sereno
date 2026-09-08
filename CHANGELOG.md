@@ -1,6 +1,24 @@
 # Changelog
 
-## Sin publicar
+## 1.42.0
+
+**`sereno-cuota` viaja por fin en la release, en el tap y en el instalador.** Estuvo escrito,
+probado, documentado en los dos README y anunciado aqui — y no lo distribuia nadie: `release.sh`
+subia UN solo asset, la formula del tap hacia `bin.install "sereno"` y el instalador se bajaba un
+fichero. Quien instalaba por `brew`, leia el README y tecleaba `sereno-cuota` recibia un `command
+not found` por un comando que la propia documentacion le ofrecia. Es la clase de agujero que no
+rompe ningun test porque el programa esta bien: falta en el REPARTO. Ahora la release lleva **dos
+assets** con sus dos lineas en `SHA256SUMS`, y el sidecar pasa las mismas guardas que el programa
+—estar en el commit, empezar por el shebang, pesar algo y que python lo acepte— antes de subirse y
+otra vez despues, descargado de lo publicado. La formula lo trae como `resource "sereno-cuota"`,
+asi que `bump-tap.sh` recibe **dos sha256** (`./bump-tap.sh <ver> <sha_sereno> <sha_cuota>`),
+comprueba que los dos assets existen y son ese sha, y reescribe las dos mitades: parte la formula
+por el bloque antes de tocarla, porque el patron del `sha256` no sabe de cual de las dos es. Si
+alguna de las cuatro sustituciones no sale exactamente una vez, no escribe nada. `install.sh` baja
+tambien el sidecar y lo deja ejecutable; si esa descarga falla lo **avisa y sigue** —`sereno`
+funciona sin el, sin fichero de cuota no hay celda y ya esta— en vez de tumbar la instalacion del
+programa por un accesorio. `tests/test_distribucion_cuota.py`, mas cuatro casos nuevos en
+`test_release_guardas.py` y tres en `test_bump_tap.py` (78 -> 79 tests).
 
 **El registro que escribe el propio Claude Code, como tercera fuente de estado.** El CLI deja un
 `~/.claude/sessions/<pid>.json` por proceso vivo con `status` (`busy`/`waiting`/`idle`) y
