@@ -389,6 +389,11 @@ reading that line, or a throwaway conversation would talk the ceiling down on it
 There is nothing to install, really. `sereno` is one Python file. Every route below ends with
 that same file sitting somewhere on your `PATH`.
 
+Homebrew and `install.sh` also put **`sereno-cuota`** next to it — the sidecar that asks how
+much of your plan you have spent and writes `~/.sereno/cuota.json`, which `sereno` then reads
+like any other file. It is a separate program on purpose: `sereno` makes no network calls and
+that one does. You never have to run it; without it there is simply no quota cell.
+
 **With Homebrew**
 
 ```bash
@@ -441,8 +446,10 @@ curl -fsSLo /tmp/install.sh https://raw.githubusercontent.com/ElRaxy/sereno/main
 less /tmp/install.sh && sh /tmp/install.sh
 ```
 
-It's 32 lines: it checks you have Python 3.8+, downloads one file into `~/.local/bin`, and
-tells you if that directory isn't on your `PATH`. Set `SERENO_BIN` to put it elsewhere.
+It's 53 lines: it checks you have Python 3.8+, downloads the two files into `~/.local/bin`,
+and tells you if that directory isn't on your `PATH`. Set `SERENO_BIN` to put them elsewhere.
+If the sidecar is the one that fails to download it says so and carries on: `sereno` works
+without it, and losing the whole install over an accessory would be the worse trade.
 
 ---
 
@@ -1325,7 +1332,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are seventy-eight
+collects the whole folder, prints a line per file and ends with the count. There are seventy-nine
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 

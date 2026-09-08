@@ -360,6 +360,11 @@ ignora al leer esa línea: si no, una conversación de nada bajaría el tope por
 En realidad no hay nada que instalar. `sereno` es un fichero de Python. Todas las vías de abajo
 acaban con ese mismo fichero en algún sitio de tu `PATH`.
 
+Homebrew e `install.sh` dejan además **`sereno-cuota`** al lado: el sidecar que pregunta cuánto
+llevas gastado del plan y escribe `~/.sereno/cuota.json`, que `sereno` lee como leería cualquier
+otro fichero. Es un programa aparte a propósito —`sereno` no hace red y ese sí— y no estás
+obligado a ejecutarlo nunca: sin él simplemente no hay celda de cuota.
+
 **Con Homebrew**
 
 ```bash
@@ -412,8 +417,10 @@ curl -fsSLo /tmp/install.sh https://raw.githubusercontent.com/ElRaxy/sereno/main
 less /tmp/install.sh && sh /tmp/install.sh
 ```
 
-Son 32 líneas: comprueba que tienes Python 3.8 o más nuevo, baja un fichero a `~/.local/bin` y
-te avisa si esa carpeta no está en tu `PATH`. Con `SERENO_BIN` lo pones en otro sitio.
+Son 53 líneas: comprueba que tienes Python 3.8 o más nuevo, baja los dos ficheros a
+`~/.local/bin` y te avisa si esa carpeta no está en tu `PATH`. Con `SERENO_BIN` los pones en
+otro sitio. Si el que falla al bajar es el sidecar, lo dice y sigue: `sereno` funciona sin él,
+y perder la instalación entera por un accesorio sería el peor cambio.
 
 ---
 
@@ -1288,7 +1295,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y ocho,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y nueve,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
