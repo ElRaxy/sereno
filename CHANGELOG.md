@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.43.0
+
+**`r` reabre TODAS las marcadas, tambien las que ya se ven en otra ventana.** Se marcaban seis
+sesiones, cuatro estaban abiertas en otro Warp y se abrian dos; con las seis abiertas no se abria
+ninguna y salia «esas ya tienen pestana abierta», que suena a error de quien pulsa. El filtro era
+deliberado —evitar una pestana duplicada— pero contradice el gesto: marcar y decir «abrelas aqui»
+ES pedir que se las traiga. Ahora no se descarta ninguna, y el pie dice cuantas venian de otra
+pestana en vez de cuantas se quedaron fuera.
+
+Para que «aqui» signifique algo, el comando de una sesion viva pasa a ser `tmux attach -d`. Sin
+el `-d` la sesion acaba con **dos** clientes —medido: `session_attached` = 2— y tmux la encoge al
+tamano del mas pequeno, asi que las dos vistas quedan mal; con `-d` el cliente viejo se suelta y la
+sesion se muda. En una sesion que no tenia a nadie enganchado no hace nada.
+
+Nadie lo cazo antes porque **toda la bateria marcaba una sola fila** y ademas ponia `attached =
+False` en todas para que la seleccion no saliera vacia: con una marca y sin nadie enganchado, el
+filtro no se veia nunca. `tests/test_reabrir_las_marcadas.py` cubre el hueco — marcar una, dos y
+tres; las tres enganchadas; el `-d` en el comando; y el hecho de tmux en que se apoya, medido
+contra un servidor de verdad (79 -> 80 tests).
+
 ## 1.42.0
 
 **`sereno-cuota` viaja por fin en la release, en el tap y en el instalador.** Estuvo escrito,

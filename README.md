@@ -1067,6 +1067,12 @@ window with one tab per session. The rest open a window per session:
 | **tmux** | a tmux window per session, in the session you are already in | being *inside* tmux — the only one that works off macOS |
 | **Terminal.app** | a Terminal window per session | macOS |
 
+**A session already showing in another window moves here, it isn't duplicated.** Mark it, press
+`r` and it comes over: the reattach uses `tmux attach -d`, which drops the previous client. Without
+that `-d` the session ends up with **two** clients and tmux shrinks it to the smaller one, so both
+views look wrong. Until 1.43.0 those sessions didn't open at all — `r` dropped them, so marking six
+when four were already open opened two.
+
 Terminal.app goes last on purpose: macOS **restores** its windows on reboot, so a day of
 handovers leaves windows coming back at you at startup. iTerm2 comes before kitty because it
 reuses its process: kitty is launched with `open -n` and spends one instance per window.
@@ -1332,7 +1338,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are seventy-nine
+collects the whole folder, prints a line per file and ends with the count. There are eighty
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
