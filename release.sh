@@ -49,8 +49,39 @@ echo "extraido: ${bytes}B · primera linea: ${primera} · dice ser: ${declarada:
   echo "ABORTA: el fichero dice ser '${declarada:-<nada>}' y la release es '$VER'." >&2
   echo "        bumpea VERSION en \`sereno\` y commitea antes de publicar." >&2; exit 1; }
 
-( cd "$TMP" && shasum -a 256 sereno > SHA256SUMS )
-esperado="$(awk '{print $1}' "$TMP/SHA256SUMS")"
+# ── el sidecar, que estaba documentado y no lo distribuia nadie ─────────────────
+# `sereno-cuota` sale en los dos README y en el CHANGELOG desde que existe, pero la
+# release subia UN solo asset: quien instalaba por brew y tecleaba lo que acababa de leer
+# se llevaba un "command not found". Va detras de las guardas de `sereno` a proposito,
+# para que a un commit sin sidecar le conteste una linea propia y no el error de `git
+# show`, que no explica nada a quien publica.
+git show "${SHA}:sereno-cuota" > "$TMP/sereno-cuota" 2> /dev/null || {
+  echo "ABORTA: el commit no trae \`sereno-cuota\`; el sidecar viaja en la release." >&2
+  exit 1; }
+chmod +x "$TMP/sereno-cuota"
+
+# No tiene `--version`: no lleva numero propio, viaja con el del programa. Asi que la
+# guarda equivalente a "dime quien eres" es que python lo acepte — lo mismo que hace la
+# formula del tap en el otro extremo del cable, y por el mismo motivo: un asset roto
+# cuyo sha256 cuadra se instala sin una queja y no se ve hasta ejecutarlo.
+primera_c="$(head -1 "$TMP/sereno-cuota")"
+bytes_c="$(wc -c < "$TMP/sereno-cuota" | tr -d ' ')"
+compila_c=0
+if python3 -m py_compile "$TMP/sereno-cuota" 2> /dev/null; then compila_c=1; fi
+echo "sidecar: ${bytes_c}B · primera linea: ${primera_c} · lo compila python: ${compila_c}"
+
+[ "$primera_c" = "#!/usr/bin/env python3" ] || {
+  echo "ABORTA: el sidecar no empieza por el shebang; no es el programa." >&2; exit 1; }
+[ "$bytes_c" -gt 1000 ] || {
+  echo "ABORTA: el sidecar son ${bytes_c}B, que no es \`sereno-cuota\`." >&2; exit 1; }
+[ "$compila_c" = 1 ] || {
+  echo "ABORTA: python3 no acepta el sidecar extraido; no es un programa." >&2; exit 1; }
+
+( cd "$TMP" && shasum -a 256 sereno sereno-cuota > SHA256SUMS )
+# Con dos lineas en el fichero, `awk '{print $1}'` devolveria las dos pegadas y el sha
+# que se le pasaria al tap no seria un sha. Se pide por nombre, no por posicion.
+esperado="$(awk '$2 == "sereno" {print $1}' "$TMP/SHA256SUMS")"
+esperado_cuota="$(awk '$2 == "sereno-cuota" {print $1}' "$TMP/SHA256SUMS")"
 
 # ── notas: la seccion del CHANGELOG mas el bloque Install de la release anterior ─
 python3 - "$VER" "$TMP" <<'PY'
@@ -70,16 +101,21 @@ PY
 git tag -a "v$VER" "$SHA" -m "sereno $VER"
 git push origin "v$VER"
 gh release create "v$VER" --repo ElRaxy/sereno --title "sereno $VER" \
-   --notes-file "$TMP/notas.md" "$TMP/sereno" "$TMP/SHA256SUMS"
+   --notes-file "$TMP/notas.md" "$TMP/sereno" "$TMP/sereno-cuota" "$TMP/SHA256SUMS"
 
 # ── verificacion: se DESCARGA lo publicado, no se cree lo que se subio ──────────
 BAJA="$TMP/baja"; mkdir -p "$BAJA"
 gh release download "v$VER" --repo ElRaxy/sereno -D "$BAJA"
 real="$(shasum -a 256 "$BAJA/sereno" | awk '{print $1}')"
 dice="$(python3 "$BAJA/sereno" --version 2>/dev/null | awk '{print $2}')"
+real_c="$(shasum -a 256 "$BAJA/sereno-cuota" 2>/dev/null | awk '{print $1}')"
+compila_baja=0
+if python3 -m py_compile "$BAJA/sereno-cuota" 2> /dev/null; then compila_baja=1; fi
 echo "publicado: sha=$real · dice ser: ${dice:-<nada>}"
+echo "publicado: sidecar sha=${real_c:-<nada>} · lo compila python: $compila_baja"
 [ "$real" = "$esperado" ] && [ "$dice" = "$VER" ] \
-  && echo "OK  v$VER publicada y verificada por descarga" \
+  && [ "$real_c" = "$esperado_cuota" ] && [ "$compila_baja" = 1 ] \
+  && echo "OK  v$VER publicada y verificada por descarga (programa y sidecar)" \
   || { echo "FALLO: lo publicado no cuadra con lo que se subio." >&2; exit 1; }
 
 # ── el tap de Homebrew, que se bumpea solo ──────────────────────────────────────
@@ -93,10 +129,10 @@ echo "publicado: sha=$real · dice ser: ${dice:-<nada>}"
 # haga pensar que hay que republicar algo que no se puede republicar.
 if [ "${SERENO_SIN_TAP:-}" = "1" ]; then
   echo "tap: saltado (SERENO_SIN_TAP=1)"
-elif ./bump-tap.sh "$VER" "$esperado"; then
+elif ./bump-tap.sh "$VER" "$esperado" "$esperado_cuota"; then
   :
 else
   echo "AVISO: el tap se quedo atras, pero la release v$VER SI esta publicada y es buena." >&2
-  echo "       Reintenta solo esa parte:  ./bump-tap.sh $VER $esperado" >&2
+  echo "       Reintenta solo esa parte:  ./bump-tap.sh $VER $esperado $esperado_cuota" >&2
   exit 1
 fi

@@ -11,9 +11,15 @@ un directorio temporal), asi que el test empuja de verdad y luego RELEE del remo
 una llamada a la red, y aun asi se ejerce el camino entero: clonar, editar, empujar y
 verificar.
 
-Los tres casos que abortan valen poco sin el primero, que es el CONTROL POSITIVO: un
-guion que no hiciera nada nunca pasaria los tres. Y el ultimo mira la otra mitad de lo
+Los casos que abortan valen poco sin el primero, que es el CONTROL POSITIVO: un guion
+que no hiciera nada nunca los pasaria todos. Y el segundo mira la otra mitad de lo
 mismo — que un bump repetido no invente un commit vacio.
+
+Desde la 1.42.0 la formula trae ademas un `resource "sereno-cuota"` con su propia url y
+su propio sha256, asi que la reescritura son CUATRO sustituciones en dos mitades. El
+patron del sha256 no sabe de cual de las dos es, y por eso el guion parte la formula por
+el bloque antes de tocar nada: aqui se prueba que las dos mitades quedan al dia y que una
+formula sin el bloque no se edita a ciegas.
 """
 import hashlib, os, pathlib, re, shutil, subprocess, sys, tempfile
 
@@ -25,26 +31,42 @@ SHA_B = "b" * 64
 FORMULA = '''class Sereno < Formula
   url "https://github.com/ElRaxy/sereno/releases/download/v1.0.0/sereno"
   sha256 "{sha}"
+
+  resource "sereno-cuota" do
+    url "https://github.com/ElRaxy/sereno/releases/download/v1.0.0/sereno-cuota"
+    sha256 "{sha_cuota}"
+  end
 end
 '''
+SIN_RESOURCE = '''class Sereno < Formula
+  url "https://github.com/ElRaxy/sereno/releases/download/v1.0.0/sereno"
+  sha256 "{sha}"
+end
+'''
+SHA_C_VIEJO = "e" * 64
 
 ENT = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
            GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t",
            GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null")
 
 
-def assets(version="2.0.0", cuerpo=b"#!/usr/bin/env python3\n"):
+def assets(version="2.0.0", cuerpo=b"#!/usr/bin/env python3\n",
+           cuerpo_cuota=b"#!/usr/bin/env python3\n# sereno-cuota\n", con_cuota=True):
     """Un 'servidor' de releases que es un directorio, servido por `file://`.
 
-    El guion comprueba contra la red que el asset existe y que su sha es el que se le
+    El guion comprueba contra la red que los assets existen y que su sha es el que se le
     pide. Probar eso contra GitHub ataria el test a que haya conexion y a que una release
     concreta siga publicada; `curl` habla `file://` igual de bien, asi que la
     comprobacion se ejerce ENTERA sin salir de la maquina.
+
+    `con_cuota=False` publica solo el programa: la release de antes de la 1.42.0.
     """
     d = pathlib.Path(tempfile.mkdtemp())
     (d / ("v" + version)).mkdir()
     (d / ("v" + version) / "sereno").write_bytes(cuerpo)
-    return d, hashlib.sha256(cuerpo).hexdigest()
+    if con_cuota:
+        (d / ("v" + version) / "sereno-cuota").write_bytes(cuerpo_cuota)
+    return d, hashlib.sha256(cuerpo).hexdigest(), hashlib.sha256(cuerpo_cuota).hexdigest()
 
 
 def tap(contenido):
@@ -81,22 +103,27 @@ def main():
     fallos = []
 
     # ── CONTROL POSITIVO: una formula normal se bumpea y el remoto lo refleja ──────
-    releases, SHA_B = assets("2.0.0")
-    d, bare = tap(FORMULA.format(sha=SHA_A))
+    releases, SHA_B, SHA_C = assets("2.0.0")
+    d, bare = tap(FORMULA.format(sha=SHA_A, sha_cuota=SHA_C_VIEJO))
     try:
-        cod, salida = corre(bare, "2.0.0", SHA_B, base=releases)
+        cod, salida = corre(bare, "2.0.0", SHA_B, SHA_C, base=releases)
         fin = publicado(bare)
         if cod != 0:
             fallos.append(f"formula buena: salio con {cod}. Dijo: {salida.strip()[:200]!r}")
-        if "download/v2.0.0/sereno" not in fin:
+        if "download/v2.0.0/sereno\n" not in fin and 'download/v2.0.0/sereno"' not in fin:
             fallos.append(f"formula buena: el remoto no apunta a v2.0.0. Quedo: {fin!r}")
         if SHA_B not in fin or SHA_A in fin:
             fallos.append(f"formula buena: el sha256 no se cambio. Quedo: {fin!r}")
+        # ── y la otra mitad: el resource del sidecar, que es la que no existia ─────
+        if 'download/v2.0.0/sereno-cuota"' not in fin:
+            fallos.append(f"formula buena: el resource sigue sin apuntar a v2.0.0. Quedo: {fin!r}")
+        if SHA_C not in fin or SHA_C_VIEJO in fin:
+            fallos.append(f"formula buena: el sha256 del sidecar no se cambio. Quedo: {fin!r}")
 
         # ── y un segundo bump igual no inventa un commit ──────────────────────────
         antes = subprocess.run(["git", "rev-parse", "main"], cwd=bare, capture_output=True,
                                text=True, env=ENT).stdout
-        cod2, salida2 = corre(bare, "2.0.0", SHA_B, base=releases)
+        cod2, salida2 = corre(bare, "2.0.0", SHA_B, SHA_C, base=releases)
         despues = subprocess.run(["git", "rev-parse", "main"], cwd=bare, capture_output=True,
                                  text=True, env=ENT).stdout
         if cod2 != 0 or "ya estaba" not in salida2:
@@ -107,33 +134,46 @@ def main():
         shutil.rmtree(str(d), ignore_errors=True)
 
     # ── los que tienen que abortar, y dejar el remoto intacto ─────────────────────
+    buena = FORMULA.format(sha=SHA_A, sha_cuota=SHA_C_VIEJO)
     casos = [
         ("una formula sin url de release",
-         'class Sereno < Formula\n  sha256 "%s"\nend\n' % SHA_A, "2.0.0", SHA_B, "url=0"),
+         buena.replace('  url "https://github.com/ElRaxy/sereno/releases/download/v1.0.0/sereno"\n',
+                       ""), "2.0.0", SHA_B, SHA_C, "url=0"),
+        # El segundo sha256 va FUERA del resource a proposito: dentro seria el otro
+        # mensaje, y lo que este caso vigila es la mitad de siempre.
         ("una formula con dos sha256",
-         FORMULA.format(sha=SHA_A).replace("end\n", '  sha256 "%s"\nend\n' % SHA_A),
-         "2.0.0", SHA_B, "sha256=2"),
+         buena.replace('  sha256 "%s"\n' % SHA_A, '  sha256 "%s"\n  sha256 "%s"\n'
+                       % (SHA_A, SHA_A), 1),
+         "2.0.0", SHA_B, SHA_C, "sha256=2"),
+        # El bloque del sidecar no se inventa: sin el, `brew install` dejaria fuera
+        # `sereno-cuota` y el README seguiria prometiendo un comando que no existe.
+        ("una formula sin el bloque resource del sidecar",
+         SIN_RESOURCE.format(sha=SHA_A), "2.0.0", SHA_B, SHA_C, "resource"),
         ("un sha256 que no es un sha256",
-         FORMULA.format(sha=SHA_A), "2.0.0", "nosoyunsha", "no es un sha256"),
+         buena, "2.0.0", "nosoyunsha", SHA_C, "no es un sha256"),
         ("un sha256 de 63 caracteres",
-         FORMULA.format(sha=SHA_A), "2.0.0", "a" * 63, "63 caracteres"),
+         buena, "2.0.0", "a" * 63, SHA_C, "63 caracteres"),
+        ("un sha256 del sidecar que no es un sha256",
+         buena, "2.0.0", SHA_B, "tampocosoyunsha", "no es un sha256"),
         # Estos tres son los que la auditoria echo en falta: el guion validaba la FORMA
         # y nunca el HECHO, asi que un dedazo en el numero dejaba el tap apuntando a un
         # 404 y salia con 0. Lo unico que lo tapaba era el orden dentro de `release.sh`.
         ("una version que no esta publicada",
-         FORMULA.format(sha=SHA_A), "99.99.99", SHA_B, "no esta publicada"),
+         buena, "99.99.99", SHA_B, SHA_C, "no esta publicada"),
         ("un sha que no es el del asset publicado",
-         FORMULA.format(sha=SHA_A), "2.0.0", "c" * 64, "se pidio escribir"),
+         buena, "2.0.0", "c" * 64, SHA_C, "se pidio escribir"),
+        ("un sha del sidecar que no es el del asset publicado",
+         buena, "2.0.0", SHA_B, "d" * 64, "sereno-cuota publicado"),
         ("una formula con una stanza `version` explicita",
-         FORMULA.format(sha=SHA_A).replace("class Sereno < Formula\n",
-                                           'class Sereno < Formula\n  version "1.0.0"\n'),
-         "2.0.0", SHA_B, "stanza"),
+         buena.replace("class Sereno < Formula\n",
+                       'class Sereno < Formula\n  version "1.0.0"\n'),
+         "2.0.0", SHA_B, SHA_C, "stanza"),
     ]
-    for nombre, contenido, ver, sha, esperado in casos:
+    for nombre, contenido, ver, sha, sha_c, esperado in casos:
         d, bare = tap(contenido)
         try:
             antes = publicado(bare)
-            cod, salida = corre(bare, ver, sha, base=releases)
+            cod, salida = corre(bare, ver, sha, sha_c, base=releases)
             if cod == 0:
                 fallos.append(f"{nombre}: salio con 0; tenia que abortar")
             if esperado not in salida:
@@ -146,7 +186,7 @@ def main():
             shutil.rmtree(str(d), ignore_errors=True)
 
     # ── sin argumentos no hace nada y lo dice ─────────────────────────────────────
-    d, bare = tap(FORMULA.format(sha=SHA_A))
+    d, bare = tap(FORMULA.format(sha=SHA_A, sha_cuota=SHA_C_VIEJO))
     try:
         cod, salida = corre(bare, base=releases)
         if cod == 0 or "uso:" not in salida:
@@ -176,9 +216,10 @@ def main():
         for f in fallos:
             print("FALLO:", f)
         return 1
-    print("ok: bumpea y el remoto lo refleja, repetirlo no mueve nada, y lo paran sin "
-          "tocar el tap una formula ambigua, un sha falso, una version sin publicar, un "
-          "sha que no es el del asset y una stanza `version` que no bumpea")
+    print("ok: bumpea las dos mitades —programa y resource del sidecar—, el remoto lo "
+          "refleja, repetirlo no mueve nada, y lo paran sin tocar el tap una formula "
+          "ambigua, una sin el bloque resource, un sha falso de cualquiera de los dos, "
+          "una version sin publicar y una stanza `version` que no bumpea")
     return 0
 
 
