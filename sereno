@@ -2489,7 +2489,12 @@ def _comando_de(r, modelo=None):
         orden = [bin_cli(cli)] + _con_modelo(cli, modelo) + list(r["abrir"][1:])
         return " ".join(shlex.quote(x) for x in orden), e.get("cwd") or str(HOME)
     if str(r.get("name", "")).startswith("cc-"):
-        return (f"{shlex.quote(TMUX_BIN)} -L {SOCK} attach -t {shlex.quote(r['name'])}",
+        # `-d`, y no es un adorno: sin el, una sesion que ya se veia en otra ventana
+        # acaba con DOS clientes —medido: `session_attached` pasa a 2— y tmux encoge la
+        # sesion al tamano del cliente mas pequeno, asi que las dos vistas quedan mal.
+        # Con `-d` el cliente viejo se suelta y la sesion se muda AQUI, que es lo que
+        # pide quien la abre. En una sesion sin nadie enganchado no hace nada.
+        return (f"{shlex.quote(TMUX_BIN)} -L {SOCK} attach -d -t {shlex.quote(r['name'])}",
                 e.get("cwd") or str(HOME))
     if e.get("id"):                        # sesion de Claude muerta: --resume
         # Lista de tokens y un `join`, no una f-string partida en dos lineas: eso es un
@@ -6307,14 +6312,12 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     aviso = _("Mark which ones you want to resume first.")
                     continue
                 sel = [r for r in base if r["name"] in marcadas]
+                # Las que ya tenian pestana en otra ventana NO se caen de la lista.
+                # Se caian, y ese era el bug: marcabas seis, cuatro estaban abiertas en
+                # el otro Warp y solo se abrian dos — y si las seis lo estaban, ninguna.
+                # "Abrir aqui" es justo el gesto de traerselas, no de saltarselas; el
+                # `attach -d` de `_comando_de` las muda de ventana en vez de duplicarlas.
                 con_pestana = [r for r in sel if r["attached"]]
-                sel = [r for r in sel if not r["attached"]]
-                if not sel:
-                    aviso = _("Those already have a tab open.")
-                    continue
-                # Las que ya tienen pestana se caen de la lista, y hasta hoy en
-                # silencio: marcabas seis, se abrian cuatro y no habia forma de saber
-                # cuales faltaban ni por que.
                 _sin_forma = pestanas_de(sel)[1]
                 if not ejecutar:
                     res["out"] = ("reopen", sel)
@@ -6343,7 +6346,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 # firma del `ejecutar` de siempre cuando no lo hay.
                 extra_m = (modelo_reabrir,) if modelo_reabrir else ()
                 aviso, todas = ejecutar("reopen", sel, donde, *extra_m)
-                fuera = ([_("{n} already had a tab", n=len(con_pestana))] if con_pestana
+                fuera = ([_("{n} moved here from another tab", n=len(con_pestana))]
+                         if con_pestana
                          else []) + ([_("{n} cannot be opened from here",
                                         n=len(_sin_forma))] if _sin_forma else [])
                 if fuera:
@@ -6848,7 +6852,7 @@ def _T():
         "last thing it said": "lo \u00faltimo que dijo",
         "First get your bearings in that directory, then carry on the work above.":
             "Ori\u00e9ntate primero en ese directorio y luego sigue con el trabajo de arriba.",
-        "{n} already had a tab": "{n} ya ten\u00edan pesta\u00f1a",
+        "{n} moved here from another tab": "{n} tra\u00eddas de otra pesta\u00f1a",
         "{n} cannot be opened from here": "{n} no se saben abrir desde aqu\u00ed",
         "None of those can be opened from here.":
             "Ninguna de esas se sabe abrir desde aqu\u00ed.",
@@ -6972,7 +6976,6 @@ def _T():
         "Stopped {s}.": "Parada {s}.",
         "--stop needs a session name.": "--stop necesita el nombre de una sesión.",
         "They all already have a tab open.": "Todas están ya abiertas en una pestaña.",
-        "Those already have a tab open.": "Esas ya tienen pestaña abierta.",
         "[in a tab]": "[en una pestaña]",
         "[y] confirm    [any other key] cancel": "[s] confirmar    [cualquier otra] cancelar",
         "`{p}` to manage them": "`{p}` para gestionarlas",
@@ -7145,7 +7148,7 @@ def _T():
 _T()
 
 
-VERSION = "1.42.0"
+VERSION = "1.43.0"
 
 
 # Los que existen, y cuales se llevan el argumento siguiente. Sin esta lista un flag

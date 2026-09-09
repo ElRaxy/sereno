@@ -1034,6 +1034,12 @@ pestaña por sesión. Los demás abren una ventana por sesión:
 | **tmux** | una ventana de tmux por sesión, en la que ya estás | estar *dentro* de tmux — el único que funciona fuera de macOS |
 | **Terminal.app** | una ventana de Terminal por sesión | macOS |
 
+**Una sesión que ya se ve en otra ventana se muda aquí, no se duplica.** Marcarla y pulsar `r` la
+trae: el reenganche va con `tmux attach -d`, que suelta al cliente anterior. Sin ese `-d` la sesión
+acaba con **dos** clientes y tmux la encoge al tamaño del más pequeño, así que las dos vistas
+quedan mal. Hasta la 1.43.0 esas sesiones ni se abrían — `r` las descartaba, y marcando seis de las
+que cuatro ya estaban abiertas se abrían dos.
+
 Terminal.app va último a propósito: macOS **restaura** sus ventanas al reiniciar, así que un día
 de relevos deja ventanas resucitando al arrancar. iTerm2 va antes que kitty porque reutiliza su
 proceso: kitty se lanza con `open -n` y gasta una instancia por ventana.
@@ -1295,7 +1301,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son setenta y nueve,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
