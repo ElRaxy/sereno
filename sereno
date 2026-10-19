@@ -486,14 +486,20 @@ def tmux_kill(name=None):
         pass
 
 
-def meta_by_tmux():
-    """Metadatos del registro indexados por nombre de sesion tmux."""
+def meta_by_tmux(vivas=None):
+    """Metadatos del registro indexados por nombre de sesion tmux.
+
+    Con `vivas`, solo las sesiones que tmux tiene abiertas. El registro guarda tambien
+    las muertas (cientos), nadie las mira, y resolver el transcript de cada una recorre
+    el directorio del proyecto: medido el 2026-10-19, 33 s de los 34 que tardaba
+    `--json` con 405 entradas y 550 transcripts.
+    """
     if not LIVE.is_dir():
         return {}
     out = {}
     for f in sorted(LIVE.glob("*.env")):
         e = read_entry(f)
-        if e and e.get("tmux_session"):
+        if e and e.get("tmux_session") and (vivas is None or e["tmux_session"] in vivas):
             e["_transcript"] = transcript_vivo(e)
             out[e["tmux_session"]] = e
     return out
@@ -1256,8 +1262,8 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     # estado— y NO quiere el `ps -eo` de toda la maquina cada veinte segundos.
     if fino is None:
         fino = con_ram
-    metas = meta_by_tmux()
     paneles = tmux_list()
+    metas = meta_by_tmux({p[0] for p in paneles})
     mem = rss_por_arbol([p for *_resto, p in paneles if p]) if con_ram else {}
     rows = []
     for name, created, attached, titulo, pid in paneles:
@@ -1519,7 +1525,9 @@ def fila_de_transcript(p, mt=None, fino=True):
             mt = p.stat().st_mtime
         except OSError:
             mt = 0
-    clave = (str(p), mt)
+    # `fino` va en la clave: la pasada ligera no trae aiTitle ni rama, y `--json` hace
+    # una ligera y otra fina en el mismo segundo, con el mismo mtime.
+    clave = (str(p), mt, fino)
     fila = _CACHE_DISCO.get(clave)
     if fila is None:
         e = {"id": p.stem, "project_dir": str(p.parent), "_transcript": p}
