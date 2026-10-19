@@ -77,6 +77,18 @@ def main():
         if not fila_l["title"].endswith("…"):
             fallos.append("title recortado no acaba en puntos suspensivos")
 
+        # ── 4. la cache no sirve la fila ligera a quien pide la fina ─────────────
+        # `--json` lee el disco dos veces seguidas, ligera y fina, con el mismo mtime.
+        pulso_real = ns["pulso"]
+        ns["pulso"] = lambda e, fino=True: {"aiTitle": "Fino" if fino else ""}
+        try:
+            ns["_CACHE_DISCO"].clear()
+            fila_de_transcript(sin_rename, mt=1.0, fino=False)
+            igual("la pasada fina no hereda la ligera",
+                  fila_de_transcript(sin_rename, mt=1.0, fino=True)["title_full"], "Fino")
+        finally:
+            ns["pulso"] = pulso_real
+
     if fallos:
         print("FALLA test_rename:")
         for f in fallos:

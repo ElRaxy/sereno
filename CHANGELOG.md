@@ -11,6 +11,10 @@
   o `infra` cuando el run ya publicó su veredicto. La demo incluye un hijo ficticio.
 - Una sola lectura adicional de `ps` por refresco; los status opcionales se leen
   únicamente con procesos Codex presentes y con un límite de 64 KiB por fichero.
+- `--json` pasa de 33 s a 0,3 s. Resolvía el transcript de cada entrada del registro,
+  también de las cientos de sesiones tmux ya cerradas; ahora solo de las vivas.
+- Una sesión de disco salía en `--json` sin título, rama ni modelo: la caché servía
+  la lectura ligera a la pasada fina hecha en el mismo segundo.
 
 ## 1.43.0
 

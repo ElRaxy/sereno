@@ -191,7 +191,7 @@ class CodexVivos(unittest.TestCase):
         self.assertEqual(set(d["codex_orphans"][0]), expected)
         self.assertNotIn("SECRET", buf.getvalue())
         self.assertNotIn(str(self.cwd), buf.getvalue())
-        self.ns["meta_by_tmux"] = lambda: {}
+        self.ns["meta_by_tmux"] = lambda *a, **k: {}
         self.ns["tmux_list"] = lambda: []
         self.ns["sesiones_de_disco"] = lambda **kw: [self.row]
         self.ns["colisiones"] = lambda rows: rows
