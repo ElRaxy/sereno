@@ -472,6 +472,23 @@ resto eran volcados de `tool_result` —greps, contenidos de ficheros, salidas d
 `CLAUDE.md` del proyecto, que el CLI pega en **cada** sesión. Con eso dentro, cualquier palabra
 de tu propio proyecto casa en todas partes.
 
+### Codex hijos en marcha
+
+Un proceso `codex` vivo aparece como una fila hija sangrada de la sesión de Claude
+Code que lo lanzó, incluso a través de una shell intermedia. El selector, `--list`
+y `--now` muestran modelo y tiempo vivo, más fase, ronda e ID del run cuando
+constan. La atribución sigue los procesos padres; compartir directorio no basta.
+No hace falta ningún wrapper ni metadato de run.
+
+`--json` añade `codex_children` a cada sesión y una lista `codex_orphans` en el
+nivel superior para los procesos sin sesión madre conocida. Ambas contienen solo
+`pid`, `model`, `alive_seconds`, `run_id`, `phase` y `ronda`, con `null` donde no
+conste el dato; no incluyen comandos, prompts ni respuestas. El esquema JSON sigue en 1.
+
+`--watch` avisa una vez cuando desaparece un hijo, con el timbre y la notificación
+habituales. Si su run ya terminó, incluye el veredicto registrado: `ready`,
+`code_failure` o `infra`. `--demo` incluye un hijo ficticio.
+
 ### `--watch`
 
 Déjalo en un panel que te sobre. No dice nada hasta que una sesión **deja de trabajar**: el
@@ -1122,7 +1139,7 @@ entera de imports es `base64, os, stat, sys, json, re, shlex, shutil, subprocess
 datetime, pathlib, sqlite3, unicodedata, uuid, traceback` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
 nada capaz de mandar nada a ningún sitio.
 
-Los únicos programas externos que llega a ejecutar son `ps` (memoria), `tmux` (listar y matar
+Los únicos programas externos que llega a ejecutar son `ps` (memoria y ascendencia), `tmux` (listar y matar
 sesiones, y abrir una ventana por sesión), `open` (pasarle una sesión a Warp), `osascript` (una
 ventana de Terminal.app por sesión, y —bajo `--watch`— el aviso de escritorio), `defaults` (leer
 tu locale en macOS) y `notify-send` para ese mismo aviso fuera de macOS. Sin telemetría, sin
@@ -1301,7 +1318,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y uno,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 

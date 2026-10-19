@@ -42,6 +42,8 @@ CAMPOS = {
     "clash_command": str,
     # Enum cerrado y en ingles. Nunca el comando que se atasca, que si sale en el panel.
     "stuck": list,
+    # Los Codex hijos: pid, modelo, tiempo vivo y su run. Ni cwd ni tarea.
+    "codex_children": list,
 }
 ESTADOS = {"writing", "in_command", "waiting", "stopped", "unknown"}
 
@@ -58,7 +60,9 @@ ESQUEMA = 1
 # programa aparte —y el unico— que abre una conexion. Anadirlos NO sube `ESQUEMA`: nada
 # se ha quitado ni ha cambiado de tipo, y quien lea el esquema 1 sigue leyendo lo mismo.
 SOBRE = {"sereno": str, "schema": int, "sessions": list,
-         "quota_session_pct": int, "quota_weekly_pct": int, "quota_fetched_at": int}
+         "quota_session_pct": int, "quota_weekly_pct": int, "quota_fetched_at": int,
+         # Los Codex sin sesion conocida: no son de ninguna fila, van aqui.
+         "codex_orphans": list}
 
 
 def main():

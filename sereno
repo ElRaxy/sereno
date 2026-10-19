@@ -1066,6 +1066,172 @@ def rss_por_arbol(pids):
     return {p: suma(int(p), set()) / 1024 for p in pids if str(p).isdigit()}
 
 
+CODEX_ORPHANS = []
+_CAMPOS_CODEX = ("pid", "model", "alive_seconds", "run_id", "phase", "ronda")
+
+
+def cwd_procesos(pids):
+    """cwd por /proc en Linux. En macOS no hay forma sin un programa externo (lsof
+    se puede colgar en el kernel), asi que ahi el cwd sale de la sesion padre."""
+    fuera = {}
+    if not sys.platform.startswith("linux"):
+        return fuera
+    for pid in pids:
+        try:
+            fuera[pid] = os.readlink("/proc/%s/cwd" % pid)
+        except OSError:
+            pass
+    return fuera
+
+
+def lee_status_codex(path):
+    # Acotado incluso si otro programa deja aqui algo que no es un status pequeno.
+    try:
+        with pathlib.Path(path).open("rb") as f:
+            datos = f.read(65537)
+        if len(datos) > 65536:
+            return {}
+        j = json.loads(datos)
+        return j if isinstance(j, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def codex_vivos(rows):
+    """Una foto de ps por refresco; la relacion la prueba el ppid, nunca el cwd."""
+    for r in rows:
+        r["codex_children"] = []
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,etime=,command="],
+                             capture_output=True, text=True, timeout=10)
+        if getattr(out, "returncode", 0):
+            return None
+    except (OSError, subprocess.TimeoutExpired):
+        return None              # una lectura fallida no prueba que hayan terminado
+    padres, codex, wrappers, claudes = {}, {}, set(), set()
+    for linea in out.stdout.splitlines():
+        campos = linea.split(None, 3)
+        if len(campos) != 4 or not all(c.isdigit() for c in campos[:2]):
+            continue
+        pid, ppid = map(int, campos[:2])
+        padres[pid] = ppid
+        if "claude" in campos[3]:
+            claudes.add(pid)     # mismo filtro de PID reutilizado que pids_vivos()
+        try:
+            args = shlex.split(campos[3])
+        except ValueError:
+            args = campos[3].split()  # ps no escapa las comillas de un prompt
+        if not args:
+            continue
+        wrapper = (pathlib.Path(args[0]).name in ("node", "nodejs") and len(args) > 1
+                   and pathlib.Path(args[1]).name in ("codex", "codex.js"))
+        if pathlib.Path(args[0]).name != "codex" and not wrapper:
+            continue
+        if wrapper:
+            wrappers.add(pid)
+        modelo = None
+        argumentos = iter(args[2:] if wrapper else args[1:])
+        for arg in argumentos:
+            if arg in ("-m", "--model"):
+                modelo = next(argumentos, None)
+            elif arg.startswith("-m") and len(arg) > 2:
+                modelo = arg[2:]
+            elif arg.startswith("--model="):
+                modelo = arg.split("=", 1)[1] or None
+            elif arg in ("-c", "--config", "-C", "--cd", "-s", "--sandbox",
+                         "-a", "--ask-for-approval", "-p", "--profile", "-o",
+                         "--output-last-message", "--output-schema", "-i", "--image"):
+                next(argumentos, None)
+            elif arg == "--" or (not arg.startswith("-") and arg not in ("exec", "e")):
+                break           # no interpretar el prompt como opciones del CLI
+        try:
+            dias, sep, reloj = campos[2].rpartition("-")
+            segundos = 0
+            for parte in reloj.split(":"):
+                segundos = segundos * 60 + int(parte)
+            segundos += int(dias) * 86400 if sep else 0
+        except ValueError:
+            segundos = None
+        codex[pid] = dict(pid=pid, model=modelo, alive_seconds=segundos,
+                          run_id=None, phase=None, ronda=None)
+    for pid in list(codex):
+        if padres.get(pid) in wrappers:
+            codex.pop(padres[pid], None)
+    if not codex:
+        return []
+    duenos = {}
+    reg = lee_registro_cc()
+    for r in rows:
+        if cli_de(r) != "claude":
+            continue
+        meta = r.get("meta") or {}
+        h = reg.get(id_sesion(r)) or reg.get(meta.get("id")) or {}
+        for pid in (h.get("pid"), meta.get("pid")):
+            if str(pid).isdigit() and int(pid) in claudes:
+                duenos.setdefault(int(pid), r)
+    # El pid propio de una fila manda sobre el que sale del registro: un `--resume` sin id
+    # puede heredar el id de otra sesion, y entonces el registro apunta al proceso ajeno.
+    for r in rows:
+        pid = r.get("pid")
+        if cli_de(r) == "claude" and str(pid).isdigit() and int(pid) > 1:
+            duenos[int(pid)] = r
+    cwds = cwd_procesos(codex)
+    runs, sueltos = {}, []
+    for pid, hijo in codex.items():
+        ancestros, visto = [], {pid}
+        actual = padres.get(pid)
+        while actual and actual not in visto:
+            ancestros.append(actual)
+            visto.add(actual)
+            actual = padres.get(actual)
+        padre = next((duenos[p] for p in ancestros if p in duenos), None)
+        cwd = cwds.get(pid)
+        if not cwd and padre is not None:
+            cwd = ((padre.get("pulso") or {}).get("cwd")
+                   or (padre.get("meta") or {}).get("cwd"))
+        hijo["cwd"] = cwd
+        if cwd and cwd not in runs:
+            try:
+                runs[cwd] = [(p, lee_status_codex(p)) for p in
+                             pathlib.Path(cwd).glob(".agents/runs/*/status.json")]
+            except OSError:
+                runs[cwd] = []
+        for ancestro in ancestros:
+            run = next(((p, j) for p, j in runs.get(cwd, ())
+                        if type(j.get("pid")) is int and j["pid"] == ancestro
+                        and j.get("phase") != "done"), None)
+            if run:
+                path, j = run
+                for src, dst in (("id", "run_id"), ("phase", "phase"),
+                                 ("ronda", "ronda"), ("worker_model", "model")):
+                    v = j.get(src)
+                    if isinstance(v, str) or (src == "ronda" and type(v) is int):
+                        hijo[dst] = v
+                hijo["_status_path"], hijo["_run_pid"] = path, ancestro
+                break
+        if padre is None:
+            sueltos.append(hijo)
+        else:
+            padre["codex_children"].append(hijo)
+    return sueltos
+
+
+def codex_json(hijos):
+    return [{k: h.get(k) for k in _CAMPOS_CODEX} for h in hijos]
+
+
+def linea_codex(hijo, cols):
+    secs = hijo.get("alive_seconds")
+    dur = "?" if secs is None else "%d:%02d" % divmod(max(0, secs), 60)
+    partes = ["codex", hijo.get("model") or "?", dur]
+    if hijo.get("phase"):
+        partes.append(str(hijo["phase"]) + (" " + str(hijo["ronda"])
+                      if hijo.get("ronda") is not None else ""))
+    if hijo.get("run_id"):
+        partes.append(hijo["run_id"])
+    return recorta("    " + GLIFO_CLI["codex"] + " " + _clean(" · ".join(partes)), cols)
+
+
 def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     """`con_ram` cuesta un `ps -eo` de toda la maquina: 220 ms medidos con 9 sesiones.
 
@@ -1081,7 +1247,9 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     # antes, las capturas y el GIF del README ensenaban un orden —de menos a mas
     # parada— que el programa de verdad no producia nunca. La unica vista que se
     # revisa a ojo era justo la que esquivaba la regla.
+    global CODEX_ORPHANS
     if DEMO:
+        CODEX_ORPHANS = []
         return ordena([r for r in sesiones_demo() if r.get("fuente") == "claude"])
     # El pulso fino y la RAM iban atados porque hasta ahora solo los pedia el selector,
     # que pinta las dos cosas. `--watch` quiere lo fino —es lo que detecta el cambio de
@@ -1143,6 +1311,7 @@ def live_sessions(con_ram=False, con_disco=True, fino=None, solo_activas=True):
     # El orden por defecto lo compone `ordena()`, que es pura y tiene test propio.
     # Antes iba aqui a pelo y ponia la sesion MAS parada la primera: justo debajo del
     # cursor, que es lo que abre ENTER.
+    CODEX_ORPHANS = codex_vivos(rows)
     return colisiones(ordena(desambigua(rows)))
 
 
@@ -1599,6 +1768,8 @@ def sesiones_demo():
     # demas de aqui. `raiz_repo()` devuelve "" en demo, asi que se queda en nivel 3
     # (mismo fichero) sin tocar el disco de verdad.
     ahora = time.time()
+    rows[0]["codex_children"] = [dict(pid=4242, model="gpt-5.3-codex",
+        alive_seconds=123, run_id="webhooks", phase="executing", ronda="1/3")]
     rows[0]["pulso"]["escrituras"] = [
         (ahora - 40, "w", "/Users/you/code/checkout-api/src/webhooks.py", "Edit"),
         (ahora - 95, "w", "/Users/you/code/checkout-api/tests/test_webhooks.py", "Write")]
@@ -1696,6 +1867,7 @@ def filas_json(rows):
                                          pico_de(r)) if ctx else None,
             "model": pu.get("modelo"),
             "pid": r.get("pid") or None,
+            "codex_children": codex_json(r.get("codex_children") or []),
             # Los cuatro crudos y ninguna suma: juntar la cache leida con la entrada da
             # una cifra cien veces mayor que el material real. Quien quiera un total lo
             # compone, sabiendo lo que esta sumando.
@@ -1740,7 +1912,8 @@ def print_json(rows):
                       "quota_session_pct": c.get("session_pct"),
                       "quota_weekly_pct": c.get("weekly_pct"),
                       "quota_fetched_at": c.get("fetched_at"),
-                      "sessions": filas_json(rows)},
+                      "sessions": filas_json(rows),
+                      "codex_orphans": codex_json(CODEX_ORPHANS or [])},
                      indent=2, ensure_ascii=False))
 
 
@@ -2116,9 +2289,31 @@ def watch(cada=20):
     antes, pares, atascados, ctxs = {}, {}, {}, {}
     nivel_c = 0
     primera = True
+    hijos_antes = {}
     try:
         while True:
-            filas = filas_json(live_sessions(fino=True, solo_activas=False))
+            vivas = live_sessions(fino=True, solo_activas=False)
+            hijos = {h["pid"]: (r, h) for r in vivas for h in r.get("codex_children", ())}
+            if CODEX_ORPHANS is not None:
+                presentes = set(hijos) | {h["pid"] for h in CODEX_ORPHANS}
+                for pid in hijos_antes.keys() - presentes:
+                    r, hijo = hijos_antes[pid]
+                    j = lee_status_codex(hijo["_status_path"]) if hijo.get("_status_path") else {}
+                    veredicto = j.get("verdict") if (j.get("phase") == "done"
+                        and j.get("id") == hijo.get("run_id")
+                        and j.get("pid") == hijo.get("_run_pid")) else None
+                    resultado = (" · " + veredicto
+                                 if veredicto in ("ready", "code_failure", "infra") else "")
+                    titulo = _("Codex stopped")
+                    cuerpo = _("{t} · codex {pid}{result}",
+                               t=r.get("title_full") or r.get("title") or r["name"],
+                               pid=pid, result=resultado)
+                    sys.stdout.write("\a" + time.strftime("%H:%M") + "  " + titulo
+                                     + " · " + cuerpo + "\n")
+                    sys.stdout.flush()
+                    notifica(titulo, cuerpo)
+                hijos_antes = hijos
+            filas = filas_json(vivas)
             for r in (() if primera else transiciones(antes, filas)):
                 que = r["title"] or r["id"]
                 donde = r["project"] or ""
@@ -2245,6 +2440,11 @@ def print_live(rows):
                 if u["compacta"]:
                     extra += "  \u00b7 " + _("{n} compaction(s)", n=u["compacta"])
                 print("         " + extra)
+        for hijo in r.get("codex_children", ()):
+            texto = linea_codex(hijo, shutil.get_terminal_size((92, 24)).columns)
+            print(("\033[38;5;208m" + texto + "\033[0m") if sys.stdout.isatty() else texto)
+    for hijo in CODEX_ORPHANS or ():
+        print(linea_codex(hijo, shutil.get_terminal_size((92, 24)).columns))
 
 
 def ESTADO_LARGO(est):
@@ -5717,11 +5917,15 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 cab_put(txt_cuota, 7, curses.A_BOLD)
 
             fondo = max(5, h - 6)          # ultima fila util del area de contenido
-            alto = max(3, min(len(rows), fondo - 2))
+            alturas = [1 + len(r.get("codex_children", ())) for r in rows]
+            alto = max(3, min(sum(alturas), fondo - 2))
+            tope_top = len(rows) - 1
+            while tope_top > 0 and sum(alturas[tope_top - 1:]) <= alto:
+                tope_top -= 1
             if cur < top:
                 top = cur
-            if cur >= top + alto:
-                top = cur - alto + 1
+            while sum(alturas[top:cur + 1]) > alto and top < cur:
+                top += 1
 
             # Con 150 columnas la lista ocupaba un tercio y el resto estaba vacio:
             # a partir de 108 el detalle se va a una columna a la derecha.
@@ -5730,7 +5934,11 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             # solo mete espacios en blanco entre columnas, mientras que el panel tiene
             # contenido de verdad que cortar (el ultimo prompt). Asi una ventana de 185
             # columnas se llena de informacion en vez de desierto.
-            visibles = rows[top:top + alto]
+            fin, ocupadas = top, 0
+            while fin < len(rows) and ocupadas < alto:
+                ocupadas += alturas[fin]
+                fin += 1
+            visibles = rows[top:fin]
 
             def _proy(r):
                 pr, ra = r.get("proyecto") or "", r.get("rama") or ""
@@ -5775,11 +5983,11 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
             if lateral and ancho_lista + 2 < w - 1:
                 stdscr.addnstr(1, ancho_lista + 2, "\u252c", 1, C(4))
             tope_ram = max((r["mem_mb"] or 0 for r in rows), default=0)
-            for vis, i in enumerate(range(top, min(len(rows), top + alto))):
+            for i in range(top, fin):
                 r = rows[i]
                 marcada = r["name"] in marcadas or (
                     ancla is not None and min(ancla, cur) <= i <= max(ancla, cur))
-                fila_y, x = fila0 + vis, 0
+                fila_y, x = fila0 + sum(alturas[top:i]), 0
                 foco = i == cur
                 roza = sobre == i and not foco
                 zonas.append((fila_y, 0, 2, "marca", i))
@@ -5909,14 +6117,21 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                 if (foco or roza) and relleno:      # con n=0, addnstr devuelve ERR
                     stdscr.addnstr(fila_y, x, " " * relleno, relleno,
                                    CF(0) if foco else CH(0))
+                for offset, hijo in enumerate(r.get("codex_children", ()), 1):
+                    if fila_y + offset >= fila0 + alto:
+                        break
+                    stdscr.addnstr(fila_y + offset, 0, linea_codex(hijo, ancho_lista),
+                                   ancho_lista, C(COLOR_CLI["codex"]))
+                    zonas.append((fila_y + offset, 0, ancho_lista - 1, "fila", i))
 
             y = fila0 + alto
-            if len(rows) > alto:
+            if sum(alturas) > alto:
                 # La columna `ancho_lista` esta libre por construccion (todo el
                 # contenido se recorta a ancho_lista-1) y la barra dice de un vistazo
                 # cuanta lista queda debajo, que el contador solo dice leyendolo.
-                grosor = max(1, round(alto * alto / len(rows)))
-                arriba = round((alto - grosor) * top / max(1, len(rows) - alto))
+                grosor = max(1, round(alto * alto / sum(alturas)))
+                arriba = round((alto - grosor) * sum(alturas[:top])
+                               / max(1, sum(alturas) - alto))
                 for k in range(alto):
                     pomo = arriba <= k < arriba + grosor
                     stdscr.addnstr(fila0 + k, ancho_lista,
@@ -5924,7 +6139,7 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                                    C(6) if pomo else C(4))
                     zonas.append((fila0 + k, ancho_lista, ancho_lista, "scroll", k))
                 stdscr.addnstr(y, 4, _("\u2195  {a}\u2013{b} of {n}",
-                                       a=top + 1, b=top + alto, n=len(rows)), w - 5, C(4))
+                                       a=top + 1, b=fin, n=len(rows)), w - 5, C(4))
                 y += 1
             y += 1
 
@@ -6109,8 +6324,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     # La rueda desplaza la VISTA y solo arrastra el cursor si se le
                     # sale: mover la seleccion con la rueda hace perder el sitio.
                     top = (max(0, top - 3) if arriba
-                           else min(max(0, len(rows) - alto), top + 3))
-                    cur = max(top, min(cur, top + alto - 1))
+                           else min(tope_top, top + 3))
+                    cur = max(top, min(cur, len(rows) - 1))
                     continue
                 golpe = zona_en(zonas, mx, my)
                 if not (pulsa or dcha):          # solo esta pasando por encima
@@ -6134,9 +6349,8 @@ def pick_ui(rows, muertas=False, ejecutar=None, recargar=None, vista_inicial="cl
                     aviso = ""
                     continue
                 if que == "scroll":
-                    top = max(0, min(round((len(rows) - alto) * dato / max(1, alto - 1)),
-                                     max(0, len(rows) - alto)))
-                    cur = max(top, min(cur, top + alto - 1))
+                    top = max(0, min(round(tope_top * dato / max(1, alto - 1)), tope_top))
+                    cur = top
                     continue
                 if que == "copia":
                     # Sale por `continue` a proposito: unas lineas mas abajo hay un
@@ -6769,6 +6983,8 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "Codex stopped": "Codex ha terminado",
+        "{t} · codex {pid}{result}": "{t} · codex {pid}{result}",
         "--add needs a session id.": "--add necesita un id de sesi\u00f3n.",
         "--cwd needs a path.": "--cwd necesita una ruta.",
         "--title needs a value.": "--title necesita un valor.",
@@ -7325,6 +7541,7 @@ def que_hacen(tope_eventos=3):
             "atasco": alertas(sint),
             "sintomas": sint,
             "eventos": ruta[-tope_eventos:],
+            "codex_children": r.get("codex_children") or [],
         })
     return filas
 
@@ -7396,6 +7613,8 @@ def lineas_now(filas, ancho_t):
                         par if (e["pend"] or e["err"]) else 4))
         if not f["eventos"]:
             out.append(("    " + _("no tool calls in the tail of its transcript"), 4))
+        for hijo in f.get("codex_children", ()):
+            out.append((linea_codex(hijo, ancho_t), COLOR_CLI["codex"]))
     return out
 
 
@@ -7836,6 +8055,11 @@ def main():
                 recargar=live_sessions)
         return 0
     rows = live_sessions()
+    if "--json" in argv and not rows:
+        # Tambien por tuberia y sin Claude vivo: puede haber Codex sueltos.
+        hist = sesiones_de_disco(limite=40)
+        print_json(hist or [fila_de_huerfana(e) for e in orphans()])
+        return 0
 
     # ── parar ──
     if "--stop-all" in argv:
@@ -7961,7 +8185,7 @@ def main():
     if not items:
         hist = sesiones_de_disco(limite=40)
         if hist:
-            if hook or not sys.stdin.isatty():
+            if hook or (not sys.stdin.isatty() and "--list" not in argv):
                 return 0           # al abrir terminal no se avisa de historial viejo
             if "--json" in argv:
                 print_json(hist)
@@ -7982,10 +8206,11 @@ def main():
         return 0
 
     if "--list" in argv:
-        if not items:
+        if not items and not CODEX_ORPHANS:
             print(nada_que_ensenar())
         for e in items:
             print(describe(e))
+        print_live([])
         return 0
 
     if not items:
