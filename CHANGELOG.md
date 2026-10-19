@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Los Codex vivos aparecen bajo la sesión de Claude Code que los lanzó, siguiendo
+  la cadena de procesos padres. Selector, `--list` y `--now` muestran modelo,
+  tiempo vivo y, si existe, fase, ronda e ID del run.
+- `--json` añade `codex_children` y `codex_orphans`, sin conversaciones ni comandos;
+  los datos ausentes son `null` y el esquema sigue siendo 1.
+- `--watch` avisa una vez al desaparecer un hijo e incluye `ready`, `code_failure`
+  o `infra` cuando el run ya publicó su veredicto. La demo incluye un hijo ficticio.
+- Una sola lectura adicional de `ps` por refresco; los status opcionales se leen
+  únicamente con procesos Codex presentes y con un límite de 64 KiB por fichero.
+
 ## 1.43.0
 
 **`r` reabre TODAS las marcadas, tambien las que ya se ven en otra ventana.** Se marcaban seis

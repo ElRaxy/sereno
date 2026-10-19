@@ -500,6 +500,23 @@ actually said. The rest were `tool_result` dumps — greps, file contents, comma
 the project's `CLAUDE.md`, which the CLI pastes into **every** session. With those in, any word
 from your own project matches everywhere.
 
+### Live Codex children
+
+A running `codex` process appears as an indented child of the Claude Code session
+that launched it, even through an intermediate shell. The selector, `--list` and
+`--now` show its model and elapsed time, plus the run phase, round and ID when
+available. Process ancestry determines ownership; sharing a directory does not.
+No wrapper or run metadata is required.
+
+`--json` adds `codex_children` to each session and a top-level `codex_orphans` list
+for processes without a known parent session. Both contain only `pid`, `model`,
+`alive_seconds`, `run_id`, `phase` and `ronda`, with `null` for unknown values;
+no command, prompt or reply is included. The JSON schema remains 1.
+
+`--watch` reports a child disappearing once, through the usual bell and desktop
+notification. If its run has already finished, the notice includes the recorded
+`ready`, `code_failure` or `infra` verdict. `--demo` includes a fictional child.
+
 ### `--watch`
 
 Leave it in a spare pane. It says nothing until a session **stops working** — the transition
@@ -1155,7 +1172,7 @@ import list is `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time
 datetime, pathlib, sqlite3, unicodedata, uuid, traceback` and `curses`. Nothing it reads can leave your machine, because there is nothing
 in it that can send anything anywhere.
 
-The only external programs it ever runs are `ps` (memory), `tmux` (list and kill sessions, and
+The only external programs it ever runs are `ps` (memory and process ancestry), `tmux` (list and kill sessions, and
 open a window per session), `open` (hand a session to Warp), `osascript` (a Terminal.app window
 per session, and — under `--watch` — the desktop alert), `defaults` (read your macOS locale) and
 `notify-send` for that same alert off macOS. No telemetry, no analytics, no
@@ -1338,7 +1355,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are eighty
+collects the whole folder, prints a line per file and ends with the count. There are eighty-one
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
