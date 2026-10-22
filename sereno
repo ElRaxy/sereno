@@ -1890,10 +1890,12 @@ def filas_json(rows):
             # `context_max` de una sesion que ya lo hizo.
             "peak_context_tokens": u["pico"] if u else None,
             "working_seconds": round(u["activo"]) if u else None,
-            # Lo escribio el propio CLI con sus precios; `sereno` no calcula dinero ni
-            # lleva tabla de tarifas. En un plan de suscripcion es lo que HABRIA costado
-            # por API, no lo que has pagado. Fuera del TUI a proposito.
+            # Lo escribio el propio CLI con sus precios: es la cifra autoritativa,
+            # no necesariamente lo que has pagado en un plan de suscripcion.
             "api_cost_usd": u["usd"] if u else None,
+            # Estimacion de sereno con su tabla, no un cobro. Usa el modelo actual
+            # de la sesion para todos los tokens, aunque antes usara otro.
+            "estimated_cost_usd": coste_estimado(u, pu.get("modelo")) if u else None,
             # Con quien choca y cuanto. Van las CIFRAS, nunca las rutas: `--json` se
             # canaliza a barras de estado y a scripts de terceros, y un path de cliente
             # dice tanto como una frase de la conversacion. El panel si las ensena,
@@ -2444,7 +2446,7 @@ def print_live(rows):
             u = uso_de(r)
             if u:
                 ritmo = _uso_ritmo(u)
-                extra = _uso_texto(u) + (("  \u00b7 " + ritmo) if ritmo else "")
+                extra = _uso_texto(u, pu.get("modelo")) + (("  \u00b7 " + ritmo) if ritmo else "")
                 if u["compacta"]:
                     extra += "  \u00b7 " + _("{n} compaction(s)", n=u["compacta"])
                 print("         " + extra)
@@ -3872,7 +3874,83 @@ def pico_de(r):
     return (r.get("_uso") or {}).get("pico") or 0
 
 
-def _uso_texto(u):
+# USD por millon de tokens: entrada, salida, cache escrita 5m y cache leida.
+# Fuente: skill claude-api, cache 2026-10-06. Haiku 5.5 usa la base hasta 100k.
+TARIFAS_USD_MTOK = {
+    "claude-fable-5-1": (10, 50, 12.5, 0.25),
+    "claude-fable-5": (10, 50, 12.5, 0.25),
+    "claude-opus-5-5": (4, 20, 5, 0.20),
+    "claude-opus-5": (5, 25, 6.25, 0.50),
+    "claude-opus-4-8": (5, 25, 6.25, 0.50),
+    "claude-opus-4-7": (5, 25, 6.25, 0.50),
+    "claude-opus-4-6": (5, 25, 6.25, 0.50),
+    "claude-sonnet-5-5": (2, 10, 2.5, 0.20),
+    "claude-sonnet-5": (2, 10, 2.5, 0.20),
+    "claude-sonnet-4-6": (3, 15, 3.75, 0.30),
+    "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
+    "claude-haiku-4-5": (1, 5, 1.25, 0.10),
+}
+
+
+def _modelo_tarifa(m):
+    """Los prefijos del proveedor y la fecha no cambian la tarifa del modelo."""
+    if not m:
+        return None
+    m = re.sub(r"^(?:[^.]+\.)?anthropic\.", "", m.lower())
+    m = re.sub(r"\[1m\]$", "", m)
+    return re.sub(r"-\d{8}$", "", m) or None
+
+
+def coste_estimado(u, modelo):
+    """Lo que costarian esos tokens por API; sin datos no se inventa un cero."""
+    tarifa = TARIFAS_USD_MTOK.get(_modelo_tarifa(modelo))
+    if u is None or tarifa is None:
+        return None
+    return round(sum(u[k] * p for k, p in zip(("in", "out", "cw", "cr"), tarifa))
+                 / 1e6, 4)
+
+
+def refresca_tarifas_models_dev(timeout=2):
+    """Opt-in: devuelve un hilo, sin esperar a la red. El programa no lo llama.
+
+    Solo Anthropic: otro proveedor puede vender el mismo modelo a otro precio.
+    Se valida todo antes de tocar la tabla, para no dejar medio refresco si falla.
+    """
+    import threading
+    import urllib.request
+
+    def refresca():
+        try:
+            with urllib.request.urlopen("https://models.dev/api.json", timeout=timeout) as r:
+                modelos = json.load(r)["anthropic"]["models"]
+            cambios = {}
+            for modelo, datos in modelos.items():
+                modelo = _modelo_tarifa(modelo)
+                if modelo not in TARIFAS_USD_MTOK:
+                    continue
+                coste = datos.get("cost", {})
+                claves = ("input", "output", "cache_write", "cache_read")
+                if not isinstance(coste, dict):
+                    return
+                if not all(k in coste for k in claves):
+                    continue
+                tarifa = tuple(coste[k] for k in claves)
+                if not all(type(v) in (int, float) and 0 <= v < float("inf") for v in tarifa):
+                    return
+                cambios[modelo] = tarifa
+            TARIFAS_USD_MTOK.update(cambios)
+        except Exception:
+            pass                       # offline o formato ajeno: queda la tabla anterior
+
+    try:
+        hilo = threading.Thread(target=refresca, daemon=True)
+        hilo.start()
+        return hilo
+    except Exception:
+        return None
+
+
+def _uso_texto(u, modelo=None):
     """`1.4M in · 403k out · 300M cache`. Tres cifras y ninguna sumada con otra.
 
     La entrada nueva si junta `in` y `cw`: las dos son material que entra al modelo por
@@ -3880,9 +3958,17 @@ def _uso_texto(u):
     LEIDA no se junta con nada: es lo mismo releido, y en una sesion de ocho horas es cien
     veces mayor que todo lo demas junto. Las cuatro partes siguen enteras en `--json`.
     """
-    return _("{i} in · {o} out · {c} cache",
+    texto = _("{i} in · {o} out · {c} cache",
              i=_tok(u["in"] + u["cw"]) or "0", o=_tok(u["out"]) or "0",
              c=_tok(u["cr"]) or "0")
+    # El panel recorta por la derecha: el dinero va delante para no perder el "est.".
+    costes = []
+    if u["usd"] is not None:
+        costes.append(_("${usd}", usd=f"{u['usd']:.2f}"))
+    estimado = coste_estimado(u, modelo)
+    if estimado is not None:
+        costes.append(_("~${usd} est.", usd=f"{estimado:.2f}"))
+    return " · ".join(costes + [texto])
 
 
 def _uso_ritmo(u):
@@ -5227,7 +5313,7 @@ def campos_panel(r, d, cwd_cur, ahora=None):
         # Mientras se lee, un guion y no una cifra: media lectura da media
         # cifra, y una cifra a medias en una columna que dice "gastado" se
         # lee como el total. Dura una vuelta o dos.
-        (_("spent"), _uso_texto(uso_cur) if listo_cur
+        (_("spent"), _uso_texto(uso_cur, pu_cur.get("modelo")) if listo_cur
          else (_("reading\u2026") if uso_cur else ""), 8),
         (_("rhythm"), _uso_ritmo(uso_cur) if listo_cur else "", 4),
         (_("history"), f"{max(1, (d.get('peso') or 0) // 1024 // 1024)} MB"
@@ -7132,6 +7218,8 @@ def _T():
             "{n} b\u00fasquedas seguidas sin ning\u00fan resultado",
         "\u25b8 what it has been doing": "\u25b8 lo que ha estado haciendo",
         "spent": "gastado",
+        "${usd}": "${usd}",
+        "~${usd} est.": "~${usd} est.",
         "rhythm": "ritmo",
         "{i} in \u00b7 {o} out \u00b7 {c} cache":
             "{i} entrada \u00b7 {o} salida \u00b7 {c} cach\u00e9",

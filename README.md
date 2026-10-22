@@ -391,7 +391,7 @@ that same file sitting somewhere on your `PATH`.
 
 Homebrew and `install.sh` also put **`sereno-cuota`** next to it — the sidecar that asks how
 much of your plan you have spent and writes `~/.sereno/cuota.json`, which `sereno` then reads
-like any other file. It is a separate program on purpose: `sereno` makes no network calls and
+like any other file. It is a separate program on purpose: `sereno` makes no network calls by default and
 that one does. You never have to run it; without it there is simply no quota cell.
 
 **With Homebrew**
@@ -704,10 +704,15 @@ against the `cost-state` the CLI itself writes, the scan matches within 0.1% on 
 of eight and falls up to 21% short on two. The fields are called `input_tokens` / `output_tokens`
 — what the transcript recorded — not "what you were charged", which is a different thing.
 
-That other thing travels apart, as `api_cost_usd` in `--json --usage` only: the `totalCostUSD`
-the CLI wrote with its own prices, relayed as-is. `sereno` carries no price table — one in a
-public repo goes stale without telling anyone — and it never puts a dollar figure in the TUI,
-where on a subscription plan it would be money you did not pay.
+The CLI's `totalCostUSD` remains unchanged as `api_cost_usd` in `--json --usage`.
+Alongside it, `estimated_cost_usd` estimates API cost from sereno's own table (skill
+`claude-api`, cached 2026-10-06), applying the session's current model to all its tokens.
+Unknown models or missing usage give `null`. The usage list and spend panel show `~$X.XX est.`
+beside the authoritative CLI figure when present; neither means a subscription charge.
+The estimate uses 5-minute cache writes and Haiku 5.5's base rate up to 100k tokens.
+`refresca_tarifas_models_dev(timeout=2)` is an opt-in function returning a background thread:
+it updates only complete matching Anthropic rates, retaining the table on failure. No CLI or
+TUI path calls it; ordinary use stays offline and deterministic.
 
 #### Sorting by what it burned
 
@@ -1035,7 +1040,7 @@ not recognise counts as unknown, never as idle. A file whose PID no longer runs 
 **The plan's quota is the one number that is not on disk**, and that is why it arrives from a
 separate program. How much of the 5-hour and weekly windows you have burned is known only to
 Anthropic, and asking costs a connection — which `sereno` does not make and, thanks to
-`tests/test_sin_red.py`, cannot. So `sereno-cuota` asks and writes `~/.sereno/cuota.json`, and
+`tests/test_sin_red.py`, never makes by default. So `sereno-cuota` asks and writes `~/.sereno/cuota.json`, and
 `sereno` reads that file like any other, without ever learning where it came from. Run it or don't:
 with no file there is no cell in the header, the three `quota_*` fields of `--json` are `null`, and
 nothing else changes. It borrows the OAuth token Claude Code already keeps in your keychain and does
@@ -1142,8 +1147,8 @@ heard of, on a machine you're SSH'd into.
   to see what the fleet is doing.
 - **write to a transcript, or to anything that belongs to a session.** It kills processes you
   pick, and that's the only destructive thing in it.
-- **send anything anywhere.** There is no networking code at all, and a test in CI fails the
-  build if any appears.
+- **send session data anywhere.** The only network function fetches public prices when explicitly
+  called; CI checks that no program path invokes it.
 - **ask a model what it thinks.** Every state is composed in code from typed facts.
 
 What that buys you, concretely:
@@ -1167,10 +1172,11 @@ that no other single tool has all of them, and none in this form.
 It reads your prompts and your agent's replies to draw them on your screen. That deserves a
 straight answer, not a promise:
 
-**`sereno` has zero networking code.** No `socket`, no `urllib`, no `requests` — the whole
+**`sereno` makes no network calls by default.** The whole
 import list is `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, sqlite3, unicodedata, uuid, traceback` and `curses`. Nothing it reads can leave your machine, because there is nothing
-in it that can send anything anywhere.
+datetime, pathlib, sqlite3, unicodedata, uuid, traceback, threading, urllib` and `curses`.
+The opt-in price refresh imports `threading` and `urllib.request` locally and fetches only
+`https://models.dev/api.json`, without session data. No CLI or TUI path invokes it.
 
 The only external programs it ever runs are `ps` (memory and process ancestry), `tmux` (list and kill sessions, and
 open a window per session), `open` (hand a session to Warp), `osascript` (a Terminal.app window
@@ -1189,8 +1195,8 @@ One thing worth saying plainly: a `--watch` alert puts the **session title** int
 notification centre, which on a shared or screen-shared machine is a place you may not want it.
 The alert carries the title and the project, never the conversation.
 
-`tests/test_sin_red.py` walks the AST on every CI run and fails if a networking import appears,
-or if a new external binary shows up that isn't on that list. You don't have to take my word
+`tests/test_sin_red.py` walks the AST on every CI run and fails if a networking import appears
+outside that function, a program path references it, or an undeclared external binary appears. You don't have to take my word
 for it — the test *is* the word.
 
 [`SECURITY.md`](SECURITY.md) has the full list of what it reads, what it writes and what it
@@ -1355,7 +1361,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are eighty-one
+collects the whole folder, prints a line per file and ends with the count. There are eighty-two
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1364,7 +1370,7 @@ guard against something that fails **silently**, which is why they exist at all:
 - **`test_i18n.py`** — every string printed goes through `_()` and has a Spanish entry with the
   same `{placeholders}`. It walks the AST, so a hardcoded phrase is caught too. English is the
   key, so a missing translation never crashes; it just quietly shows the wrong language.
-- **`test_sin_red.py`** — no sockets, and no external binary beyond the declared list.
+- **`test_sin_red.py`** — network imports only in the uncalled opt-in refresh; external binaries stay declared.
 - **`test_contexto.py`** — the context bar can never read above 100%.
 - **`test_json_sin_conversacion.py`** — `--json` carries no prompt and no reply.
 - **`test_uso.py`** — three lines of the same reply count once, cache read never joins the
@@ -1398,7 +1404,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and seventy-six real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and eighty real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

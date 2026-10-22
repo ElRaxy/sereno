@@ -362,7 +362,7 @@ acaban con ese mismo fichero en algún sitio de tu `PATH`.
 
 Homebrew e `install.sh` dejan además **`sereno-cuota`** al lado: el sidecar que pregunta cuánto
 llevas gastado del plan y escribe `~/.sereno/cuota.json`, que `sereno` lee como leería cualquier
-otro fichero. Es un programa aparte a propósito —`sereno` no hace red y ese sí— y no estás
+otro fichero. Es un programa aparte a propósito —`sereno` no hace red por defecto y ese sí— y no estás
 obligado a ejecutarlo nunca: sin él simplemente no hay celda de cuota.
 
 **Con Homebrew**
@@ -671,10 +671,15 @@ contra el `cost-state` que escribe el propio CLI, el escaneo cuadra al 0,1% en c
 de ocho y se queda hasta un 21% corto en dos. Los campos se llaman `input_tokens` /
 `output_tokens` —lo que el transcript registró— y no "lo que te han cobrado", que es otra cosa.
 
-Esa otra cosa viaja aparte, como `api_cost_usd` y solo en `--json --usage`: el `totalCostUSD` que
-escribió el CLI con sus propios precios, relatado tal cual. `sereno` no lleva tabla de tarifas
-—una en un repo público caduca sin avisar a nadie— y nunca pinta un dólar en el TUI, donde en un
-plan de suscripción sería dinero que no has pagado.
+El `totalCostUSD` del CLI sigue intacto como `api_cost_usd` en `--json --usage`.
+A su lado, `estimated_cost_usd` estima el coste por API con la tabla de sereno (skill
+`claude-api`, caché 2026-10-06), aplicando el modelo actual de la sesión a todos sus tokens.
+Modelo desconocido o uso ausente dan `null`. La lista de uso y el panel de gasto muestran
+`~$X.XX est.` junto a la cifra autoritativa del CLI cuando existe; ninguna implica un cobro de suscripción.
+La estimación usa caché escrita de 5 minutos y la tarifa base de Haiku 5.5 hasta 100k tokens.
+`refresca_tarifas_models_dev(timeout=2)` es una función opt-in que devuelve un hilo:
+actualiza solo tarifas completas de Anthropic que casen y conserva la tabla si falla. Ningún
+camino del CLI o TUI la llama; el uso normal sigue siendo offline y determinista.
 
 #### Ordenar por lo gastado
 
@@ -1004,8 +1009,8 @@ tampoco cuenta.
 
 **La cuota del plan es la única cifra que no está en el disco**, y por eso llega desde un programa
 aparte. Cuánto llevas gastado de la ventana de 5 horas y de la semanal solo lo sabe Anthropic, y
-preguntarlo cuesta una conexión — que `sereno` no hace y, gracias a `tests/test_sin_red.py`, no puede
-hacer. Así que lo pregunta `sereno-cuota`, que escribe `~/.sereno/cuota.json`, y `sereno` lee ese
+preguntarlo cuesta una conexión — que `sereno` no hace por defecto, como vigila `tests/test_sin_red.py`.
+Así que lo pregunta `sereno-cuota`, que escribe `~/.sereno/cuota.json`, y `sereno` lee ese
 fichero como leería cualquier otro, sin enterarse de dónde salió. Lo ejecutas o no: sin fichero no hay
 celda en la cabecera, los tres campos `quota_*` de `--json` valen `null`, y no cambia nada más. Toma
 prestado el token OAuth que Claude Code ya tiene en tu llavero y no hace nada más con él — no lo
@@ -1108,8 +1113,8 @@ oído hablar, en una máquina a la que has entrado por SSH.
   este para ver qué está haciendo.
 - **escribir en un transcript, ni en nada que sea de una sesión.** Mata los procesos que le marques,
   y esa es toda la destrucción que lleva dentro.
-- **mandar nada a ninguna parte.** No tiene una sola línea de red, y un test del CI tumba la build
-  si aparece alguna.
+- **mandar datos de sesiones a ninguna parte.** La única función de red consulta precios públicos
+  si se llama expresamente; el CI comprueba que ningún camino del programa la invoca.
 - **preguntarle a un modelo qué le parece.** Cada estado lo compone el código a partir de hechos
   tipados.
 
@@ -1134,10 +1139,11 @@ que ninguna otra herramienta las tiene todas, y ninguna en esta forma.
 Lee tus prompts y las respuestas de tu agente para pintarlos en tu pantalla. Eso merece una
 respuesta directa, no una promesa:
 
-**`sereno` no tiene una sola línea de red.** Ni `socket`, ni `urllib`, ni `requests` — la lista
+**`sereno` no hace conexiones por defecto.** La lista
 entera de imports es `base64, os, stat, sys, json, re, shlex, shutil, subprocess, time,
-datetime, pathlib, sqlite3, unicodedata, uuid, traceback` y `curses`. Nada de lo que lee puede salir de tu máquina, porque no hay dentro
-nada capaz de mandar nada a ningún sitio.
+datetime, pathlib, sqlite3, unicodedata, uuid, traceback, threading, urllib` y `curses`.
+El refresco opt-in de precios importa `threading` y `urllib.request` localmente y consulta solo
+`https://models.dev/api.json`, sin datos de sesiones. Ningún camino del CLI o TUI lo invoca.
 
 Los únicos programas externos que llega a ejecutar son `ps` (memoria y ascendencia), `tmux` (listar y matar
 sesiones, y abrir una ventana por sesión), `open` (pasarle una sesión a Warp), `osascript` (una
@@ -1157,8 +1163,8 @@ centro de notificaciones del sistema, que en una máquina compartida o mientras 
 pantalla es un sitio donde igual no lo quieres. El aviso lleva el título y el proyecto, nunca la
 conversación.
 
-`tests/test_sin_red.py` recorre el AST en cada vuelta de CI y falla si aparece un import de red,
-o un binario externo que no esté en esa lista. No hace falta que me creas: el test *es* la
+`tests/test_sin_red.py` recorre el AST en cada vuelta de CI y falla si aparece un import de red
+fuera de esa función, una referencia a ella o un binario externo no declarado. No hace falta que me creas: el test *es* la
 palabra.
 
 En [`SECURITY.md`](SECURITY.md) está la lista completa de lo que lee, lo que escribe y lo que
@@ -1318,7 +1324,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y uno,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y dos,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1327,7 +1333,7 @@ que falla **en silencio**, que es justo por lo que existen:
 - **`test_i18n.py`** — cada cadena que se imprime pasa por `_()` y tiene traducción con los mismos
   `{huecos}`. Recorre el AST, así que también caza una frase escrita a pelo. El inglés es la clave,
   así que una traducción que falta no revienta: aparece en el idioma equivocado y ya.
-- **`test_sin_red.py`** — ni sockets, ni un binario externo fuera de la lista declarada.
+- **`test_sin_red.py`** — imports de red solo en el refresco opt-in sin llamadas; binarios externos declarados.
 - **`test_contexto.py`** — la barra de contexto no puede pasar del 100%.
 - **`test_json_sin_conversacion.py`** — `--json` no lleva dentro ni prompt ni respuesta.
 - **`test_uso.py`** — tres líneas de la misma respuesta cuentan una vez, la caché leída no se
@@ -1353,7 +1359,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento setenta y seis guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento ochenta guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

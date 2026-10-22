@@ -36,6 +36,7 @@ CAMPOS = {
     "cache_read_tokens": int, "assistant_turns": int, "compactions": int,
     "peak_context_tokens": int,
     "working_seconds": int, "api_cost_usd": float,
+    "estimated_cost_usd": float,
     # Con quien choca y cuanto, en cifras. Nunca la RUTA: un path de cliente
     # dice tanto como una frase de la conversacion, y esto se canaliza.
     "clash_level": int, "clash_with": str, "clash_files": int,

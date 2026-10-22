@@ -29,6 +29,7 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 PERMITIDAS = {
     # La escriben los tests para montar un tmux de mentira; el programa no la llama.
     "write_attach_config": "solo la usan los tests, para preparar el entorno",
+    "refresca_tarifas_models_dev": "opt-in por contrato; probado sin red, nunca llamado por CLI o TUI",
 }
 
 
