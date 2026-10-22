@@ -698,16 +698,27 @@ against 3M in an eight-hour session). Adding it to the input gives a huge number
 nothing, so the four parts stay apart and whoever wants a total composes it knowing what they
 are adding.
 
-**What it does not count**, and this matters if you delegate: subagent turns and the Haiku calls
-the CLI makes on its own (titles, summaries) leave no line in the transcript. Cross-checked
-against the `cost-state` the CLI itself writes, the scan matches within 0.1% on five transcripts
-of eight and falls up to 21% short on two. The fields are called `input_tokens` / `output_tokens`
-— what the transcript recorded — not "what you were charged", which is a different thing.
+**The token, turn, peak and working-time counters describe the main thread**, so their meaning
+stays unchanged. Estimated cost also includes `.jsonl` files recursively under
+`<transcript without .jsonl>/subagents/` and `<transcript without .jsonl>/workflows/`.
+Calls without recorded usage remain absent.
 
-That other thing travels apart, as `api_cost_usd` in `--json --usage` only: the `totalCostUSD`
-the CLI wrote with its own prices, relayed as-is. `sereno` carries no price table — one in a
-public repo goes stale without telling anyone — and it never puts a dollar figure in the TUI,
-where on a subscription plan it would be money you did not pay.
+The CLI's `totalCostUSD` remains unchanged as `api_cost_usd` in `--json --usage`.
+Alongside it, `estimated_cost_usd` uses static rates in the code, with a date and source:
+what the CLI charges (`cost-state`), checked against ccusage 20.0.40 and models.dev, 2026-10-22.
+Each message uses its own model and the last line for its `message.id`. Unknown models and
+`<synthetic>` messages contribute nothing; if no message has a rate, the result is `null`.
+The usage list and spend panel show `~$X.XX est.`
+beside the authoritative CLI figure when present; neither means a subscription charge.
+Cache writes use the recorded 5-minute/1-hour split: 5 minutes uses the table's cache-write
+rate, 1 hour uses twice the input rate. Without the split, all writes count as 5 minutes.
+Haiku 5.5 uses its base rate up to 100k tokens. Rates can become stale; sereno has no network
+code and never refreshes them automatically.
+
+The independent 2026-10-22 review reproduced ccusage's Claude total for 2026-10-21 at
+$1616.0318 after accounting for subagents, 1-hour writes and Sonnet 5.5 cache reads; the
+main-thread-only, 5-minute calculation was $419.84 (74.02% short). This is the review's
+comparison, not a new live measurement or a guarantee that every CLI total matches.
 
 #### Sorting by what it burned
 
@@ -1355,7 +1366,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are eighty-one
+collects the whole folder, prints a line per file and ends with the count. There are eighty-two tests
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
@@ -1398,7 +1409,7 @@ House rules:
 - **A test you haven't seen fail doesn't count.** Break the code on purpose, watch it go red,
   then fix it. Half the tests here were written that way after the first version passed
   something it shouldn't have. Since 1.33.0 that ritual is a test of its own:
-  `tests/test_mutantes.py` breaks one hundred and seventy-six real guards, one at a time, on a copy of the
+  `tests/test_mutantes.py` breaks one hundred and eighty-two real guards, one at a time, on a copy of the
   tree, and
   fails if any of them survives — or if an anchor no longer exists, which means the catalogue
   went stale and the entry has to be rewritten rather than quietly skipped.

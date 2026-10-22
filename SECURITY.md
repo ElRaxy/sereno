@@ -49,6 +49,10 @@ network code of any kind. No secrets and no credentials. There is no config file
 either — everything you can set is an environment variable; the `preferencias.json` above is
 written by the program, not by you, and deleting it only forgets your last sort order.
 
+Estimated costs use static rates in the code, with a date and source: what the CLI charges
+(`cost-state`), checked against ccusage 20.0.40 and models.dev on 2026-10-22. Reading those
+rates requires no network connection, and there is no online refresh.
+
 ## Your session text is on screen
 
 The panel shows the last prompt and the last reply of each session, so a screenshot of

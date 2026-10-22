@@ -665,16 +665,27 @@ vuelve a leer— y es cien veces mayor que todo lo demás junto (300M frente a 3
 ocho horas). Sumarla con la entrada da un número enorme que no significa nada, así que las cuatro
 partes van sueltas y quien quiera un total lo compone sabiendo qué está sumando.
 
-**Lo que no cuenta**, y esto importa si delegas: los turnos de subagente y las llamadas a Haiku
-que el CLI hace por su cuenta (títulos, resúmenes) no dejan línea en el transcript. Cruzado
-contra el `cost-state` que escribe el propio CLI, el escaneo cuadra al 0,1% en cinco transcripts
-de ocho y se queda hasta un 21% corto en dos. Los campos se llaman `input_tokens` /
-`output_tokens` —lo que el transcript registró— y no "lo que te han cobrado", que es otra cosa.
+**Los contadores de tokens, turnos, pico y tiempo activo describen el hilo principal**, para
+mantener su significado. El coste estimado incluye además los `.jsonl` bajo
+`<transcript sin .jsonl>/subagents/` y `<transcript sin .jsonl>/workflows/`, recursivamente.
+Las llamadas sin uso registrado siguen sin constar.
 
-Esa otra cosa viaja aparte, como `api_cost_usd` y solo en `--json --usage`: el `totalCostUSD` que
-escribió el CLI con sus propios precios, relatado tal cual. `sereno` no lleva tabla de tarifas
-—una en un repo público caduca sin avisar a nadie— y nunca pinta un dólar en el TUI, donde en un
-plan de suscripción sería dinero que no has pagado.
+El `totalCostUSD` del CLI sigue intacto como `api_cost_usd` en `--json --usage`.
+A su lado, `estimated_cost_usd` usa tarifas estáticas en el código, con fecha y fuente:
+lo que cobra el CLI (`cost-state`), contrastado con ccusage 20.0.40 y models.dev, 2026-10-22.
+Cada mensaje usa su modelo y la última línea de su `message.id`. Los modelos desconocidos y
+los mensajes `<synthetic>` no suman; si ningún mensaje tiene tarifa, el resultado es `null`.
+La lista de uso y el panel de gasto muestran
+`~$X.XX est.` junto a la cifra autoritativa del CLI cuando existe; ninguna implica un cobro de suscripción.
+La caché escrita usa el desglose registrado de 5 minutos/1 hora: 5 minutos a la tarifa de
+escritura de la tabla y 1 hora al doble de la entrada. Sin desglose, toda escritura cuenta como
+5 minutos. Haiku 5.5 usa su tarifa base hasta 100k tokens. Las tarifas pueden quedar antiguas;
+sereno funciona sin red y nunca las actualiza automáticamente.
+
+La revisión independiente del 2026-10-22 reprodujo el total Claude de ccusage del 2026-10-21:
+$1616.0318 al contar subagentes, escritura de 1 hora y lectura de caché de Sonnet 5.5; el
+cálculo con solo el hilo principal y 5 minutos daba $419.84 (un 74,02% menos). Es el contraste
+de aquella revisión, no una medición nueva ni una garantía de coincidir con cada total del CLI.
 
 #### Ordenar por lo gastado
 
@@ -1318,7 +1329,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y uno,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y dos tests,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
@@ -1353,7 +1364,7 @@ Normas de la casa:
 - **Un test que no has visto fallar no vale.** Rompe el código a propósito, míralo ponerse rojo y
   arréglalo. La mitad de estos se escribieron así, después de que la primera versión diera por
   bueno algo que no lo era. Desde la 1.33.0 ese ritual es un test más:
-  `tests/test_mutantes.py` rompe ciento setenta y seis guardas de verdad, una a una, sobre una copia del
+  `tests/test_mutantes.py` rompe ciento ochenta y dos guardas de verdad, una a una, sobre una copia del
   árbol, y
   falla si alguna sobrevive — o si un ancla ya no existe, que quiere decir que el catálogo se quedó
   viejo y hay que reescribir la entrada en vez de saltarla en silencio.

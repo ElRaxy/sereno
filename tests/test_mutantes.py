@@ -32,6 +32,30 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 
 # (que guarda es · ancla exacta en `sereno` · con que se sustituye · quien debe cazarlo)
 MUTANTES = [
+    # El coste estimado no borra ausencias ni sustituye la cifra del CLI.
+    ("un uso ausente pasa a costar cero",
+     "    if u is None or tarifa is None:\n        return None",
+     "    if u is None or tarifa is None:\n        return 0.0",
+     "test_coste_estimado.py"),
+    ("la estimacion cobra la cache leida como salida",
+     'zip(("in", "out", "cw", "cr"), tarifa)',
+     'zip(("in", "cr", "cw", "out"), tarifa)',
+     "test_coste_estimado.py"),
+    ("un coste autoritativo de cero desaparece del panel",
+     '    if u["usd"] is not None:', '    if u["usd"]:',
+     "test_coste_estimado.py"),
+    ("la cache de una hora se cobra como la de cinco minutos",
+     'u.get("cw1h", 0) * 2 * tarifa[0]',
+     'u.get("cw1h", 0) * tarifa[2]', "test_coste_estimado.py"),
+    ("la primera linea de un mensaje descarta su salida definitiva",
+     '                actual = {clave: u.get(campo) or 0 for clave, campo in _USO_CAMPOS}',
+     '                if anterior is not None:\n                    continue\n'
+     '                actual = {clave: u.get(campo) or 0 for clave, campo in _USO_CAMPOS}',
+     "test_coste_estimado.py"),
+    ("el coste total omite los subagentes",
+     '    for carpeta in ("subagents", "workflows"):',
+     '    for carpeta in ("workflows",):',
+     "test_coste_estimado.py"),
     # ── lo tecleado en el cuadro de cerrar ───────────────────────────────────
     ("el rango se materializa entero antes de recortarlo",
      "            a, b = max(a, 1), min(b, len(rows))",
