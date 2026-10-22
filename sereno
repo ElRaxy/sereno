@@ -1893,8 +1893,8 @@ def filas_json(rows):
             # Lo escribio el propio CLI con sus precios: es la cifra autoritativa,
             # no necesariamente lo que has pagado en un plan de suscripcion.
             "api_cost_usd": u["usd"] if u else None,
-            # Estimacion de sereno con su tabla, no un cobro. Usa el modelo actual
-            # de la sesion para todos los tokens, aunque antes usara otro.
+            # Suma por modelo de cada mensaje, incluidos subagentes y workflows.
+            # Los contadores de tokens anteriores siguen siendo del hilo principal.
             "estimated_cost_usd": coste_estimado(u, pu.get("modelo")) if u else None,
             # Con quien choca y cuanto. Van las CIFRAS, nunca las rutas: `--json` se
             # canaliza a barras de estado y a scripts de terceros, y un path de cliente
@@ -3643,10 +3643,10 @@ def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
 # numero que sale:
 #
 #   1. Una respuesta ocupa VARIAS lineas —un `thinking` y dos `tool_use` van en tres— y
-#      las tres repiten el MISMO `usage`. Sumarlas todas infla la salida entre un +49% y
-#      un +123% segun la sesion. Se deduplica por `message.id`, y basta compararlo con el
-#      anterior: en 14.507 lineas con `usage` de 60 transcripts, un id repetido nunca
-#      aparecio separado de sus hermanos. Eso ahorra guardar el conjunto entero de ids.
+#      las tres comparten `message.id`. Sumarlas todas infla la salida entre un +49% y
+#      un +123% segun la sesion. Vale la ULTIMA linea por `message.id`: en 1598 de
+#      2031 respuestas de subagente la primera traia salida parcial (2026-10-22).
+#      Se guarda lo contado por id para restarlo incluso entre lecturas incrementales.
 #   2. `cache_read_input_tokens` NO es material nuevo: es lo ya enviado que se vuelve a
 #      leer, y es cien veces mayor que el resto (300M frente a 3M en una sesion de ocho
 #      horas). Sumarlo con la entrada da una cifra enorme que no significa nada, asi que
@@ -3654,13 +3654,11 @@ def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
 #   3. La ultima linea de una sesion viva se esta escribiendo mientras la lees. Si se
 #      consume a medias, el `_pos` avanza sobre ella y esos tokens se pierden para siempre.
 #
-# Y una cuarta que no se puede arreglar desde aqui, pero hay que saberla: los turnos de
-# subagente y las llamadas a Haiku que el CLI hace por su cuenta (titulos, resumenes) NO
-# dejan linea en el transcript. Cruzado contra el `cost-state` que escribe el propio CLI,
-# esto cuadra al 0,1% en cinco transcripts de ocho y se queda hasta un 21% corto en dos.
-# Se llama `input_tokens`/`output_tokens` —lo que el transcript registro— y no "lo que te
-# han cobrado", que es otra cosa y viaja aparte en `usd`.
+# Los contadores siguen describiendo el hilo principal; solo `est` suma subagentes y
+# workflows. Omitirlos dejaba fuera el 70,65% del coste del dia 2026-10-21. Las llamadas
+# internas sin transcript siguen sin constar: el coste del CLI va aparte en `usd`.
 TOPE_USO = 256 * 1024 * 1024      # por encima, `None`: mejor sin dato que a medias
+# Dura lo que el proceso: vaciar a 200 releeria una sesion de 201 hijos sin cambios.
 _CACHE_USO = {}
 _USO_CAMPOS = (("in", "input_tokens"), ("out", "output_tokens"),
                ("cw", "cache_creation_input_tokens"),
@@ -3709,19 +3707,29 @@ def _uso(path, tope=None):
     guardado = _CACHE_USO.get(str(path))
     if (guardado and guardado[0] == st.st_size and guardado[1] == st.st_mtime
             and guardado[2]["completo"]):
+        guardado[2]["_leidos"] = 0
         return guardado[2]
-    if guardado and st.st_size >= guardado[0]:
+    if guardado and (st.st_size > guardado[0] or
+                     (st.st_size == guardado[0] and st.st_mtime == guardado[1])):
         d = dict(guardado[2])          # sigue creciendo: se lee solo lo nuevo
+        d["_mensajes"] = dict(d["_mensajes"])
     else:
         # Encogio (o no habia nada): lo han reescrito y el offset ya no vale. Releer
         # 89 MB una vez es mas barato que publicar una cifra que se quedo a medias.
         if st.st_size > TOPE_USO:
             return None
         d = {"in": 0, "out": 0, "cw": 0, "cr": 0, "turnos": 0, "compacta": 0,
-             "pico": 0, "activo": 0.0, "usd": None, "completo": False,
-             "_pos": 0, "_ult": None, "_ts": 0.0}
+             "pico": 0, "activo": 0.0, "usd": None, "est": None, "completo": False,
+             "_pos": 0, "_mensajes": {}, "_tarifados": 0, "_ts": 0.0}
+    inicio = d["_pos"]
     d["completo"] = True               # salvo que el tope corte la lectura
     fin = None if tope is None else d["_pos"] + max(0, tope)
+    if fin is not None and inicio >= fin:
+        # Sin presupuesto, abrir cada hijo leeria su primera linea antes del corte.
+        d["completo"] = inicio >= st.st_size
+        d["_leidos"] = 0
+        _CACHE_USO[str(path)] = (st.st_size, st.st_mtime, d)
+        return d
     try:
         with path.open("rb") as f:
             f.seek(d["_pos"])
@@ -3759,8 +3767,8 @@ def _uso(path, tope=None):
                         d["pico"] = max(d["pico"], v)
                     continue
                 if tipo == "cost-state":
-                    # Lo escribe el CLI al cerrar, con SUS precios. `sereno` no calcula
-                    # dinero: lo relata. Vale el ultimo, que es el vigente.
+                    # Lo escribe el CLI al cerrar, con SUS precios. Esta cifra no se
+                    # calcula: se relata. Vale el ultimo, que es el vigente.
                     #
                     # Y un 0 con `modelUsage` vacio NO es "esta sesion costo cero": es que
                     # esa cuenta no lleva la contabilidad, asi que el dato no consta.
@@ -3780,19 +3788,29 @@ def _uso(path, tope=None):
                 if not isinstance(u, dict):
                     continue
                 mid = m.get("id")
-                if mid is not None and mid == d["_ult"]:
-                    continue           # otra linea de la MISMA respuesta: ya contada
-                d["_ult"] = mid
-                d["turnos"] += 1
+                anterior = d["_mensajes"].get(mid) if mid is not None else None
+                actual = {clave: u.get(campo) or 0 for clave, campo in _USO_CAMPOS}
+                cc = u.get("cache_creation") or {}
+                if "ephemeral_5m_input_tokens" in cc and "ephemeral_1h_input_tokens" in cc:
+                    actual["cw5"] = cc["ephemeral_5m_input_tokens"] or 0
+                    actual["cw1h"] = cc["ephemeral_1h_input_tokens"] or 0
+                actual["est"] = _coste_tokens(actual, m.get("model"))
                 for clave, campo in _USO_CAMPOS:
-                    d[clave] += u.get(campo) or 0
+                    d[clave] += actual[clave] - (anterior[clave] if anterior else 0)
+                antes = anterior.get("est") if anterior else None
+                d["_tarifados"] += int(actual["est"] is not None) - int(antes is not None)
+                d["est"] = ((d["est"] or 0) - (antes or 0) + (actual["est"] or 0)
+                            if d["_tarifados"] else None)
+                d["_mensajes"][mid if mid is not None else (d["_pos"],)] = actual
+                if anterior is None:
+                    d["turnos"] += 1
                 # El contexto de ESA respuesta, que es lo que suma la barra: entrada
                 # nueva mas cache. La salida no cuenta, no viaja de vuelta al modelo.
                 d["pico"] = max(d["pico"], (u.get("input_tokens") or 0)
                                 + (u.get("cache_read_input_tokens") or 0)
                                 + (u.get("cache_creation_input_tokens") or 0))
                 t = _epoch(j.get("timestamp") or "")
-                if t:
+                if t and anterior is None:
                     # Trabajo = huecos entre respuestas que no pasan de `VIVA`. Se reusa
                     # esa constante y no un numero nuevo porque el programa YA llama "no
                     # esta escribiendo" a un transcript quieto 90 s: dos umbrales harian
@@ -3803,8 +3821,7 @@ def _uso(path, tope=None):
                     d["_ts"] = t
     except OSError:
         return None
-    if len(_CACHE_USO) > 200:
-        _CACHE_USO.clear()             # la clave no lleva mtime: crece sin tope
+    d["_leidos"] = d["_pos"] - inicio
     _CACHE_USO[str(path)] = (st.st_size, st.st_mtime, d)
     return d
 
@@ -3819,12 +3836,35 @@ def uso_de(r, tope=None):
     pasada y no tienen a nadie esperando delante. Con `tope`, deja el trabajo a medias y
     lo dice en `completo` — es lo que usa el selector para no bloquearse.
     """
-    if "_uso" in r and (r["_uso"] is None or r["_uso"].get("completo") or tope is None):
-        if r["_uso"] is None or r["_uso"].get("completo"):
-            return r["_uso"]
+    if r.get("_demo") and (r.get("_uso") or {}).get("completo"):
+        return r["_uso"]
     t = (r.get("meta") or {}).get("_transcript")
-    r["_uso"] = _uso(t, tope) if t else None
-    return r["_uso"]
+    if not t:
+        return r.setdefault("_uso", None)
+    # Mirar tambien los hijos: su mtime cambia sin tocar el transcript principal.
+    paths = [t]
+    for carpeta in ("subagents", "workflows"):
+        paths.extend(sorted((t.with_suffix("") / carpeta).rglob("*.jsonl")))
+    total, costes = None, {}
+    for path in paths:
+        u = _uso(path, tope)
+        if u is None:
+            r["_uso"] = None
+            return None
+        if total is None:
+            total = dict(u)
+        else:
+            total["completo"] = total["completo"] and u["completo"]
+        # Un workflow puede copiar mensajes del principal: tampoco se cobran dos veces.
+        for mid, mensaje in u["_mensajes"].items():
+            clave = (str(path), mid) if isinstance(mid, tuple) else mid
+            costes[clave] = mensaje["est"]
+        if tope is not None:
+            tope = max(0, tope - u["_leidos"])
+    conocidos = [c for c in costes.values() if c is not None]
+    total["est"] = sum(conocidos) if conocidos else None
+    r["_uso"] = total
+    return total
 
 
 # Cuanto se lee de cada transcript por vuelta, y cuanto se deja gastar en total. El
@@ -3875,16 +3915,17 @@ def pico_de(r):
 
 
 # USD por millon de tokens: entrada, salida, cache escrita 5m y cache leida.
-# Fuente: skill claude-api, cache 2026-10-06. Haiku 5.5 usa la base hasta 100k.
+# Fuente: lo que cobra el CLI (cost-state), contrastado con ccusage 20.0.40
+# y models.dev, 2026-10-22. Haiku 5.5 usa la base hasta 100k.
 TARIFAS_USD_MTOK = {
     "claude-fable-5-1": (10, 50, 12.5, 0.25),
-    "claude-fable-5": (10, 50, 12.5, 0.25),
+    "claude-fable-5": (10, 50, 12.5, 1.0),
     "claude-opus-5-5": (4, 20, 5, 0.20),
     "claude-opus-5": (5, 25, 6.25, 0.50),
     "claude-opus-4-8": (5, 25, 6.25, 0.50),
     "claude-opus-4-7": (5, 25, 6.25, 0.50),
     "claude-opus-4-6": (5, 25, 6.25, 0.50),
-    "claude-sonnet-5-5": (2, 10, 2.5, 0.20),
+    "claude-sonnet-5-5": (2, 10, 2.5, 0.10),
     "claude-sonnet-5": (2, 10, 2.5, 0.20),
     "claude-sonnet-4-6": (3, 15, 3.75, 0.30),
     "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
@@ -3901,53 +3942,20 @@ def _modelo_tarifa(m):
     return re.sub(r"-\d{8}$", "", m) or None
 
 
-def coste_estimado(u, modelo):
-    """Lo que costarian esos tokens por API; sin datos no se inventa un cero."""
+def _coste_tokens(u, modelo):
+    """Sin redondear por mensaje: miles de respuestas pequenas suman centimos."""
     tarifa = TARIFAS_USD_MTOK.get(_modelo_tarifa(modelo))
     if u is None or tarifa is None:
         return None
-    return round(sum(u[k] * p for k, p in zip(("in", "out", "cw", "cr"), tarifa))
-                 / 1e6, 4)
+    tokens = dict(u, cw=u.get("cw5", u["cw"]))
+    return (sum(tokens[k] * p for k, p in zip(("in", "out", "cw", "cr"), tarifa))
+            + u.get("cw1h", 0) * 2 * tarifa[0]) / 1e6
 
 
-def refresca_tarifas_models_dev(timeout=2):
-    """Opt-in: devuelve un hilo, sin esperar a la red. El programa no lo llama.
-
-    Solo Anthropic: otro proveedor puede vender el mismo modelo a otro precio.
-    Se valida todo antes de tocar la tabla, para no dejar medio refresco si falla.
-    """
-    import threading
-    import urllib.request
-
-    def refresca():
-        try:
-            with urllib.request.urlopen("https://models.dev/api.json", timeout=timeout) as r:
-                modelos = json.load(r)["anthropic"]["models"]
-            cambios = {}
-            for modelo, datos in modelos.items():
-                modelo = _modelo_tarifa(modelo)
-                if modelo not in TARIFAS_USD_MTOK:
-                    continue
-                coste = datos.get("cost", {})
-                claves = ("input", "output", "cache_write", "cache_read")
-                if not isinstance(coste, dict):
-                    return
-                if not all(k in coste for k in claves):
-                    continue
-                tarifa = tuple(coste[k] for k in claves)
-                if not all(type(v) in (int, float) and 0 <= v < float("inf") for v in tarifa):
-                    return
-                cambios[modelo] = tarifa
-            TARIFAS_USD_MTOK.update(cambios)
-        except Exception:
-            pass                       # offline o formato ajeno: queda la tabla anterior
-
-    try:
-        hilo = threading.Thread(target=refresca, daemon=True)
-        hilo.start()
-        return hilo
-    except Exception:
-        return None
+def coste_estimado(u, modelo=None):
+    """Lo que costarian esos tokens por API; sin datos no se inventa un cero."""
+    est = u["est"] if u is not None and "est" in u else _coste_tokens(u, modelo)
+    return round(est, 4) if est is not None else None
 
 
 def _uso_texto(u, modelo=None):

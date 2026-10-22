@@ -23,7 +23,7 @@ Requirements: Python 3.8 or newer, and nothing else. Sereno is one file and it s
 then fix it. Half the tests here exist because the first version of them passed something it
 shouldn't have.
 
-Since 1.33.0 that ritual is itself a test: `tests/test_mutantes.py` breaks one hundred and eighty real guards,
+Since 1.33.0 that ritual is itself a test: `tests/test_mutantes.py` breaks one hundred and eighty-two real guards,
 one at a time, on a copy of the tree, and fails if any mutant survives — or if an anchor no longer
 matches, which means the catalogue went stale and the entry has to be rewritten rather than
 quietly skipped. If you add a guard worth keeping, add its mutant.
@@ -37,6 +37,9 @@ quietly skipped. If you add a guard worth keeping, add its mutant.
   using `@v4` will be rejected. Dependabot raises the bumps.
 - **Both READMEs move together.** `README.md` and `README.es.md` are kept in step by
   `tests/test_readmes_a_la_par.py`; a section added to one has to be added to the other.
+- **No network code.** Estimated costs use static rates in the code, with a date and source:
+  CLI `cost-state`, checked against ccusage 20.0.40 and models.dev on 2026-10-22.
+  Rate changes require a code change; there is no online refresh.
 - **Every string the user sees goes through `_()`**, with its Spanish entry in `TEXTOS["es"]` and
   the same `{placeholders}`. `tests/test_i18n.py` walks the AST, so a hardcoded phrase is caught.
   Singular and plural are two separate strings.
@@ -45,7 +48,7 @@ quietly skipped. If you add a guard worth keeping, add its mutant.
 ## On AI-assisted code
 
 Sereno is written with Claude Code, and its author says so up front rather than being asked. That
-is also why the harness above exists: eighty-two tests, one hundred and eighty mutants and a full run on
+is also why the harness above exists: eighty-two tests, one hundred and eighty-two mutants and a full run on
 every pull request are what make a claim about this code checkable by someone who did not write
 it. Contributions written the same way are welcome under exactly the same bar — the tests do not
 care who typed the line, and neither does the review.

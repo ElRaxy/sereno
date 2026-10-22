@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""El programa no abre conexiones por defecto, y aqui se demuestra.
+"""El programa no puede abrir una conexion, y aqui se demuestra.
 
 Es la pregunta razonable de cualquiera que se plantee instalarlo: esto lee tus
 prompts y las respuestas de tu agente. La respuesta no deberia ser "confia en mi",
-asi que el test recorre el AST y limita la red al refresco explicito de tarifas,
-sin llamadas desde el programa. Ademas fija la lista COMPLETA de programas externos.
+asi que el test recorre el AST y falla si aparece un import de red, y ademas fija
+la lista COMPLETA de programas externos que se lanzan.
 """
 import ast, pathlib, re, sys
 
@@ -36,32 +36,18 @@ def imports_del_fuente(arbol):
     return fuera
 
 
-def fallos_red(arbol):
+def main():
+    arbol = ast.parse(FUENTE)
     fallos = []
-    opt_in = {n for f in arbol.body if isinstance(f, ast.FunctionDef)
-              and f.name == "refresca_tarifas_models_dev" for n in ast.walk(f)}
+
     for n in ast.walk(arbol):
-        if isinstance(n, ast.Name) and n.id == "refresca_tarifas_models_dev":
-            fallos.append(f"referencia al refresco opt-in en la linea {n.lineno}")
         if isinstance(n, ast.Import):
             for a in n.names:
-                if n in opt_in and a.name == "urllib.request":
-                    continue
                 if a.name.split(".")[0] in RED:
                     fallos.append(f"import de red en la linea {n.lineno}: {a.name}")
         elif isinstance(n, ast.ImportFrom) and n.module:
             if n.module.split(".")[0] in RED:
                 fallos.append(f"import de red en la linea {n.lineno}: {n.module}")
-    return fallos
-
-
-def main():
-    arbol = ast.parse(FUENTE)
-    fallos = fallos_red(arbol)
-    # La excepcion no permite red fuera de la funcion, ni activarla o pasarla como callback.
-    for extra in ("\nimport urllib.request\n", "\nrefresca_tarifas_models_dev()\n",
-                  "\nrefresco = refresca_tarifas_models_dev\n"):
-        assert fallos_red(ast.parse(FUENTE + extra))
 
     externos = set()
     for n in ast.walk(arbol):
@@ -112,7 +98,7 @@ def main():
 
     for f in fallos:
         print("FALLO:", f)
-    print(f"ok: red solo en refresco opt-in sin llamadas; solo lanza {sorted(concretos)}"
+    print(f"ok: cero imports de red; solo lanza {sorted(concretos)}"
           if not fallos else f"{len(fallos)} fallo(s)")
     return 1 if fallos else 0
 

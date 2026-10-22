@@ -3,9 +3,9 @@
 
 Las cuatro clases de tokens se cobran por separado. Se prueban la fila JSON y las
 dos vistas, no solo la cuenta, porque perder el modelo al pintar oculta la cifra.
-El refresco se prueba con respuestas locales: la suite no depende de models.dev.
+Los transcripts son fixtures temporales: nunca se leen conversaciones reales.
 """
-import contextlib, io, json, pathlib, threading, urllib.request
+import contextlib, io, json, os, pathlib, tempfile, urllib.request
 from unittest.mock import patch
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -38,13 +38,13 @@ def main():
     tabla = ns["TARIFAS_USD_MTOK"]
     assert tabla == {
         "claude-fable-5-1": (10, 50, 12.5, 0.25),
-        "claude-fable-5": (10, 50, 12.5, 0.25),
+        "claude-fable-5": (10, 50, 12.5, 1.0),
         "claude-opus-5-5": (4, 20, 5, 0.20),
         "claude-opus-5": (5, 25, 6.25, 0.50),
         "claude-opus-4-8": (5, 25, 6.25, 0.50),
         "claude-opus-4-7": (5, 25, 6.25, 0.50),
         "claude-opus-4-6": (5, 25, 6.25, 0.50),
-        "claude-sonnet-5-5": (2, 10, 2.5, 0.20),
+        "claude-sonnet-5-5": (2, 10, 2.5, 0.10),
         "claude-sonnet-5": (2, 10, 2.5, 0.20),
         "claude-sonnet-4-6": (3, 15, 3.75, 0.30),
         "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
@@ -86,60 +86,155 @@ def main():
             assert "$" not in ns["_uso_texto"](u, "desconocido")
         assert not red.called
 
-    original = dict(tabla)
-    completo = {"cost": {"input": 6, "output": 30, "cache_write": 7.5, "cache_read": 0.6}}
+    with patch.dict(ns, DEMO=True, USO=True):
+        filas = ns["sesiones_demo"]()
+        precargados = [r["_uso"] for r in filas]
+        with patch.object(pathlib.Path, "open", side_effect=AssertionError("demo lee disco")), \
+                patch.object(pathlib.Path, "stat", side_effect=AssertionError("demo mira disco")), \
+                patch.object(pathlib.Path, "rglob", side_effect=AssertionError("demo busca hijos")):
+            ns["filas_json"]([r for r in filas if r["_uso"] is not None])
+        salida = ns["filas_json"](filas)
+        for r, u, s in zip(filas, precargados, salida):
+            if u is not None:
+                assert r["_uso"] is u
+                assert s["input_tokens"] == u["in"]
+                if s["model"] is not None:
+                    assert s["estimated_cost_usd"] is not None
+                else:
+                    assert s["estimated_cost_usd"] is None
+        assert salida[0]["input_tokens"] == 1200
+        assert salida[0]["estimated_cost_usd"] == 53.7667
 
-    def refresca(datos):
-        with patch.object(urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(datos).encode())) as red:
-            hilo = ns["refresca_tarifas_models_dev"](timeout=0.1)
-            hilo.join(2)
-            assert not hilo.is_alive()
-            red.assert_called_once_with("https://models.dev/api.json", timeout=0.1)
+    prueba_transcripts()
+    print("ok: costes, ausencias, normalizacion, JSON, vistas bilingues, subagentes, "
+          "cache 1h, modelos mixtos y deduplicacion incremental")
 
-    try:
-        refresca({"anthropic": {"models": {modelo: completo,
-                 "claude-fable-5": {"cost": {"input": 999}}, "desconocido": completo}}})
-        assert tabla == dict(original, **{modelo: (6, 30, 7.5, 0.6)})
-        tabla.update(original)
-        for datos in ({}, [], {"anthropic": {"models": []}},
-                      {"anthropic": {"models": {modelo: completo, "claude-fable-5": None}}},
-                      {"anthropic": {"models": {modelo: completo, "claude-fable-5": {"cost": []}}}}):
-            refresca(datos)
-            assert tabla == original
-        for valor in (None, "6", True, -1, float("inf"), float("nan")):
-            malo = {"cost": dict(completo["cost"], input=valor)}
-            refresca({"anthropic": {"models": {modelo: completo, "claude-fable-5": malo}}})
-            assert tabla == original
-        with patch.object(urllib.request, "urlopen", side_effect=TimeoutError):
-            hilo = ns["refresca_tarifas_models_dev"]()
-            hilo.join(2)
-            assert not hilo.is_alive()
-            assert tabla == original
-        with patch.object(urllib.request, "urlopen", return_value=io.BytesIO(b"no es json")):
-            hilo = ns["refresca_tarifas_models_dev"]()
-            hilo.join(2)
-            assert tabla == original
-        # La red queda esperando, pero quien llama ya ha recuperado el control.
-        entra, sale = threading.Event(), threading.Event()
 
-        def espera(*args, **kwargs):
-            entra.set()
-            assert sale.wait(2)
-            raise TimeoutError
+def respuesta(mid, modelo="claude-opus-5", ent=0, out=0, cw=0, cr=0, cache=None):
+    uso = {"input_tokens": ent, "output_tokens": out,
+           "cache_creation_input_tokens": cw, "cache_read_input_tokens": cr}
+    if cache is not None:
+        uso["cache_creation"] = cache
+    return json.dumps({"type": "assistant", "message": {
+        "id": mid, "model": modelo, "usage": uso}}) + "\n"
 
-        with patch.object(urllib.request, "urlopen", side_effect=espera):
-            hilo = ns["refresca_tarifas_models_dev"]()
-            try:
-                assert entra.wait(1)
-                assert hilo.is_alive()
-                assert tabla == original
-            finally:
-                sale.set()
-                hilo.join(2)
-    finally:
-        tabla.clear()
-        tabla.update(original)
-    print("ok: costes, ausencias, normalizacion, JSON, vistas bilingues y refresco opt-in")
+
+def prueba_transcripts():
+    coste, uso_de, cache_uso = ns["coste_estimado"], ns["uso_de"], ns["_CACHE_USO"]
+    with tempfile.TemporaryDirectory() as tmp:
+        p = pathlib.Path(tmp) / "sesion.jsonl"
+        sub = p.with_suffix("") / "subagents" / "agent-x.jsonl"
+        flujo = p.with_suffix("") / "workflows" / "anidado" / "paso.jsonl"
+        sub.parent.mkdir(parents=True)
+        flujo.parent.mkdir(parents=True)
+        p.write_text(respuesta("a", ent=1_000_000, out=10_000)
+                     + respuesta("b", "claude-sonnet-5-5", ent=1_000_000)
+                     + respuesta("a", ent=1_000_000, out=100_000))
+        sub.write_text(respuesta("x", out=1_000)
+                       + respuesta("y", "claude-sonnet-5-5", ent=500_000, out=50_000)
+                       + respuesta("x", out=200_000))
+        flujo.write_text(respuesta("z", "claude-haiku-5-5", ent=1_000_000))
+        fila = {"name": "prueba", "title": "prueba", "attached": False,
+                "created": 0, "mem_mb": None, "meta": {"_transcript": p},
+                "pulso": {"modelo": "desconocido"}}
+        u = uso_de(fila)
+        # Principal: (5 + 2.5) + 2 = 9.5. Subagente: 5 + (1 + .5) = 6.5.
+        # Workflow: .1. La salida parcial y el modelo del panel no mandan.
+        assert coste(u, "desconocido") == 16.1
+        assert u["in"] == 2_000_000 and u["out"] == 100_000
+        assert u["turnos"] == 2 and u["cw"] == 0 and u["cr"] == 0
+        assert u["activo"] == 0 and u["pico"] == 1_000_000
+        assert ns["filas_json"]([fila])[0]["estimated_cost_usd"] == 16.1
+        assert "~$16.10 est." in ns["_uso_texto"](u, "desconocido")
+        # Una fila nueva y una existente reutilizan los tres ficheros sin abrirlos.
+        with patch.object(pathlib.Path, "open", side_effect=AssertionError("relectura")):
+            assert coste(uso_de(fila)) == 16.1
+            assert coste(uso_de({"meta": fila["meta"]})) == 16.1
+        with sub.open("a") as f:
+            f.write(respuesta("x", out=400_000))
+        # Solo cambio el hijo: 5 dolares mas, con principal y workflow intactos.
+        assert coste(uso_de(fila)) == 21.1
+        with p.open("a") as f:
+            f.write(respuesta("a", ent=1_000_000, out=200_000))
+        assert coste(uso_de(fila)) == 23.6
+        incremental = uso_de(fila)
+        cache_uso.clear()
+        assert coste(uso_de(fila)) == 23.6
+        assert uso_de(fila)["out"] == incremental["out"] == 200_000
+        # Copia de workflow: id global, vale la ultima observacion una sola vez.
+        with flujo.open("a") as f:
+            f.write(respuesta("x", out=500_000))
+        assert coste(uso_de(fila)) == 26.1
+        # El presupuesto es compartido: no se lee un trozo por cada subagente.
+        cache_uso.clear()
+        abiertos, abrir = [], pathlib.Path.open
+
+        def abre(path, *args, **kwargs):
+            abiertos.append(path.name)
+            return abrir(path, *args, **kwargs)
+
+        with patch.object(pathlib.Path, "open", abre):
+            parcial = uso_de(fila, 1)
+        assert abiertos == ["sesion.jsonl"]
+        assert not parcial["completo"]
+        assert sum(d[2]["_pos"] for d in cache_uso.values()) == len(
+            respuesta("a", ent=1_000_000, out=10_000).encode())
+        for vuelta in range(20):
+            parcial = uso_de(fila, 1)
+            if parcial["completo"]:
+                break
+        assert parcial["completo"] and coste(parcial) == 26.1
+        # Reescritura con el mismo tamano: mtime distinto invalida el offset.
+        viejo = sub.stat().st_mtime
+        sub.write_text(sub.read_text().replace('400000', '600000'))
+        os.utime(sub, (viejo + 1, viejo + 1))
+        assert ns["_uso"](sub)["out"] == 650_000
+        # Borrar un hijo tambien debe quitar su coste, aunque no cambie el principal.
+        flujo.unlink()
+        assert coste(uso_de(fila)) == 28.5
+
+        p = pathlib.Path(tmp) / "cache.jsonl"
+        fila = {"meta": {"_transcript": p}}
+        p.write_text(respuesta("hora", ent=100_000, out=20_000, cw=300_000,
+                               cr=1_000_000, cache={"ephemeral_5m_input_tokens": 100_000,
+                                                   "ephemeral_1h_input_tokens": 200_000}))
+        # .5 entrada + .5 salida + .625 cache 5m + 2 cache 1h + .5 lectura.
+        assert coste(uso_de(fila)) == 4.125
+        assert uso_de(fila)["cw"] == 300_000
+        p.write_text(respuesta("cinco", ent=100_000, out=20_000,
+                               cw=300_000, cr=1_000_000))
+        assert coste(uso_de(fila)) == 3.375
+        # Con solo media pareja no hay desglose completo: se conserva el fallback 5m.
+        p.write_text(respuesta("incompleto", cw=300_000,
+                               cache={"ephemeral_1h_input_tokens": 200_000}))
+        cache_uso.clear()
+        assert coste(uso_de(fila)) == 1.875
+        # Ausencia de tarifa no es cero; tampoco se hereda el ultimo modelo del panel.
+        p.write_text(respuesta("sin", "desconocido", ent=1_000_000)
+                     + respuesta("sintetico", "<synthetic>", ent=1_000_000))
+        cache_uso.clear()
+        assert coste(uso_de(fila), "claude-opus-5") is None
+        p.write_text(respuesta("cero"))
+        assert coste(uso_de(fila)) == 0.0
+        # Una ultima linea sin tarifa retira el precio anterior del mismo id.
+        with p.open("a") as f:
+            f.write(respuesta("cero", "<synthetic>"))
+        assert coste(uso_de(fila)) is None
+        # Las respuestas pequenas se redondean despues de sumar: 20 * .000005.
+        p.write_text("".join(respuesta(str(i), ent=1) for i in range(20)))
+        cache_uso.clear()
+        assert coste(uso_de(fila)) == 0.0001
+        # Mas de 200 hijos no deben vaciar la cache y releerse en cada refresco.
+        p = pathlib.Path(tmp) / "muchos.jsonl"
+        p.write_text(respuesta("principal", ent=1_000_000))
+        hijos = p.with_suffix("") / "subagents"
+        hijos.mkdir(parents=True)
+        for i in range(201):
+            (hijos / ("agent-%d.jsonl" % i)).write_text(respuesta(str(i), ent=1_000_000))
+        fila = {"meta": {"_transcript": p}}
+        assert coste(uso_de(fila)) == 1010.0
+        with patch.object(pathlib.Path, "open", side_effect=AssertionError("relectura")):
+            assert coste(uso_de(fila)) == 1010.0
 
 
 if __name__ == "__main__":
