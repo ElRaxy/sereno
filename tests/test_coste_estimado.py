@@ -6,7 +6,7 @@ dos vistas, no solo la cuenta, porque perder el modelo al pintar oculta la cifra
 Los transcripts son fixtures temporales: nunca se leen conversaciones reales.
 """
 import contextlib, io, json, os, pathlib, tempfile, urllib.request
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ns = {"__name__": "sereno_test"}
@@ -106,6 +106,10 @@ def main():
         assert salida[0]["estimated_cost_usd"] == 53.7667
 
     prueba_transcripts()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_agregado_memorizado(pathlib.Path(tmp))
+    with tempfile.TemporaryDirectory() as tmp:
+        test_hijos_no_se_enumeran_dentro_del_plazo(pathlib.Path(tmp))
     print("ok: costes, ausencias, normalizacion, JSON, vistas bilingues, subagentes, "
           "cache 1h, modelos mixtos y deduplicacion incremental")
 
@@ -121,7 +125,8 @@ def respuesta(mid, modelo="claude-opus-5", ent=0, out=0, cw=0, cr=0, cache=None)
 
 def prueba_transcripts():
     coste, uso_de, cache_uso = ns["coste_estimado"], ns["uso_de"], ns["_CACHE_USO"]
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch.object(ns["time"], "monotonic", return_value=100.0) as reloj:
         p = pathlib.Path(tmp) / "sesion.jsonl"
         sub = p.with_suffix("") / "subagents" / "agent-x.jsonl"
         flujo = p.with_suffix("") / "workflows" / "anidado" / "paso.jsonl"
@@ -153,20 +158,24 @@ def prueba_transcripts():
         with sub.open("a") as f:
             f.write(respuesta("x", out=400_000))
         # Solo cambio el hijo: 5 dolares mas, con principal y workflow intactos.
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
         assert coste(uso_de(fila)) == 21.1
         with p.open("a") as f:
             f.write(respuesta("a", ent=1_000_000, out=200_000))
         assert coste(uso_de(fila)) == 23.6
         incremental = uso_de(fila)
         cache_uso.clear()
+        ns["_CACHE_AGREGADO"].clear()
         assert coste(uso_de(fila)) == 23.6
         assert uso_de(fila)["out"] == incremental["out"] == 200_000
         # Copia de workflow: id global, vale la ultima observacion una sola vez.
         with flujo.open("a") as f:
             f.write(respuesta("x", out=500_000))
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
         assert coste(uso_de(fila)) == 26.1
         # El presupuesto es compartido: no se lee un trozo por cada subagente.
         cache_uso.clear()
+        ns["_CACHE_AGREGADO"].clear()
         abiertos, abrir = [], pathlib.Path.open
 
         def abre(path, *args, **kwargs):
@@ -191,6 +200,7 @@ def prueba_transcripts():
         assert ns["_uso"](sub)["out"] == 650_000
         # Borrar un hijo tambien debe quitar su coste, aunque no cambie el principal.
         flujo.unlink()
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
         assert coste(uso_de(fila)) == 28.5
 
         p = pathlib.Path(tmp) / "cache.jsonl"
@@ -208,11 +218,13 @@ def prueba_transcripts():
         p.write_text(respuesta("incompleto", cw=300_000,
                                cache={"ephemeral_1h_input_tokens": 200_000}))
         cache_uso.clear()
+        ns["_CACHE_AGREGADO"].clear()
         assert coste(uso_de(fila)) == 1.875
         # Ausencia de tarifa no es cero; tampoco se hereda el ultimo modelo del panel.
         p.write_text(respuesta("sin", "desconocido", ent=1_000_000)
                      + respuesta("sintetico", "<synthetic>", ent=1_000_000))
         cache_uso.clear()
+        ns["_CACHE_AGREGADO"].clear()
         assert coste(uso_de(fila), "claude-opus-5") is None
         p.write_text(respuesta("cero"))
         assert coste(uso_de(fila)) == 0.0
@@ -223,6 +235,7 @@ def prueba_transcripts():
         # Las respuestas pequenas se redondean despues de sumar: 20 * .000005.
         p.write_text("".join(respuesta(str(i), ent=1) for i in range(20)))
         cache_uso.clear()
+        ns["_CACHE_AGREGADO"].clear()
         assert coste(uso_de(fila)) == 0.0001
         # Mas de 200 hijos no deben vaciar la cache y releerse en cada refresco.
         p = pathlib.Path(tmp) / "muchos.jsonl"
@@ -235,6 +248,133 @@ def prueba_transcripts():
         assert coste(uso_de(fila)) == 1010.0
         with patch.object(pathlib.Path, "open", side_effect=AssertionError("relectura")):
             assert coste(uso_de(fila)) == 1010.0
+
+
+def test_agregado_memorizado(tmp_path):
+    coste, uso_de = ns["coste_estimado"], ns["uso_de"]
+    cache_uso, cache_agregado = ns["_CACHE_USO"], ns["_CACHE_AGREGADO"]
+    cache_uso.clear()
+    cache_agregado.clear()
+    recorridos = 0
+
+    class MensajesContados(dict):
+        def items(self):
+            nonlocal recorridos
+            recorridos += 1
+            return super().items()
+
+    parche = patch.object(ns["time"], "monotonic", return_value=100.0)
+    reloj = parche.start()
+    try:
+        p = tmp_path / "sesion.jsonl"
+        p.write_text(respuesta("principal", ent=1_000_000))
+        hijos = []
+        for i in range(201):
+            carpeta = "subagents" if i % 2 else "workflows"
+            hijo = p.with_suffix("") / carpeta / "anidado" / ("hijo-%d.jsonl" % i)
+            hijo.parent.mkdir(parents=True, exist_ok=True)
+            hijo.write_text(respuesta("hijo-%d" % i, ent=1_000_000))
+            hijos.append(hijo)
+        fila = {"meta": {"_transcript": p}}
+        primero = uso_de(fila)
+        assert primero["completo"] and coste(primero) == 1010.0
+        assert len(cache_uso) == 202
+        for entrada in cache_uso.values():
+            entrada[2]["_mensajes"] = MensajesContados(entrada[2]["_mensajes"])
+        # Recargar crea filas nuevas: la reutilizacion debe depender del transcript.
+        segundo = uso_de({"meta": fila["meta"]})
+        assert recorridos == 0
+        assert coste(segundo) == coste(primero)
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
+        assert uso_de({"meta": fila["meta"]}) is primero
+        assert recorridos == 0
+
+        hijo = hijos[0]
+        viejo = hijo.stat().st_mtime
+        with hijo.open("a") as f:
+            f.write(respuesta("nuevo", out=1_000_000))
+        os.utime(hijo, (viejo + 1, viejo + 1))
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
+        cambiado = uso_de({"meta": fila["meta"]})
+        assert recorridos > 0
+        assert cambiado["completo"] and coste(cambiado) == 1035.0
+
+        nuevo = hijo.with_name("nuevo.jsonl")
+        nuevo.write_text(respuesta("otro", ent=1_000_000))
+        recorridos = 0
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
+        assert coste(uso_de({"meta": fila["meta"]})) == 1040.0
+        assert recorridos > 0
+        nuevo.unlink()
+        recorridos = 0
+        reloj.return_value += ns["REVISA_HIJOS_S"] + 1
+        assert coste(uso_de({"meta": fila["meta"]})) == 1035.0
+        assert recorridos > 0
+    finally:
+        parche.stop()
+        cache_uso.clear()
+        cache_agregado.clear()
+
+
+def test_hijos_no_se_enumeran_dentro_del_plazo(tmp_path):
+    coste, uso_de = ns["coste_estimado"], ns["uso_de"]
+    cache_uso, cache_agregado = ns["_CACHE_USO"], ns["_CACHE_AGREGADO"]
+    cache_uso.clear()
+    cache_agregado.clear()
+    enumeraciones, rglob = 0, pathlib.Path.rglob
+
+    def enumera(path, patron):
+        nonlocal enumeraciones
+        enumeraciones += 1
+        return rglob(path, patron)
+
+    try:
+        p = tmp_path / "sesion.jsonl"
+        p.write_text(respuesta("principal", ent=1_000_000))
+        hijos = p.with_suffix("") / "subagents"
+        hijos.mkdir(parents=True)
+        (hijos / "primero.jsonl").write_text(respuesta("primero", ent=1_000_000))
+        fila = {"meta": {"_transcript": p}}
+        with patch.object(ns["time"], "monotonic", return_value=100.0) as reloj, \
+                patch.object(pathlib.Path, "rglob", enumera):
+            primero = uso_de(fila)
+            assert enumeraciones > 0 and coste(primero) == 10.0
+            enumeraciones = 0
+            reloj.return_value += 1
+            with patch.dict(ns, {"_uso": Mock(side_effect=AssertionError(
+                    "_uso dentro del plazo"))}), \
+                    patch.object(pathlib.Path, "stat", autospec=True,
+                                 side_effect=pathlib.Path.stat) as stat:
+                assert uso_de({"meta": fila["meta"]}) is primero
+                assert stat.call_count == 1 and stat.call_args.args == (p,)
+            assert enumeraciones == 0 and coste(fila["_uso"]) == 10.0
+
+            viejo = p.stat().st_mtime
+            with p.open("a") as f:
+                f.write(respuesta("principal-nuevo", out=1_000_000))
+            os.utime(p, (viejo + 1, viejo + 1))
+            assert coste(uso_de(fila)) == 35.0
+            assert enumeraciones > 0
+
+            enumeraciones = 0
+            (hijos / "nuevo.jsonl").write_text(respuesta("nuevo", ent=1_000_000))
+            reloj.return_value += 1
+            assert coste(uso_de(fila)) == 35.0
+            assert enumeraciones == 0
+            reloj.return_value += ns["REVISA_HIJOS_S"] + 1
+            assert coste(uso_de(fila)) == 40.0
+            assert enumeraciones > 0
+            enumeraciones = 0
+            reloj.return_value += ns["REVISA_HIJOS_S"] + 1
+            assert coste(uso_de(fila)) == 40.0
+            assert enumeraciones > 0
+            enumeraciones = 0
+            reloj.return_value += 1
+            assert coste(uso_de(fila)) == 40.0
+            assert enumeraciones == 0
+    finally:
+        cache_uso.clear()
+        cache_agregado.clear()
 
 
 if __name__ == "__main__":

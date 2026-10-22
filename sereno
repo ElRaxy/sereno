@@ -3660,6 +3660,11 @@ def ultimas_lineas(path, cuantas=60, tope=8 * 1024 * 1024):
 TOPE_USO = 256 * 1024 * 1024      # por encima, `None`: mejor sin dato que a medias
 # Dura lo que el proceso: vaciar a 200 releeria una sesion de 201 hijos sin cambios.
 _CACHE_USO = {}
+# Evita deduplicar todos los mensajes en cada vuelta si ningun fichero cambio.
+# Solo guarda lecturas completas: un parcial avanza sin cambiar tamano ni mtime.
+_CACHE_AGREGADO = {}
+# Una sesion con cientos de hijos no cabe en el presupuesto de 25 ms por vuelta.
+REVISA_HIJOS_S = 15
 _USO_CAMPOS = (("in", "input_tokens"), ("out", "output_tokens"),
                ("cw", "cache_creation_input_tokens"),
                ("cr", "cache_read_input_tokens"))
@@ -3841,16 +3846,37 @@ def uso_de(r, tope=None):
     t = (r.get("meta") or {}).get("_transcript")
     if not t:
         return r.setdefault("_uso", None)
+    guardado = _CACHE_AGREGADO.get(str(t))
+    try:
+        st = t.stat()
+    except OSError:
+        pass
+    else:
+        if (guardado and guardado[2] == (st.st_size, st.st_mtime)
+                and time.monotonic() - guardado[3] < REVISA_HIJOS_S):
+            r["_uso"] = guardado[1]
+            return guardado[1]
     # Mirar tambien los hijos: su mtime cambia sin tocar el transcript principal.
     paths = [t]
     for carpeta in ("subagents", "workflows"):
         paths.extend(sorted((t.with_suffix("") / carpeta).rglob("*.jsonl")))
-    total, costes = None, {}
+    enumerado = time.monotonic()
+    usos = []
     for path in paths:
         u = _uso(path, tope)
         if u is None:
             r["_uso"] = None
             return None
+        usos.append(u)
+        if tope is not None:
+            tope = max(0, tope - u["_leidos"])
+    firma = tuple((str(path), *_CACHE_USO[str(path)][:2]) for path in paths)
+    if guardado and guardado[0] == firma and all(u["completo"] for u in usos):
+        _CACHE_AGREGADO[str(t)] = (firma, guardado[1], firma[0][1:], enumerado)
+        r["_uso"] = guardado[1]
+        return guardado[1]
+    total, costes = None, {}
+    for path, u in zip(paths, usos):
         if total is None:
             total = dict(u)
         else:
@@ -3859,10 +3885,10 @@ def uso_de(r, tope=None):
         for mid, mensaje in u["_mensajes"].items():
             clave = (str(path), mid) if isinstance(mid, tuple) else mid
             costes[clave] = mensaje["est"]
-        if tope is not None:
-            tope = max(0, tope - u["_leidos"])
     conocidos = [c for c in costes.values() if c is not None]
     total["est"] = sum(conocidos) if conocidos else None
+    if total["completo"]:
+        _CACHE_AGREGADO[str(t)] = (firma, total, firma[0][1:], enumerado)
     r["_uso"] = total
     return total
 
