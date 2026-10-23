@@ -14,6 +14,11 @@ fichero no existe, y `sereno` funciona igual que siempre.
   sereno-cuota             una pasada: lee, escribe el fichero y sale
   sereno-cuota --watch     se queda en bucle (5 min, con espera creciente si te frenan)
   sereno-cuota --once      lo mismo que sin nada; existe para que se lea en un cron
+  sereno-cuota --tarifas   descarga tarifas publicas de models.dev, sin leer el llavero
+
+--tarifas guarda de forma atomica las tarifas en $XDG_CACHE_HOME/sereno/tarifas.json
+(o ~/.cache/sereno/tarifas.json). Solo esta opcion consulta models.dev; sin cache,
+sereno usa su tabla interna. Timeout de 15 segundos y limite de lectura de 20 MB.
 
 De donde sale el token: del ITEM DEL LLAVERO que Claude Code ya tiene puesto
 ("Claude Code-credentials"). No hay login propio ni hay que pegar nada. Y no se toca:
@@ -22,19 +27,24 @@ refresca ni se reescribe** — es una credencial de otro programa, y escribir en
 justo lo que separa "leer tu llavero" de "gestionarlo por ti".
 
 El token no se imprime, ni entero ni en trozos, ni en un error. Lo unico que sale por
-la salida estandar es una linea con los porcentajes.
+la salida estandar es una linea con los porcentajes, o el resultado de --tarifas.
 
 Entorno: SERENO_DIR (donde escribir; por defecto ~/.sereno), SERENO_CUOTA_URL y
 SERENO_SECURITY_BIN (para las pruebas: el endpoint y el `security` de mentira).
+SERENO_TARIFAS_URL cambia la URL de tarifas (por defecto https://models.dev/api.json).
+SERENO_LANG elige en/es para las tarifas; si no, LC_ALL/LC_MESSAGES/LANG.
 
 MIT licence. https://github.com/ElRaxy/sereno
 """
+import datetime
+import http.client
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -45,6 +55,7 @@ SERVICIO = "Claude Code-credentials"
 # `http_status` y el `error`, para que quien lo lea distinga "no gasto nada" de "no se
 # pudo mirar".
 URL = os.environ.get("SERENO_CUOTA_URL") or "https://api.anthropic.com/api/oauth/usage"
+URL_TARIFAS = os.environ.get("SERENO_TARIFAS_URL") or "https://models.dev/api.json"
 SECURITY = os.environ.get("SERENO_SECURITY_BIN") or "/usr/bin/security"
 DESTINO = pathlib.Path(os.environ.get("SERENO_DIR")
                        or pathlib.Path.home() / ".sereno") / "cuota.json"
@@ -53,6 +64,114 @@ DESTINO = pathlib.Path(os.environ.get("SERENO_DIR")
 # una pasada suelta no reintenta, escribe el fallo y sale.
 ESPERA_MIN, ESPERA_MAX, CADA = 60, 900, 300
 TOPE_SEG = 20
+
+
+# Deben coincidir con sereno: ambos leen o escriben la misma cache.
+def _modelo_tarifa(m):
+    """Los prefijos del proveedor y la fecha no cambian la tarifa del modelo."""
+    if not m:
+        return None
+    m = re.sub(r"^(?:[^.]+\.)?anthropic\.", "", m.lower())
+    m = re.sub(r"\[1m\]$", "", m)
+    return re.sub(r"-\d{8}$", "", m) or None
+
+
+def _precios_validos(precios):
+    # bool tambien es int; NaN e infinitos no pueden convertirse en costes utiles.
+    return (isinstance(precios, (list, tuple)) and len(precios) == 4
+            and all(type(v) in (int, float) and -float("inf") < v < float("inf")
+                    for v in precios))
+
+
+def _ruta_tarifas():
+    return pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "sereno/tarifas.json"
+
+
+def _detecta_idioma():
+    """`SERENO_LANG` manda; si no, el locale; si no, ingles.
+
+    En macOS hay que preguntarle a `defaults`: la terminal suele traer `LANG=C.UTF-8`
+    —medido en esta maquina— y por ahi no se distingue un espanol de un japones.
+    """
+    v = (os.environ.get("SERENO_LANG") or os.environ.get("CLAUDE_LANG") or "")[:2].lower()
+    if v in ("en", "es"):
+        return v
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        v = os.environ.get(var, "")[:2].lower()
+        if v in ("en", "es"):
+            return v
+    if sys.platform == "darwin":
+        try:
+            v = subprocess.run(["defaults", "read", "-g", "AppleLocale"],
+                               capture_output=True, text=True, timeout=3).stdout[:2].lower()
+            if v in ("en", "es"):
+                return v
+        except Exception:
+            pass
+    return "en"
+
+
+TEXTOS = {
+    "response reaches the 20 MB limit": "la respuesta alcanza el límite de 20 MB",
+    "invalid models.dev data": "datos de models.dev no válidos",
+    "no valid Anthropic models": "ningún modelo de Anthropic válido",
+    "Could not update rates: {reason}": "No se pudieron actualizar las tarifas: {reason}",
+    "Saved rates for {n} models to {path}": "Tarifas de {n} modelos guardadas en {path}",
+}
+
+
+def _(clave, **kw):
+    texto = TEXTOS.get(clave, clave) if _detecta_idioma() == "es" else clave
+    return texto.format(**kw) if kw else texto
+
+
+def actualizar_tarifas():
+    temporal = None
+    try:
+        tope = 20 * 1024 * 1024
+        with urllib.request.urlopen(URL_TARIFAS, timeout=15) as respuesta:
+            crudo = respuesta.read(tope)
+        # No se lee un byte extra para detectar el desborde: el limite es de lectura.
+        if len(crudo) >= tope:
+            raise ValueError(_("response reaches the 20 MB limit"))
+        datos = json.loads(crudo)
+        proveedor = datos.get("anthropic") if isinstance(datos, dict) else None
+        modelos = proveedor.get("models") if isinstance(proveedor, dict) else None
+        if not isinstance(modelos, dict):
+            raise ValueError(_("invalid models.dev data"))
+        tarifas = {}
+        for modelo, datos_modelo in modelos.items():
+            if not isinstance(modelo, str) or not isinstance(datos_modelo, dict):
+                continue
+            coste = datos_modelo.get("cost")
+            if not isinstance(coste, dict):
+                continue
+            precios = [coste.get(k) for k in ("input", "output", "cache_write", "cache_read")]
+            norm = _modelo_tarifa(modelo)
+            if norm and _precios_validos(precios):
+                tarifas[norm] = precios
+        if not tarifas:
+            raise ValueError(_("no valid Anthropic models"))
+        fecha = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        destino = _ruta_tarifas()
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=str(destino.parent),
+                                         prefix="tarifas-", suffix=".tmp", delete=False) as f:
+            temporal = pathlib.Path(f.name)
+            json.dump({"fuente": "models.dev", "fecha": fecha, "modelos": tarifas}, f,
+                      ensure_ascii=False, allow_nan=False)
+        os.replace(temporal, destino)
+    except (OSError, ValueError, TypeError, RecursionError, http.client.HTTPException) as exc:
+        print(_("Could not update rates: {reason}", reason=" ".join(str(exc).split())))
+        return 1
+    finally:
+        if temporal is not None:
+            try:
+                temporal.unlink()
+            except OSError:
+                pass
+    print(_("Saved rates for {n} models to {path}", n=len(tarifas), path=destino))
+    return 0
 
 
 def _corre(cmd):
@@ -262,6 +381,8 @@ def main(argv=None):
     if "-h" in args or "--help" in args:
         print(__doc__.strip())
         return 0
+    if "--tarifas" in args:
+        return actualizar_tarifas()
     if "--watch" in args:
         try:
             bucle()

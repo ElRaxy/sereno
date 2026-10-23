@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `sereno-cuota --tarifas` descarga las tarifas públicas de Anthropic desde models.dev
+  y las guarda en una caché local de forma atómica, sin leer el llavero. Solo el sidecar
+  contacta con models.dev y solo con esta opción; `SERENO_TARIFAS_URL` permite cambiar
+  la URL. `sereno` sigue sin código de red: el coste estimado prioriza la caché y
+  conserva la tabla interna como respaldo si falta la caché o no es válida. `--usage` muestra el
+  origen y `--usage --json` añade `tarifas_fuente`, sin cambiar el esquema.
 - Los Codex vivos aparecen bajo la sesión de Claude Code que los lanzó, siguiendo
   la cadena de procesos padres. Selector, `--list` y `--now` muestran modelo,
   tiempo vivo y, si existe, fase, ronda e ID del run.

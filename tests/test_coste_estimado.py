@@ -10,9 +10,6 @@ from unittest.mock import Mock, patch
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 ns = {"__name__": "sereno_test"}
-with patch.object(urllib.request, "urlopen", side_effect=AssertionError("red al cargar")) as red:
-    exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
-    assert not red.called
 
 
 def main():
@@ -378,4 +375,9 @@ def test_hijos_no_se_enumeran_dentro_del_plazo(tmp_path):
 
 
 if __name__ == "__main__":
-    main()
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch.dict(os.environ, {"HOME": tmp, "XDG_CACHE_HOME": tmp + "/cache"}), \
+            patch.object(urllib.request, "urlopen", side_effect=AssertionError("red al cargar")) as red:
+        exec(compile((RAIZ / "sereno").read_text(), "sereno", "exec"), ns)
+        assert not red.called
+        main()

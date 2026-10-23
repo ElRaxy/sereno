@@ -704,7 +704,7 @@ stays unchanged. Estimated cost also includes `.jsonl` files recursively under
 Calls without recorded usage remain absent.
 
 The CLI's `totalCostUSD` remains unchanged as `api_cost_usd` in `--json --usage`.
-Alongside it, `estimated_cost_usd` uses static rates in the code, with a date and source:
+Alongside it, `estimated_cost_usd` uses cached rates, falling back to rates in the code:
 what the CLI charges (`cost-state`), checked against ccusage 20.0.40 and models.dev, 2026-10-22.
 Each message uses its own model and the last line for its `message.id`. Unknown models and
 `<synthetic>` messages contribute nothing; if no message has a rate, the result is `null`.
@@ -714,6 +714,15 @@ Cache writes use the recorded 5-minute/1-hour split: 5 minutes uses the table's 
 rate, 1 hour uses twice the input rate. Without the split, all writes count as 5 minutes.
 Haiku 5.5 uses its base rate up to 100k tokens. Rates can become stale; sereno has no network
 code and never refreshes them automatically.
+
+Run `sereno-cuota --tarifas` to download Anthropic rates from models.dev. Only the sidecar
+contacts models.dev, and only with this explicit option (15-second timeout, 20 MB read limit).
+`SERENO_TARIFAS_URL` overrides the URL, which defaults to `https://models.dev/api.json`.
+This command does not read the keychain. It atomically saves
+`$XDG_CACHE_HOME/sereno/tarifas.json`, or `~/.cache/sereno/tarifas.json` when that variable is unset.
+Sereno reads the cache once per process; absent or invalid caches and missing models use the internal
+table. `--usage` ends with the rates' source and cache date; `--usage --json` adds
+`tarifas_fuente` (`"models.dev"` or `"tabla_interna"`) to the top-level metadata.
 
 The independent 2026-10-22 review reproduced ccusage's Claude total for 2026-10-21 at
 $1616.0318 after accounting for subagents, 1-hour writes and Sonnet 5.5 cache reads; the
@@ -1366,7 +1375,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are eighty-two tests
+collects the whole folder, prints a line per file and ends with the count. There are eighty-three tests
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
