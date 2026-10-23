@@ -1919,6 +1919,8 @@ def print_json(rows):
     # "no se midio" y no "no has gastado nada".
     c = lee_cuota()
     print(json.dumps({"sereno": VERSION, "schema": ESQUEMA_JSON,
+                      **({"tarifas_fuente": "models.dev" if _tarifas_cache()
+                          else "tabla_interna"} if USO else {}),
                       "quota_session_pct": c.get("session_pct"),
                       "quota_weekly_pct": c.get("weekly_pct"),
                       "quota_fetched_at": c.get("fetched_at"),
@@ -2404,7 +2406,7 @@ ICONO = {"in_command": "\u25d0", "writing": "\u25cf", "waiting": "\u25cb",
          "stopped": "\u25cb", "unknown": "?"}
 
 
-def print_live(rows):
+def print_live(rows, tarifas=True):
     """La lista plana, para leer sin entrar. Mismos estados que el selector.
 
     Antes decia solo "ejecutando" o "en espera": colapsaba los cuatro estados en dos
@@ -2455,6 +2457,8 @@ def print_live(rows):
             print(("\033[38;5;208m" + texto + "\033[0m") if sys.stdout.isatty() else texto)
     for hijo in CODEX_ORPHANS or ():
         print(linea_codex(hijo, shutil.get_terminal_size((92, 24)).columns))
+    if USO and tarifas:
+        print(_origen_tarifas())
 
 
 def ESTADO_LARGO(est):
@@ -3968,9 +3972,57 @@ def _modelo_tarifa(m):
     return re.sub(r"-\d{8}$", "", m) or None
 
 
+_TARIFAS_SIN_LEER = object()
+_CACHE_TARIFAS = _TARIFAS_SIN_LEER
+
+
+def _ruta_tarifas():
+    return pathlib.Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "sereno/tarifas.json"
+
+
+def _precios_validos(precios):
+    # bool tambien es int; NaN e infinitos no pueden convertirse en costes utiles.
+    return (isinstance(precios, (list, tuple)) and len(precios) == 4
+            and all(type(v) in (int, float) and -float("inf") < v < float("inf")
+                    for v in precios))
+
+
+def _tarifas_cache():
+    global _CACHE_TARIFAS
+    if _CACHE_TARIFAS is not _TARIFAS_SIN_LEER:
+        return _CACHE_TARIFAS
+    # Tambien se memoriza la ausencia: el panel consulta por cada mensaje del transcript.
+    _CACHE_TARIFAS = None
+    try:
+        with _ruta_tarifas().open(encoding="utf-8") as f:
+            datos = json.load(f)
+        if (not isinstance(datos, dict) or set(datos) != {"fuente", "fecha", "modelos"}
+                or datos["fuente"] != "models.dev" or not isinstance(datos["fecha"], str)
+                or len(datos["fecha"].splitlines()) != 1
+                or not isinstance(datos["modelos"], dict) or not datos["modelos"]):
+            return None
+        datetime.datetime.fromisoformat(datos["fecha"].replace("Z", "+00:00"))
+        for modelo, precios in datos["modelos"].items():
+            if (not isinstance(modelo, str) or not modelo
+                    or _modelo_tarifa(modelo) != modelo or not _precios_validos(precios)):
+                return None
+        _CACHE_TARIFAS = (datos["modelos"], datos["fecha"])
+    except (OSError, ValueError, TypeError, RecursionError):
+        pass
+    return _CACHE_TARIFAS
+
+
+def _origen_tarifas():
+    cache = _tarifas_cache()
+    return (_("rates: models.dev, {date}", date=cache[1]) if cache
+            else _("rates: internal table"))
+
+
 def _coste_tokens(u, modelo):
     """Sin redondear por mensaje: miles de respuestas pequenas suman centimos."""
-    tarifa = TARIFAS_USD_MTOK.get(_modelo_tarifa(modelo))
+    norm = _modelo_tarifa(modelo)
+    cache = (_tarifas_cache() or ({}, None))[0]
+    tarifa = cache.get(norm) or TARIFAS_USD_MTOK.get(norm)
     if u is None or tarifa is None:
         return None
     tokens = dict(u, cw=u.get("cw5", u["cw"]))
@@ -7451,6 +7503,8 @@ def _T():
         "right click, or click the bar on the left: mark": "click derecho o en la barra de la izquierda: marcar",
         "session": "sesión",
         "source": "origen",
+        "rates: models.dev, {date}": "tarifas: models.dev, {date}",
+        "rates: internal table": "tarifas: tabla interna",
         "status": "estado",
         "stopped, waiting on you": "parada, te espera a ti",
         "switch CLI: claude, history, codex, gemini, all": "cambiar de CLI: claude, historial, codex, gemini, todas",
@@ -8255,15 +8309,19 @@ def main():
 
         if "--yes" in argv:
             if not sueltas:
-                print(cabecera); print_live(rows)
+                print(cabecera); print_live(rows, tarifas=False)
                 print("\n  " + _("They all already have a tab open."))
+                if USO:
+                    print(_origen_tarifas())
                 return 0
             return reopen(sueltas)
 
         if not sys.stdin.isatty():
             print(cabecera)
-            print_live(rows)
+            print_live(rows, tarifas=False)
             print("\n  " + _("Run `{p}` to manage them.", p=PROG))
+            if USO:
+                print(_origen_tarifas())
             return 0
 
         rows = live_sessions(con_ram=True)      # el TUI si pinta RAM y titulos finos
@@ -8290,8 +8348,10 @@ def main():
                          recargar=lambda: live_sessions(con_ram=True))
         if accion is None:          # salio con q, o el terminal no admite el selector
             print(cabecera)
-            print_live(rows)
+            print_live(rows, tarifas=False)
             print("\n  " + _("No changes."))
+            if USO:
+                print(_origen_tarifas())
             return 0
         verbo, sel = accion
         if verbo == "hecho":
@@ -8316,6 +8376,8 @@ def main():
         hist = sesiones_de_disco(limite=40)
         if hist:
             if hook or (not sys.stdin.isatty() and "--list" not in argv):
+                if USO and not hook and "--yes" not in argv:
+                    print(_origen_tarifas())
                 return 0           # al abrir terminal no se avisa de historial viejo
             if "--json" in argv:
                 print_json(hist)
@@ -8327,6 +8389,8 @@ def main():
             accion = pick_ui(hist, recargar=lambda: sesiones_de_disco(limite=40))
             if accion and accion[0] == "open":
                 return abrir_sesion(accion[1][0])
+            if USO and "--yes" not in argv:
+                print(_origen_tarifas())
             return 0
 
     resumable = [e for e in items if e.get("id") and e.get("_transcript")]
@@ -8346,6 +8410,8 @@ def main():
     if not items:
         if not hook:
             print(nada_que_ensenar())
+            if USO:
+                print(_origen_tarifas())
         return 0
 
     if hook:
@@ -8363,6 +8429,8 @@ def main():
             print(describe(e))
         print("\n  " + _("None can be resumed (no id or no transcript); discarding them."))
         archive(items, "dismissed")
+        if USO and "--yes" not in argv:
+            print(_origen_tarifas())
         return 0
 
     if "--yes" not in argv and sys.stdin.isatty():
@@ -8393,6 +8461,8 @@ def main():
             for e in items:
                 print(describe(e))
             print("\n  " + _("No changes. Run `{p}` to come back.", p=PROG))
+            if USO:
+                print(_origen_tarifas())
             return 0
         verbo, sel = accion
         if verbo == "hecho":
@@ -8411,6 +8481,8 @@ def main():
         for e in items:
             print(describe(e))
         print("\n  " + _("(not a terminal: nothing reopened. `{p} --yes` forces it)", p=PROG))
+        if USO:
+            print(_origen_tarifas())
         return 0
 
     path, pestanas = write_launch_config(resumable)

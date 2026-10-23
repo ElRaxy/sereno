@@ -16,6 +16,8 @@ Most of it is reading, but not all of it, so here is the whole list.
 - `~/.claude/projects/**/*.jsonl` and the equivalent directories for Codex, Gemini and
   Antigravity. It parses transcripts; it never writes to one.
 - `~/.claude/settings.json`, for the context window your model is configured with.
+- `$XDG_CACHE_HOME/sereno/tarifas.json` (or `~/.cache/sereno/tarifas.json`), if present,
+  for cached public model rates.
 
 **Writes**
 
@@ -49,9 +51,17 @@ network code of any kind. No secrets and no credentials. There is no config file
 either — everything you can set is an environment variable; the `preferencias.json` above is
 written by the program, not by you, and deleting it only forgets your last sort order.
 
-Estimated costs use static rates in the code, with a date and source: what the CLI charges
-(`cost-state`), checked against ccusage 20.0.40 and models.dev on 2026-10-22. Reading those
-rates requires no network connection, and there is no online refresh.
+Estimated costs read the local rates cache, falling back to the internal table when the cache
+is absent or invalid, or a model is missing. The internal rates have a date and source: what
+the CLI charges (`cost-state`), checked against ccusage 20.0.40 and models.dev on 2026-10-22.
+`sereno` still has no networking code and never refreshes rates automatically.
+
+The separate `sereno-cuota --tarifas` command downloads public Anthropic rates from models.dev
+and writes that cache atomically. Only the sidecar contacts models.dev, and only when explicitly
+asked with `--tarifas`; its normal quota operation does not contact models.dev. The download has
+a 15-second timeout and a 20 MB read limit, reads no keychain credentials and sends no session
+data. `SERENO_TARIFAS_URL` overrides `https://models.dev/api.json`. A failed update preserves
+the previous cache. `sereno` only reads it; without it, the internal table still works.
 
 ## Your session text is on screen
 

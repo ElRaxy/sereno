@@ -671,7 +671,7 @@ mantener su significado. El coste estimado incluye además los `.jsonl` bajo
 Las llamadas sin uso registrado siguen sin constar.
 
 El `totalCostUSD` del CLI sigue intacto como `api_cost_usd` en `--json --usage`.
-A su lado, `estimated_cost_usd` usa tarifas estáticas en el código, con fecha y fuente:
+A su lado, `estimated_cost_usd` usa las tarifas de la caché y, como respaldo, las del código:
 lo que cobra el CLI (`cost-state`), contrastado con ccusage 20.0.40 y models.dev, 2026-10-22.
 Cada mensaje usa su modelo y la última línea de su `message.id`. Los modelos desconocidos y
 los mensajes `<synthetic>` no suman; si ningún mensaje tiene tarifa, el resultado es `null`.
@@ -681,6 +681,16 @@ La caché escrita usa el desglose registrado de 5 minutos/1 hora: 5 minutos a la
 escritura de la tabla y 1 hora al doble de la entrada. Sin desglose, toda escritura cuenta como
 5 minutos. Haiku 5.5 usa su tarifa base hasta 100k tokens. Las tarifas pueden quedar antiguas;
 sereno funciona sin red y nunca las actualiza automáticamente.
+
+Ejecuta `sereno-cuota --tarifas` para descargar las tarifas de Anthropic desde models.dev.
+Solo el sidecar consulta models.dev, y solo con esta opción explícita (timeout de 15 segundos
+y límite de lectura de 20 MB). `SERENO_TARIFAS_URL` cambia la URL, que por defecto es
+`https://models.dev/api.json`. Esta opción no lee el llavero.
+Las guarda de forma atómica en `$XDG_CACHE_HOME/sereno/tarifas.json` o, sin esa variable, en
+`~/.cache/sereno/tarifas.json`. La caché se lee una vez por proceso; los modelos ausentes y las
+cachés ausentes o no válidas usan la tabla interna. `--usage` acaba con el origen de las tarifas y la fecha
+de la caché; `--usage --json` añade `tarifas_fuente` (`"models.dev"` o `"tabla_interna"`) a los
+metadatos de primer nivel.
 
 La revisión independiente del 2026-10-22 reprodujo el total Claude de ccusage del 2026-10-21:
 $1616.0318 al contar subagentes, escritura de 1 hora y lectura de caché de Sonnet 5.5; el
@@ -1329,7 +1339,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y dos tests,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y tres tests,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 
