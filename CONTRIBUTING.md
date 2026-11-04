@@ -10,7 +10,7 @@ reasoning behind each rule lives in the README ([English](README.md#-contributin
 python3 tests/todos.py
 ```
 
-That is the same entry point CI uses. It collects the whole `tests/` folder, prints a line per
+That is the same entry point CI uses. It collects all 83 test files in `tests/`, prints a line per
 file and ends with the count — there is no hand-written list to keep in sync. Everything must be
 green before a pull request is opened.
 
@@ -48,7 +48,7 @@ quietly skipped. If you add a guard worth keeping, add its mutant.
 ## On AI-assisted code
 
 Sereno is written with Claude Code, and its author says so up front rather than being asked. That
-is also why the harness above exists: eighty-two tests, one hundred and eighty-two mutants and a full run on
+is also why the harness above exists: eighty-three tests, one hundred and eighty-two mutants and a full run on
 every pull request are what make a claim about this code checkable by someone who did not write
 it. Contributions written the same way are welcome under exactly the same bar — the tests do not
 care who typed the line, and neither does the review.

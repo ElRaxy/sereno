@@ -960,6 +960,84 @@ sereno --stop mi-rama     # Parada mi-rama.
 
 Para parar sesiones pero dejarlas **reanudables** en vez de archivarlas, usa `--stop-sel "idle"`.
 
+### Restaurar tras un corte
+
+`sereno --restore` (alias `--restaurar`) lee un snapshot escrito por una **herramienta externa**
+antes de un reinicio o corte de corriente. Sereno no crea estos snapshots ni restaura sesiones
+automáticamente. Imprime el plan y pregunta `[y/N]` en una terminal; sin terminal solo imprime
+el plan y termina correctamente. `--yes` autoriza expresamente la ejecución.
+
+```bash
+sereno --restore
+sereno --restore --from "$HOME/.claude/restore/20261103-230000" --yes
+sereno --restore --yes --all
+sereno --restore --notify
+```
+
+Sin `--from`, elige el snapshot con el mayor `ts_epoch` estrictamente anterior al arranque
+actual (`sysctl -n kern.boottime`, campo `sec`). Nunca selecciona un snapshot
+tomado después del arranque. Si no hay ninguno elegible, muestra una explicación y sale con
+código 1. `--from <dir>` selecciona un directorio de snapshot concreto, que también debe ser
+estrictamente anterior al arranque actual.
+
+La herramienta externa debe crear `<SERENO_RESTORE_DIR>/<AAAAMMDD-HHMMSS>/` con estos ficheros:
+
+| Fichero | Formato |
+|:--|:--|
+| `meta.txt` | Una línea `clave=valor` por dato: `ts_epoch`, `boottime_epoch`, `host`, `sesiones`, `codex_huerfanas`, `cmux`. Los epochs son segundos; `cmux` vale `exportado`, `ausente` o `error` |
+| `sesiones.tsv` | Cabecera separada por tabuladores: `tmux_session`, `session_id`, `cwd`, `pid`, `started_epoch`, `creada_tmux`, `enganchada`; una sesión por fila |
+| `codex.tsv` | Cabecera separada por tabuladores: `run_id`, `phase`, `pid`, `pid_vivo`, `output_file`; `pid_vivo=0` señala una run huérfana |
+| `hibernadas` (opcional) | Un fichero, o directorio de ficheros, con tokens completos del ID de sesión o nombre de sesión tmux que debe quedar hibernada |
+| `cmux.json` (opcional) | La salida oficial de `cmux restore-session --export` |
+
+Los ficheros ausentes y las filas mal formadas no rompen la restauración; la entrada ignorada
+se cuenta en el resumen. Se saltan las sesiones ya vivas en el socket tmux de sereno o en el
+registro de procesos vivos de Claude. Las demás se clasifican según la última escritura de
+su transcript respecto a `ts_epoch`: primero las activas, de más reciente a más antigua;
+después las quietas durante más de las horas configuradas (justo en el límite aún se consideran
+activas); al final las hibernadas. Los
+retardos solo se aplican a las sesiones que arrancan automáticamente. Los paneles quietos
+esperan Enter salvo con `--all`; los hibernados siempre esperan Enter.
+
+Cada sesión reanudada recibe un prompt inicial que explica el reinicio o corte a la hora del
+snapshot, la pérdida de sus subagentes, Codex y procesos de fondo, y la necesidad de revisar
+lo que dejaron escrito y retomar solo lo pendiente, sin repetir pasos completados ni acciones
+que necesiten aprobación humana. Si se define `SERENO_RUNS_DIR`, añade las runs huérfanas de
+`codex.tsv` solo cuando `<SERENO_RUNS_DIR>/<run_id>/status.json` contiene el `session_id` de
+esa sesión.
+
+Con `cmux.json` y un CLI de cmux que responda, reconstruye los workspaces y splits horizontales
+y verticales en el orden del export. Los paneles se asocian mediante
+`terminal.agent.sessionId` o, si falta ese ID, mediante `terminal.resumeBinding.checkpointId`
+contra el nombre de tmux. Las shells normales y los paneles cuya sesión ya esté viva se
+convierten en terminales vacíos en su directorio guardado. Solo se recrea la pestaña
+seleccionada de cada pane; las demás se enumeran como no recreadas y no se aplican las
+posiciones guardadas de los divisores. Las sesiones ausentes del layout reciben un workspace
+propio al final. Sin export/CLI de cmux utilizable, sereno usa el mismo lanzador y orden de
+preferencia que al abrir varias sesiones marcadas. El resumen indica sesiones lanzadas,
+paneles esperando Enter, sesiones ya vivas saltadas, filas ignoradas, paneles no recreados y
+ruta y hora del snapshot.
+
+| Variable | Por defecto | Para qué sirve |
+|:--|:--|:--|
+| `SERENO_RESTORE_DIR` | `~/.claude/restore` | Directorio padre de los snapshots externos y las marcas de aviso |
+| `SERENO_RESUME_CMD` | Binario `claude` resuelto seguido de `--resume {id}` | Plantilla de reanudación; `{id}` debe ser un token separado tras el troceado de argumentos, se sustituye entero y se añade el prompt inicial como último argumento |
+| `SERENO_RESTORE_STAGGER` | `10` | Segundos entre lanzamientos automáticos |
+| `SERENO_RESTORE_IDLE_HOURS` | `3` | Horas sin escrituras del transcript antes del snapshot para clasificar una sesión como quieta |
+| `SERENO_CMUX_BIN` | `/Applications/cmux.app/Contents/Resources/bin/cmux` si existe; si no, `cmux` del `PATH` | CLI de cmux; se invoca con `CMUX_QUIET=1` |
+| `SERENO_RUNS_DIR` | Vacío (desactivado) | Raíz opcional de los directorios de runs de Codex |
+
+Las rutas con espacios deben ir entre comillas dentro de la plantilla, por ejemplo
+`SERENO_RESUME_CMD='"/Applications/My Tools/claude" --resume {id}'`. La plantilla es una lista
+de argumentos, no sintaxis de shell: no se evalúan tuberías, redirecciones ni sustituciones
+de comandos.
+
+`--notify` nunca lanza nada. Está pensado para un LaunchAgent con `RunAtLoad` (el plist no se
+incluye aquí). Si un snapshot elegible tiene sesiones pendientes de restaurar, envía una
+notificación de escritorio con `sereno --restore` y escribe
+`<SERENO_RESTORE_DIR>/avisado-<boottime>` para avisar una sola vez por arranque. Sin trabajo
+elegible no hay aviso. Este modo sale con 0 salvo errores de uso.
+
 ### 🎭 Probarlo sin tocar tus datos
 
 ```bash
@@ -1329,7 +1407,7 @@ python3 tests/todos.py
 ```
 
 Es la misma entrada que usa el CI, así que no hay lista escrita a mano que se quede atrás: recoge
-la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y dos tests,
+la carpeta entera, imprime una línea por fichero y termina con la cuenta. Hoy son ochenta y tres tests,
 y el CI los corre todos en macOS y Ubuntu contra Python 3.8, 3.12 y 3.13. Casi todos vigilan algo
 que falla **en silencio**, que es justo por lo que existen:
 

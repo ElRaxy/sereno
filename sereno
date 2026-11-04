@@ -29,6 +29,8 @@ optional and only add live process control; without them everything is read from
   sereno --stop-sel  "idle"    stop them but leave them resumable
   sereno --stop-all            stop every live session (for scripts)
   sereno --stop <name>         stop one live session by name (for scripts)
+  sereno --restore             restore a crash snapshot (--restaurar is an alias)
+         [--from <dir>] [--yes] [--all] [--notify]
 
 Environment: SERENO_LANG=en|es, SERENO_DEMO=1 (fake sessions, safe for screenshots),
 SERENO_TMUX_SOCK, SERENO_REGISTRY, SERENO_CTX_AVISO=80,90 (the context thresholds
@@ -2722,7 +2724,7 @@ def _comando_de(r, modelo=None):
 RUN = HOME / ".sereno/lanzar"
 
 
-def _guion(cmd, cwd):
+def _guion(cmd, cwd, espera=0, esperar_enter=False, mensaje="", puerta=None):
     """Escribe el guion de UNA pestana y devuelve su ruta.
 
     Existe porque `do script` de Terminal.app y `tmux new-window` reciben la orden como
@@ -2742,11 +2744,34 @@ def _guion(cmd, cwd):
     RUN.mkdir(parents=True, exist_ok=True)
     os.chmod(RUN, 0o700)
     ruta = RUN / ("lanza-%s.sh" % uuid.uuid4().hex[:12])
+    antes = ""
+    if esperar_enter:
+        antes = "printf '%s\\n' %s\nIFS= read -r respuesta || exit 1\n" % (
+            "%s", shlex.quote(mensaje or _("Press Enter to resume")))
+    if puerta is None:
+        if espera > 0:
+            antes += "sleep %s\n" % shlex.quote(str(espera))
+    else:
+        # El reloj comun empieza cuando todos los paneles han sido creados.
+        barrera = (
+            "vueltas=0\n"
+            "while [ ! -f {p} ] && [ \"$vueltas\" -lt 300 ]; do\n"
+            "    sleep 1\n"
+            "    vueltas=$((vueltas + 1))\n"
+            "done\n"
+            "t0=$(cat {p} 2>/dev/null)\n"
+            "case \"$t0\" in\n"
+            "    ''|*[!0-9]*) ;;\n"
+            "    *) restante=$(LC_ALL=C awk -v t0=\"$t0\" -v espera={e} -v ahora=\"$(date +%s)\" "
+            "'BEGIN {{ d = t0 + espera - ahora; if (d > 0) printf \"%.9f\", d }}')\n"
+            "       if [ -n \"$restante\" ]; then sleep \"$restante\"; fi ;;\n"
+            "esac\n").format(p=shlex.quote(str(puerta)), e=shlex.quote(str(espera)))
+        antes += barrera
     ruta.write_text("#!/bin/sh\n"
                     "cd %s || exit 1\n"
                     "unset TMUX\n"
                     "rm -f -- %s\n"
-                    "exec %s\n" % (shlex.quote(cwd), shlex.quote(str(ruta)), cmd))
+                    "%sexec %s\n" % (shlex.quote(cwd), shlex.quote(str(ruta)), antes, cmd))
     os.chmod(ruta, 0o700)
     return ruta
 
@@ -2863,7 +2888,7 @@ def hay_tmux_alrededor():
 # gana nada dentro de tmux, y envolverlos solo estorba.
 _SIN_SELECTOR = {"--list", "--json", "--now", "--disk", "--hoy", "--today", "--find",
                  "--watch", "--dismiss", "--stop", "--stop-all", "--version", "-h",
-                 "--help", "--add", "--yes"}
+                 "--help", "--add", "--yes", "--restore", "--restaurar", "--notify", "--from"}
 
 
 def _plan_tmux(argv, tty):
@@ -7111,6 +7136,46 @@ def _T():
     y arriba solo estorbaria. Las claves son las cadenas inglesas, tal cual salen de
     `_()`: una que falte se pinta en ingles y se ve al momento."""
     TEXTOS["es"] = {
+        "Press Enter to resume": "Pulsa Enter para reanudar",
+        "restore a crash snapshot (--restaurar is an alias)":
+        "restaurar un snapshot tras un corte (--restaurar es un alias)",
+        "The Mac restarted or lost power at {t}. This session's subagents, Codex "
+        "and background processes died. Review what they left on disk and restart "
+        "only unfinished work. Do not repeat completed work or any action requiring "
+        "human approval.": "El Mac se reinició o sufrió un corte a las {t}. Los subagentes, "
+        "Codex y los procesos de fondo de esta sesión murieron. Revisa lo que dejaron "
+        "escrito en disco y relanza solo el trabajo que quedó a medias. No repitas lo "
+        "ya terminado ni ninguna acción que requiera aprobación humana.",
+        "Orphaned Codex run: {id} · phase: {phase} · output: {out}":
+        "Run huérfana de Codex: {id} · fase: {phase} · salida: {out}",
+        "SERENO_RESUME_CMD must contain a separate {id} token.":
+        "SERENO_RESUME_CMD debe contener un token {id} separado.",
+        "unknown time": "hora desconocida",
+        "hibernated · Press Enter to resume": "hibernada · Enter para reanudar",
+        "idle since {t} · Press Enter to resume": "quieta desde {t} · Enter para reanudar",
+        "Snapshot: {p} · {t}": "Snapshot: {p} · {t}",
+        "{n} launched · {e} waiting for Enter · {v} already live (skipped) · {i} ignored rows":
+        "{n} lanzadas · {e} esperando Enter · {v} ya vivas (saltadas) · {i} filas ignoradas",
+        "Panels not recreated: {p}": "Paneles no recreados: {p}",
+        "none": "ninguno",
+        "Divider positions are not restored ({n}).": "No se restauran las posiciones de los divisores ({n}).",
+        "Restore usage: --restore [--from <dir>] [--yes] [--all] [--notify]":
+        "Uso de restauración: --restore [--from <dir>] [--yes] [--all] [--notify]",
+        "Invalid restore settings: check RESUME_CMD, RESTORE_STAGGER and RESTORE_IDLE_HOURS.":
+        "Configuración de restauración inválida: revisa RESUME_CMD, RESTORE_STAGGER y RESTORE_IDLE_HOURS.",
+        "No eligible snapshot before the current boot was found in {p}.":
+        "No se encontró un snapshot válido anterior al arranque actual en {p}.",
+        "Restore after a crash": "Restaurar tras un corte",
+        "A crash left {n} sessions to restore · sereno --restore":
+        "Hubo un corte: {n} sesiones por restaurar · sereno --restore",
+        "active": "activa",
+        "idle": "quieta",
+        "hibernated": "hibernada",
+        "waiting for Enter": "esperando Enter",
+        "launch after {n}s": "lanzar dentro de {n}s",
+        "{s} · {state} · {action}": "{s} · {state} · {action}",
+        "Restore these sessions? [y/N] ": "¿Restaurar estas sesiones? [y/N] ",
+        "--from and --notify require --restore.": "--from y --notify requieren --restore.",
         "Codex stopped": "Codex ha terminado",
         "{t} · codex {pid}{result}": "{t} · codex {pid}{result}",
         "--add needs a session id.": "--add necesita un id de sesi\u00f3n.",
@@ -7501,6 +7566,7 @@ VERSION = "1.43.0"
 # mal escrito se tragaba en silencio: `sereno --jsonn` abria el selector, y un script
 # que creia estar pidiendo JSON recibia un TUI esperando teclas.
 _FLAGS = {
+    "--restore": 0, "--restaurar": 0, "--from": 1, "--notify": 0,
     "-h": 0, "--help": 0, "--version": 0, "--hook": 0, "--list": 0, "--json": 0,
     "--usage": 0, "--disk": 0, "--now": 0, "--hoy": 0, "--today": 0,
     "--demo": 0,
@@ -8030,7 +8096,7 @@ def _parecido(malo):
     # Cuatro: los dos guiones y dos letras. Con tres, `--frobnicate` sugeria `--find`
     # por compartir solo la efe, y una sugerencia mala estorba mas que ninguna.
     mejor = max(_FLAGS, key=lambda f: prefijo(f, malo))
-    if prefijo(mejor, malo) >= 4:
+    if prefijo(mejor, malo) >= 4 and abs(len(mejor) - len(malo)) <= 2:
         return mejor
     dentro = [f for f in _FLAGS if len(malo) >= 4 and cabe_dentro(malo, f)]
     return min(dentro, key=len) if dentro else ""
@@ -8048,6 +8114,471 @@ def flags_desconocidos(argv):
             else:
                 fuera.append(a)
     return fuera
+
+
+def arranque_restore():
+    """El corte es el arranque del kernel, nunca la hora de abrir sereno."""
+    orden = ["sysctl", "-n", "kern.boottime"]
+    try:
+        r = subprocess.run(orden, capture_output=True, text=True, timeout=5)
+        m = re.search(r"\bsec\s*=\s*(\d+)", r.stdout)
+        return int(m.group(1)) if r.returncode == 0 and m else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def lee_snapshot(ruta):
+    """Lee el contrato externo; los defectos de una fila no invalidan las demas."""
+    ruta = pathlib.Path(ruta)
+    foto = dict(ruta=ruta, ts_epoch=0, sesiones=[], codex=[], hibernadas=set(),
+                ignoradas=0, cmux=None)
+    try:
+        meta = dict(l.split("=", 1) for l in (ruta / "meta.txt").read_text().splitlines()
+                    if "=" in l)
+        foto["meta"] = meta
+        ts = float(meta.get("ts_epoch", "0"))
+        if not 0 < ts < float("inf"):
+            return None
+        foto["ts_epoch"] = ts
+    except (OSError, ValueError):
+        return None
+    tablas = (("sesiones", "tmux_session session_id cwd pid started_epoch creada_tmux enganchada"),
+              ("codex", "run_id phase pid pid_vivo output_file"))
+    for nombre, cabecera in tablas:
+        campos = cabecera.split()
+        try:
+            lineas = (ruta / (nombre + ".tsv")).read_text().splitlines()
+        except (OSError, UnicodeError):
+            foto["ignoradas"] += 1
+            continue
+        if not lineas or lineas[0].split("\t") != campos:
+            foto["ignoradas"] += max(1, len(lineas))
+            continue
+        for linea in lineas[1:]:
+            valores = linea.split("\t")
+            fila = dict(zip(campos, valores))
+            try:
+                if len(valores) != len(campos):
+                    raise ValueError()
+                if nombre == "sesiones":
+                    if not fila["session_id"].strip():
+                        raise ValueError()
+                    numeros = ("pid", "started_epoch", "creada_tmux")
+                    booleano = "enganchada"
+                else:
+                    if not fila["run_id"].strip():
+                        raise ValueError()
+                    numeros, booleano = ("pid",), "pid_vivo"
+                if (any(not 0 <= float(fila[c]) < float("inf") for c in numeros)
+                        or fila[booleano] not in ("0", "1")):
+                    raise ValueError()
+            except ValueError:
+                foto["ignoradas"] += 1
+                continue
+            foto[nombre].append(fila)
+    h = ruta / "hibernadas"
+    for p in (h.rglob("*") if h.is_dir() else [h]):
+        if not p.is_file():
+            continue
+        try:
+            foto["hibernadas"].update(re.findall(r"[\w.:-]+", p.read_text()))
+        except (OSError, UnicodeError):
+            foto["ignoradas"] += 1
+    if (ruta / "cmux.json").is_file():
+        try:
+            datos = json.loads((ruta / "cmux.json").read_text())
+            if not isinstance(datos, dict):
+                raise ValueError()
+            arbol_restore(datos, [])
+            foto["cmux"] = datos
+        except (OSError, ValueError, TypeError, AttributeError, RecursionError):
+            foto["ignoradas"] += 1
+    return foto
+
+
+def elige_snapshot(candidatos, arranque):
+    """Seleccion pura: ni el nombre de la carpeta ni el reloj sustituyen ts_epoch."""
+    elegibles = [s for s in candidatos if s and arranque is not None
+                 and 0 < s["ts_epoch"] < arranque]
+    return max(elegibles, key=lambda s: s["ts_epoch"]) if elegibles else None
+
+
+def plan_restore(snapshot, vivas=(), ids_vivos=(), mtimes=None, hibernadas=(),
+                 idle_hours=3, stagger=10, todas=False):
+    """Sin E/S: hechos de disco/procesos entran, decisiones de lanzamiento salen."""
+    mtimes = mtimes or {}
+    nombres = {v[0] if isinstance(v, (tuple, list)) else v for v in vivas}
+    dormidas = set(hibernadas) | set(snapshot.get("hibernadas", ()))
+    plan = dict(entradas=[], vivas=0, ignoradas=snapshot.get("ignoradas", 0))
+    for fila in snapshot["sesiones"]:
+        sid, nombre = fila.get("session_id"), fila.get("tmux_session", "")
+        if not sid:
+            plan["ignoradas"] += 1
+            continue
+        if nombre in nombres or sid in ids_vivos:
+            plan["vivas"] += 1
+            continue
+        mt = mtimes.get(sid, 0)
+        if sid in dormidas or nombre in dormidas:
+            estado = "hibernada"
+        elif mt < snapshot["ts_epoch"] - idle_hours * 3600:
+            estado = "quieta"
+        else:
+            estado = "activa"
+        entrada = dict(fila, estado=estado, mtime=mt,
+                       esperar=estado == "hibernada" or (estado == "quieta" and not todas))
+        plan["entradas"].append(entrada)
+    prioridad = {"activa": 0, "quieta": 1, "hibernada": 2}
+    plan["entradas"].sort(key=lambda e: (prioridad[e["estado"]], -e["mtime"]))
+    indice = 0
+    for e in plan["entradas"]:
+        e["retardo"] = 0 if e["esperar"] else indice * stagger
+        if not e["esperar"]:
+            indice += 1
+    return plan
+
+
+def _pid_vivo(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError, OverflowError):
+        return True
+    return True
+
+
+def prompt_restore(entrada, snapshot, runs_dir=""):
+    texto = _("The Mac restarted or lost power at {t}. This session's subagents, Codex "
+              "and background processes died. Review what they left on disk and restart "
+              "only unfinished work. Do not repeat completed work or any action requiring "
+              "human approval.", t=fecha_restore(snapshot["ts_epoch"]))
+    if runs_dir:
+        runs = snapshot.get("codex", [])
+        respaldo = not runs  # codex.tsv con filas manda; sin filas, se leen los status.json
+        base = pathlib.Path(runs_dir).expanduser()
+        if respaldo:
+            runs = [{"run_id": p.parent.name} for p in sorted(base.glob("*/status.json"))]
+        for run in runs:
+            rid = run["run_id"]
+            # El identificador viene de fuera: no puede convertir la lectura en ../otra.
+            if ((not respaldo and run["pid_vivo"] != "0")
+                    or pathlib.Path(rid).name != rid or rid in (".", "..")):
+                continue
+            p = base / rid / "status.json"
+            estado = lee_status_codex(p)
+            if not estado or estado.get("session_id") != entrada["session_id"]:
+                continue
+            if respaldo:
+                pid = estado.get("pid")
+                if estado.get("phase") == "done" or type(pid) is not int or _pid_vivo(pid):
+                    continue
+                phase = estado.get("phase", "?")
+                output = estado.get("output_file") or estado.get("output") or "?"
+            else:
+                phase, output = run["phase"], run["output_file"]
+            texto += "\n" + _("Orphaned Codex run: {id} · phase: {phase} · output: {out}",
+                                 id=rid, phase=phase, out=output)
+    return texto
+
+
+def orden_restore(entrada, prompt, plantilla=None):
+    if plantilla is None:
+        plantilla = _env("RESUME_CMD", shlex.quote(bin_cli("claude")) + " --resume {id}")
+    partes = shlex.split(plantilla)
+    if not partes or "{id}" not in partes:
+        raise ValueError(_("SERENO_RESUME_CMD must contain a separate {id} token."))
+    return [entrada["session_id"] if p == "{id}" else p for p in partes] + [prompt]
+
+
+def fecha_restore(epoch):
+    try:
+        return datetime.datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, OverflowError, OSError):
+        return _("unknown time")
+
+
+def arbol_restore(datos, entradas):
+    """Normaliza el arbol oficial sin comandos ni E/S; conserva el orden de ventanas."""
+    por_id = {e["session_id"]: e for e in entradas}
+    por_tmux = {e["tmux_session"]: e for e in entradas}
+    representadas, usadas, omitidos = set(), set(), []
+    workspaces, divisores = [], 0
+
+    def sesion(panel):
+        terminal = panel.get("terminal") or {}
+        sid = (terminal.get("agent") or {}).get("sessionId")
+        if sid:
+            return por_id.get(sid)
+        return por_tmux.get((terminal.get("resumeBinding") or {}).get("checkpointId"))
+
+    def nodo(n, paneles, cwd):
+        nonlocal divisores
+        if n.get("type") == "split":
+            s = n.get("split") or {}
+            if s.get("orientation") not in ("horizontal", "vertical"):
+                raise ValueError()
+            divisores += "dividerPosition" in s
+            return dict(tipo="split", direccion="right" if s.get("orientation") == "horizontal" else "down",
+                        first=nodo(s.get("first") or {}, paneles, cwd),
+                        second=nodo(s.get("second") or {}, paneles, cwd))
+        pane = n.get("pane") or {}
+        ids = pane.get("panelIds") or []
+        if not isinstance(ids, list):
+            raise ValueError()
+        elegido = pane.get("selectedPanelId") or (ids[0] if ids else None)
+        omitidos.extend(str(p) for p in ids if p != elegido)
+        panel = paneles.get(elegido, {})
+        e = sesion(panel)
+        if e and e["session_id"] in usadas:
+            e = None
+        if e:
+            usadas.add(e["session_id"])
+        directory = panel.get("directory") or cwd
+        if not isinstance(directory, str):
+            raise ValueError()
+        return dict(tipo="pane", entrada=e, directory=directory,
+                    panel=elegido)
+
+    for ventana in datos.get("windows", []):
+        for ws in (ventana.get("tabManager") or {}).get("workspaces", []):
+            paneles = {p.get("id", p.get("panelId")): p for p in ws.get("panels", [])}
+            for p in paneles.values():
+                e = sesion(p)
+                if e:
+                    representadas.add(e["session_id"])
+            cwd = ws.get("currentDirectory") or str(HOME)
+            nombre = ws.get("customTitle") or ws.get("processTitle") or "sereno"
+            if not isinstance(cwd, str) or not isinstance(nombre, str):
+                raise ValueError()
+            workspaces.append(dict(nombre=nombre,
+                                   cwd=cwd, layout=nodo(ws.get("layout") or {}, paneles, cwd)))
+    for e in entradas:
+        if e["session_id"] not in representadas:
+            cwd = e.get("cwd") or str(HOME)
+            workspaces.append(dict(nombre=e["tmux_session"], cwd=cwd,
+                                   layout=dict(tipo="pane", entrada=e, directory=cwd, panel=None)))
+    return workspaces, omitidos, divisores
+
+
+def cmux_restore(binario, args):
+    try:
+        entorno = dict(os.environ, CMUX_QUIET="1")
+        return subprocess.run([binario] + args, env=entorno, capture_output=True,
+                              text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def guion_restore(e, snapshot, runs_dir, puerta=None):
+    aviso = ""
+    if e["estado"] == "hibernada":
+        aviso = _("hibernated · Press Enter to resume")
+    elif e["estado"] == "quieta":
+        aviso = _("idle since {t} · Press Enter to resume", t=fecha_restore(e["mtime"]))
+    orden = orden_restore(e, prompt_restore(e, snapshot, runs_dir))
+    ruta = _guion(" ".join(shlex.quote(p) for p in orden), e.get("cwd") or str(HOME),
+                  espera=e["retardo"], esperar_enter=e["esperar"], mensaje=aviso, puerta=puerta)
+    return "/bin/sh " + shlex.quote(str(ruta))
+
+
+def _abre_puerta_restore(puerta):
+    RUN.mkdir(parents=True, exist_ok=True)
+    os.chmod(RUN, 0o700)
+    temporal = puerta.with_suffix(".tmp")
+    temporal.write_text(str(int(time.time())))
+    os.replace(temporal, puerta)
+
+
+def ejecuta_cmux_restore(binario, workspaces, snapshot, runs_dir):
+    hechas, creadas = [], set()
+    puerta = RUN / ("puerta-" + uuid.uuid4().hex[:12])
+
+    def hojas(n):
+        if n["tipo"] == "split":
+            yield from hojas(n["first"])
+            yield from hojas(n["second"])
+        else:
+            yield n
+
+    def comando(p):
+        if p["entrada"]:
+            return guion_restore(p["entrada"], snapshot, runs_dir, puerta=puerta)
+        ruta = _guion(shlex.quote(os.environ.get("SHELL") or "/bin/sh") + " -l", p["directory"],
+                      puerta=puerta)
+        return "/bin/sh " + shlex.quote(str(ruta))
+
+    def abre(args, p):
+        r = cmux_restore(binario, args + ["--focus", "false", "--command", comando(p)])
+        refs = dict(re.findall(r"\b(surface|workspace):(\d+)\b", r.stdout)) if r else {}
+        if not r or r.returncode != 0 or "surface" not in refs or "workspace" not in refs:
+            return None
+        creadas.add(id(p))
+        if p["entrada"]:
+            hechas.append(p["entrada"])
+        return "surface:" + refs["surface"]
+
+    def divide(n, superficie):
+        if n["tipo"] != "split" or superficie is None:
+            return
+        # Dividir el padre ANTES de sus hijos conserva los subarboles anidados.
+        otra = abre(["new-split", n["direccion"], "--surface", superficie], next(hojas(n["second"])))
+        divide(n["first"], superficie)
+        divide(n["second"], otra)
+
+    try:
+        for ws in workspaces:
+            superficie = abre(["workspace", "create", "--name", ws["nombre"], "--cwd", ws["cwd"]],
+                              next(hojas(ws["layout"])))
+            divide(ws["layout"], superficie)
+    finally:
+        _abre_puerta_restore(puerta)
+    fallos = [str(p.get("panel") or (p["entrada"] or {}).get("tmux_session") or "?")
+              for ws in workspaces for p in hojas(ws["layout"]) if id(p) not in creadas]
+    return hechas, fallos
+
+
+def resumen_restore(snapshot, plan, lanzadas=0, esperando=0, omitidos=(), divisores=0):
+    print(_("Snapshot: {p} · {t}", p=snapshot["ruta"], t=fecha_restore(snapshot["ts_epoch"])))
+    print(_("{n} launched · {e} waiting for Enter · {v} already live (skipped) · {i} ignored rows",
+            n=lanzadas, e=esperando, v=plan["vivas"], i=plan["ignoradas"]))
+    print(_("Panels not recreated: {p}", p=", ".join(omitidos) or _("none")))
+    if divisores:
+        print(_("Divider positions are not restored ({n}).", n=divisores))
+
+
+def cmd_restore(argv, arranque=None, cmux=None, reloj=None, notificar=None):
+    try:
+        for puerta in RUN.glob("puerta-*"):
+            try:
+                if time.time() - puerta.stat().st_mtime > 86400:
+                    puerta.unlink()
+            except OSError:
+                pass
+    except OSError:
+        pass
+    desde, flags = None, set()
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--from" and i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+            desde = pathlib.Path(argv[i + 1]).expanduser()
+            i += 2
+            continue
+        if a not in ("--restore", "--restaurar", "--yes", "--notify", "--all"):
+            print(_("Restore usage: --restore [--from <dir>] [--yes] [--all] [--notify]"))
+            return 2
+        flags.add(a)
+        i += 1
+    avisar = "--notify" in flags
+    try:
+        stagger = float(_env("RESTORE_STAGGER", "10"))
+        idle = float(_env("RESTORE_IDLE_HOURS", "3"))
+        if not (0 <= stagger < float("inf") and 0 <= idle < float("inf")):
+            raise ValueError()
+        orden_restore({"session_id": "id"}, "")
+    except ValueError:
+        print(_("Invalid restore settings: check RESUME_CMD, RESTORE_STAGGER and RESTORE_IDLE_HOURS."))
+        return 2
+    base = pathlib.Path(_env("RESTORE_DIR", str(HOME / ".claude/restore"))).expanduser()
+    inicio = (arranque or arranque_restore)()
+    try:
+        candidatos = [lee_snapshot(desde)] if desde is not None else [
+            lee_snapshot(p) for p in base.iterdir() if p.is_dir() and re.fullmatch(r"\d{8}-\d{6}", p.name)]
+    except OSError:
+        candidatos = []
+    foto = elige_snapshot(candidatos, inicio)
+    if foto is None:
+        if not avisar:
+            print(_("No eligible snapshot before the current boot was found in {p}.", p=desde or base))
+        return 0 if avisar else 1
+    marca = base / ("avisado-%d" % inicio)
+    if avisar and marca.exists():
+        return 0
+    mtimes = {}
+    ids = {e["session_id"] for e in foto["sesiones"]}
+    for p in PROJECTS.glob("*/*.jsonl"):
+        if p.stem not in ids:
+            continue
+        t = transcript_of(dict(id=p.stem, project_dir=str(p.parent)))
+        try:
+            if t:
+                mtimes[p.stem] = max(mtimes.get(p.stem, 0), t.stat().st_mtime)
+        except OSError:
+            pass
+    plan = plan_restore(foto, tmux_list(), registro_cc(ahora=(reloj or time.time)()), mtimes,
+                        idle_hours=idle, stagger=stagger, todas="--all" in flags)
+    entradas = plan["entradas"]
+    if avisar:
+        if entradas:
+            try:
+                base.mkdir(parents=True, exist_ok=True)
+                with marca.open("x"):
+                    pass
+                (notificar or notifica)(_("Restore after a crash"),
+                                       _("A crash left {n} sessions to restore · sereno --restore", n=len(entradas)))
+            except (OSError, RuntimeError):
+                pass
+        return 0
+    resumen_restore(foto, plan)
+    for e in entradas:
+        estado = (_("active") if e["estado"] == "activa" else
+                  _("hibernated") if e["estado"] == "hibernada" else _("idle"))
+        accion = (_("waiting for Enter") if e["esperar"] else _("launch after {n}s", n=e["retardo"]))
+        print(_("{s} · {state} · {action}", s=e["tmux_session"], state=estado, action=accion))
+    if "--yes" not in flags:
+        if not sys.stdin.isatty():
+            return 0
+        try:
+            respuesta = input(_("Restore these sessions? [y/N] "))
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if respuesta.strip().lower() not in ("y", "yes", "s", "si", "sí"):
+            return 0
+    runs_dir = _env("RUNS_DIR")
+    if cmux is None:
+        app = "/Applications/cmux.app/Contents/Resources/bin/cmux"
+        cmux = _env("CMUX_BIN", app if pathlib.Path(app).is_file() else shutil.which("cmux"))
+    disponible = False
+    if foto["cmux"] is not None and cmux:
+        for prueba in (["ping"], ["list-windows"]):
+            r = cmux_restore(cmux, prueba)
+            if r is not None and r.returncode == 0:
+                disponible = True
+                break
+    omitidos, divisores, lanzadas, esperando = [], 0, 0, 0
+    if disponible:
+        workspaces, omitidos, divisores = arbol_restore(foto["cmux"], entradas)
+        hechas, fallos = ejecuta_cmux_restore(cmux, workspaces, foto, runs_dir)
+        omitidos += fallos
+        esperando = sum(e["esperar"] for e in hechas)
+        lanzadas = len(hechas) - esperando
+    else:
+        # El abridor comun devuelve cantidades, no identidades. Separar los dos estados
+        # permite informar con exactitud incluso si el sistema rechaza algunas ventanas.
+        puerta = RUN / ("puerta-" + uuid.uuid4().hex[:12])
+        try:
+            for esperar in (False, True):
+                grupo = [e for e in entradas if e["esperar"] == esperar]
+                if not grupo:
+                    continue
+                pestanas = [(e["tmux_session"], guion_restore(e, foto, runs_dir, puerta=puerta),
+                             e.get("cwd") or str(HOME)) for e in grupo]
+                config = "sereno-restore-" + uuid.uuid4().hex[:12]
+                cual = lanzador_disponible()
+                if cual == "warp":
+                    _escribe_config(config, pestanas)
+                _cual, n = abre_varias(pestanas, config, cual=cual)
+                if esperar:
+                    esperando += n
+                else:
+                    lanzadas += n
+        finally:
+            _abre_puerta_restore(puerta)
+    resumen_restore(foto, plan, lanzadas, esperando, omitidos, divisores)
+    if disponible:
+        return 1 if fallos else 0
+    return 0 if lanzadas + esperando == len(entradas) else 1
 
 
 def nada_que_ensenar():
@@ -8095,12 +8626,20 @@ def main():
     if {"-h", "--help"} & set(argv):
         # El docstring ES la ayuda: dos textos que decir lo mismo acaban diciendo
         # cosas distintas, y el que se queda viejo siempre es el de --help.
-        print((__doc__ or "").strip().replace("sereno ", PROG + " ", 1)
-              .replace("\n  sereno ", "\n  " + PROG + " "))
+        ayuda = ((__doc__ or "").strip().replace("sereno ", PROG + " ", 1)
+                 .replace("\n  sereno ", "\n  " + PROG + " "))
+        ayuda = ayuda.replace("restore a crash snapshot (--restaurar is an alias)",
+                              _("restore a crash snapshot (--restaurar is an alias)"))
+        print(ayuda)
         return 0
     if "--version" in argv:
         print(f"{PROG} {VERSION}")
         return 0
+    if "--restore" in argv or "--restaurar" in argv:
+        return cmd_restore(argv)
+    if "--from" in argv or "--notify" in argv:
+        print(_("--from and --notify require --restore."))
+        return 2
     if argv and argv[0] == "--add":
         return cmd_add(argv[1:])
 

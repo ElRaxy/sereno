@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `--restore` (alias `--restaurar`) prepara y ejecuta la recuperación de sesiones de
+  Claude Code desde snapshots externos anteriores al arranque. Excluye las ya vivas,
+  escalona las activas y deja quietas e hibernadas esperando Enter (`--all` incluye
+  las quietas). Recompone workspaces y splits de un export de cmux, o reutiliza el
+  lanzador de varias sesiones; informa de pestañas omitidas y divisores no aplicados.
+  `--from` elige un snapshot, `--yes` permite ejecutarlo sin preguntar y `--notify`
+  solo avisa una vez por arranque, para un LaunchAgent. Las rutas, la plantilla de
+  reanudación y los umbrales se configuran por entorno y están en ambos README.
 - Los Codex vivos aparecen bajo la sesión de Claude Code que los lanzó, siguiendo
   la cadena de procesos padres. Selector, `--list` y `--now` muestran modelo,
   tiempo vivo y, si existe, fase, ronda e ID del run.

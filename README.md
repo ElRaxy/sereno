@@ -992,6 +992,80 @@ sereno --stop my-branch   # Stopped my-branch.
 
 To stop sessions but leave them **resumable** instead of archiving them, use `--stop-sel "idle"`.
 
+### Restore after a crash
+
+`sereno --restore` (alias `--restaurar`) reads a snapshot written by an **external tool**
+before a restart or power cut. Sereno does not create these snapshots and never restores
+sessions automatically. It prints the plan and asks `[y/N]` on a terminal; without a terminal
+it only prints the plan and exits successfully. `--yes` explicitly authorizes execution.
+
+```bash
+sereno --restore
+sereno --restore --from "$HOME/.claude/restore/20261103-230000" --yes
+sereno --restore --yes --all
+sereno --restore --notify
+```
+
+Without `--from`, it chooses the snapshot with the greatest `ts_epoch` strictly before the
+current boot (`sysctl -n kern.boottime`, field `sec`). A snapshot taken after boot is never
+selected. No eligible snapshot produces an explanation and exit code 1. `--from <dir>`
+selects a particular snapshot directory, which must also be strictly older than the current boot.
+
+The external writer must create `<SERENO_RESTORE_DIR>/<YYYYMMDD-HHMMSS>/` with these files:
+
+| File | Format |
+|:--|:--|
+| `meta.txt` | One `key=value` per line: `ts_epoch`, `boottime_epoch`, `host`, `sesiones`, `codex_huerfanas`, `cmux`. Epochs are seconds; `cmux` is `exportado`, `ausente` or `error` |
+| `sesiones.tsv` | Tab-separated header: `tmux_session`, `session_id`, `cwd`, `pid`, `started_epoch`, `creada_tmux`, `enganchada`; one session per row |
+| `codex.tsv` | Tab-separated header: `run_id`, `phase`, `pid`, `pid_vivo`, `output_file`; `pid_vivo=0` marks an orphaned run |
+| `hibernadas` (optional) | A file, or a directory of files, containing complete session-ID or tmux-session-name tokens to leave hibernated |
+| `cmux.json` (optional) | The official output of `cmux restore-session --export` |
+
+Missing files and malformed rows do not crash restoration; ignored input is counted in the
+summary. Sessions already alive in Sereno's tmux socket or Claude's live-process registry are
+skipped. The remaining sessions are classified using their transcript modification time at
+`ts_epoch`: active sessions launch first, newest first; those idle for longer than the configured
+number of hours come next (exactly at the threshold still counts as active); hibernated
+sessions come last. Delays apply only to sessions that
+launch automatically. Idle panels wait for Enter unless `--all` is given; hibernated panels
+always wait for Enter.
+
+Each resumed session receives an initial prompt explaining the restart or cut at the snapshot
+time, the loss of its subagents, Codex and background processes, and the need to inspect saved
+work and resume only unfinished work without repeating completed steps or actions needing
+human approval. If `SERENO_RUNS_DIR` is set, it adds orphaned runs from `codex.tsv` only when
+`<SERENO_RUNS_DIR>/<run_id>/status.json` has that session's `session_id`.
+
+With `cmux.json` and a responding cmux CLI, restoration recreates workspaces and horizontal
+and vertical splits in export order. Panels match by `terminal.agent.sessionId`, or by
+`terminal.resumeBinding.checkpointId` against the tmux name when the agent ID is absent.
+Ordinary shells and panels whose session is already alive become empty terminals in their
+saved directory. Only the selected tab of each pane is recreated; the other tabs are listed
+as not recreated, and saved divider positions are not applied. Sessions absent from the
+layout get their own workspace at the end. Without a usable cmux export/CLI, Sereno uses the
+same launcher and preference order as opening several marked sessions. The summary reports
+launched sessions, panels waiting for Enter, already-live sessions skipped, ignored rows,
+panels not recreated, and the snapshot path and time.
+
+| Variable | Default | Purpose |
+|:--|:--|:--|
+| `SERENO_RESTORE_DIR` | `~/.claude/restore` | Parent directory of external snapshots and notification markers |
+| `SERENO_RESUME_CMD` | Resolved `claude` binary followed by `--resume {id}` | Resume-command template; `{id}` must be a separate token after argument parsing and is replaced as a whole, with the initial prompt appended as the last argument |
+| `SERENO_RESTORE_STAGGER` | `10` | Seconds between automatic launches |
+| `SERENO_RESTORE_IDLE_HOURS` | `3` | Hours without transcript writes before the snapshot that classify a session as idle |
+| `SERENO_CMUX_BIN` | `/Applications/cmux.app/Contents/Resources/bin/cmux` if present, otherwise `cmux` from `PATH` | cmux CLI; invoked with `CMUX_QUIET=1` |
+| `SERENO_RUNS_DIR` | Empty (disabled) | Optional root of Codex run directories |
+
+Quote paths containing spaces inside the resume template, for example
+`SERENO_RESUME_CMD='"/Applications/My Tools/claude" --resume {id}'`. The template is an argument
+list, not shell syntax: pipelines, redirections and command substitutions are not evaluated.
+
+`--notify` never launches anything. It is intended for a LaunchAgent with `RunAtLoad` (the
+plist is not supplied here). If an eligible snapshot has sessions still to restore, it sends
+a desktop notification with `sereno --restore` and writes
+`<SERENO_RESTORE_DIR>/avisado-<boottime>`, so it notifies only once per boot. No eligible work
+means no notification. This mode exits with 0 except for usage errors.
+
 ### 🎭 Try it without touching your data
 
 ```bash
@@ -1366,7 +1440,7 @@ python3 tests/todos.py
 ```
 
 That is the same entry point CI uses, so there is no hand-written list to fall out of sync: it
-collects the whole folder, prints a line per file and ends with the count. There are eighty-two tests
+collects the whole folder, prints a line per file and ends with the count. There are eighty-three tests
 today, and CI runs every one of them on macOS and Ubuntu across Python 3.8, 3.12 and 3.13. Most
 guard against something that fails **silently**, which is why they exist at all:
 
