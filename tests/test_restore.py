@@ -108,6 +108,10 @@ class Restaurar(unittest.TestCase):
             "import json, os, pathlib, sys, time\n"
             "p = pathlib.Path(%r)\n" % str(self.log) +
             "a = sys.argv[1:]\n"
+            # La consulta de surface va a su propio log: las secuencias exactas de abajo no cambian.
+            "if a[:1] == ['list-pane-surfaces']:\n"
+            "    with p.with_suffix('.surfaces').open('a') as f: f.write(a[-1] + '\\n')\n"
+            "    print('* surface:%%s  shell  [selected]' %% a[-1].split(':')[-1]); sys.exit(0)\n"
             "with p.open('a') as f: f.write(json.dumps([a, os.environ.get('CMUX_QUIET')]) + '\\n')\n"
             "if a in (['ping'], ['list-windows']): sys.exit(%d)\n" % ping +
             "if %r:\n" % latencia +
@@ -116,7 +120,8 @@ class Restaurar(unittest.TestCase):
             "    with pathlib.Path(%r).open('a') as f: f.write(str(time.time()) + '\\n')\n" % str(self.raiz / "fin-cmux") +
             "if %r and %r in a: sys.exit(1)\n" % (falla, falla) +
             "n = len([l for l in p.read_text().splitlines() if json.loads(l)[0][0] != 'ping'])\n"
-            "print('OK surface:%d workspace:%d' % (n, n))\n")
+            # Como el cmux de verdad: `workspace create` no dice su surface.
+            "print('OK workspace:%d' % n if a[:2] == ['workspace', 'create'] else 'OK surface:%d workspace:%d' % (n, n))\n")
         self.cmux.chmod(0o700)
         os.environ["SERENO_CMUX_BIN"] = str(self.cmux)
 
@@ -412,6 +417,28 @@ class Restaurar(unittest.TestCase):
         self.assertEqual(len(self.abiertas), 1)
         llamadas = [json.loads(l)[0] for l in self.log.read_text().splitlines()]
         self.assertEqual(llamadas, [["ping"], ["list-windows"]])
+
+    def test_workspace_create_sin_surface_se_pregunta(self):
+        """El `workspace create` de verdad solo dice `OK workspace:N`: la surface se pide aparte."""
+        filas = [sesion(1, self.raiz), sesion(2, self.raiz)]
+        foto = self.ns["lee_snapshot"](self.snapshot(filas=filas))
+        entradas = self.ns["plan_restore"](foto)["entradas"]
+        datos = {"windows": [{"tabManager": {"workspaces": [{
+            "customTitle": "W", "currentDirectory": str(self.raiz),
+            "layout": {"type": "split", "split": {"orientation": "horizontal",
+                       "first": {"type": "pane", "pane": {"panelIds": ["A"], "selectedPanelId": "A"}},
+                       "second": {"type": "pane", "pane": {"panelIds": ["B"], "selectedPanelId": "B"}}}},
+            "panels": [{"id": "A", "terminal": {"agent": {"sessionId": filas[0]["session_id"]}}},
+                       {"id": "B", "terminal": {"agent": {"sessionId": filas[1]["session_id"]}}}]}]}}]}
+        workspaces, _, _ = self.ns["arbol_restore"](datos, entradas)
+        self.stub_cmux()
+        hechas, fallos = self.ns["ejecuta_cmux_restore"](str(self.cmux), workspaces, foto, "")
+        self.assertEqual(fallos, [])
+        self.assertEqual(len(hechas), 2)
+        self.assertEqual(self.log.with_suffix(".surfaces").read_text().split(), ["workspace:1"])
+        split = [json.loads(l)[0] for l in self.log.read_text().splitlines()
+                 if json.loads(l)[0][0] == "new-split"]
+        self.assertEqual(split[0][:4], ["new-split", "right", "--surface", "surface:1"])
 
     def test_panel_vivo_se_recrea_vacio(self):
         filas = [sesion(n, self.raiz) for n in (1, 2)]

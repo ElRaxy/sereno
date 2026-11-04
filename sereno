@@ -8411,6 +8411,10 @@ def ejecuta_cmux_restore(binario, workspaces, snapshot, runs_dir):
     def abre(args, p):
         r = cmux_restore(binario, args + ["--focus", "false", "--command", comando(p)])
         refs = dict(re.findall(r"\b(surface|workspace):(\d+)\b", r.stdout)) if r else {}
+        if r and r.returncode == 0 and "workspace" in refs and "surface" not in refs:
+            # `workspace create` de verdad solo dice `OK workspace:N`: su surface se pregunta.
+            l = cmux_restore(binario, ["list-pane-surfaces", "--workspace", "workspace:" + refs["workspace"]])
+            refs.update(re.findall(r"\b(surface):(\d+)\b", l.stdout)[:1] if l and l.returncode == 0 else [])
         if not r or r.returncode != 0 or "surface" not in refs or "workspace" not in refs:
             return None
         creadas.add(id(p))
