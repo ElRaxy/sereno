@@ -15,7 +15,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python: ["3.8", "3.12", "3.13"]
-    runs-on: ${{ matrix.os }}
+    # ubuntu-latest es 26.04 desde nov. de 2026 y no trae Python 3.8: ese job va en 24.04
+    # sin cambiar su nombre, que es el que exige la proteccion de main.
+    runs-on: ${{ (matrix.os == 'ubuntu-latest' && matrix.python == '3.8') && 'ubuntu-24.04' || matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
