@@ -18,11 +18,12 @@ algo.
 import pathlib, subprocess, sys, time
 
 AQUI = pathlib.Path(__file__).resolve().parent
-TOPE = 420          # segundos por fichero: uno colgado no puede colgar la CI entera.
+TOPE = 600          # segundos por fichero: uno colgado no puede colgar la CI entera.
                     # La bateria de mutantes (test_mutantes) es la unica larga y crece con
                     # cada guarda; en los runners lentos (macos/ubuntu 3.8) cada mutante que
                     # ancla en test_tui_arranca (~37s) acerca el total a 300. 420 da margen
                     # sin dejar de cazar un test de verdad colgado.
+                    # 2026-11-04: macos 3.8 llego a 405 s y con --restore toco los 420: sube a 600.
 
 # Los cuatro que se comen casi todo el reloj: los tres que abren un pseudo-terminal
 # de verdad y la bateria de mutantes (~300s ella sola). `--rapido` los salta para el
